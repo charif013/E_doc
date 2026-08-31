@@ -19,8 +19,17 @@ class Document extends Model
         'title', 
         'content', 
         'status', 
+        'current_step',
         'created_by',
         'attachment_path', 
+        'external_url',
+        'external_attachment_path',
+        'external_original_name',
+        'external_mime_type',
+        'external_file_size',
+        'external_sha256',
+        'external_downloaded_at',
+        'external_download_error',
         
         // 🌟 ข้อมูลหนังสือรับเข้า (Incoming)
         'receive_number', 
@@ -34,7 +43,7 @@ class Document extends Model
         'doc_to', 'signer_name', 'reference_doc', 'remark',
 
         // 🌟 การมอบหมายส่วนราชการ (สำหรับ ปลัด/นายก สั่งการ)
-        'assigned_to',
+        'assigned_to', 'assigned_user_id', 'delegated_by', 'assignment_status', 'assigned_at',
         
         // 🌟  ฟิลด์ใหม่นี้สำหรับระบบรับทราบคำสั่ง
         'acknowledged_at',
@@ -83,6 +92,22 @@ class Document extends Model
         return $this->belongsTo(User::class, 'acknowledged_by')->withTrashed();
     }
 
+    public function assignee()
+    {
+        return $this->belongsTo(User::class, 'assigned_user_id')->withTrashed();
+    }
+
+    public function delegator()
+    {
+        return $this->belongsTo(User::class, 'delegated_by')->withTrashed();
+    }
+
+    protected $casts = [
+        'assigned_at' => 'datetime',
+        'acknowledged_at' => 'datetime',
+        'external_downloaded_at' => 'datetime',
+    ];
+
     protected static function boot()
     {
         parent::boot();
@@ -91,6 +116,48 @@ class Document extends Model
                 $model->uuid = (string) Str::uuid();
             }
         });
+    }
+
+    // 🌟 ความสัมพันธ์: 1 เอกสาร มีได้หลายเส้นทาง (คิวพิจารณา)
+    public function routes()
+    {
+        return $this->hasMany(DocumentRoute::class, 'document_id')->orderBy('step_order', 'asc');
+    }
+
+    /**
+     * Find a document by its public UUID or by a legacy numeric ID.
+     *
+     * Do not combine these columns with OR: MySQL can coerce a UUID beginning
+     * with a number (for example "2abc...") to that numeric ID and return a
+     * different document.
+     */
+    public function scopeWhereIdentifier($query, $identifier)
+    {
+        $identifier = (string) $identifier;
+
+        return ctype_digit($identifier)
+            ? $query->whereKey((int) $identifier)
+            : $query->where('uuid', $identifier);
+    }
+
+    /** เลขทะเบียนมาตรฐานสำหรับหนังสือภายในและหนังสือส่งออก */
+    public function getFormattedDocNumberAttribute(): ?string
+    {
+        if (in_array($this->doc_type, ['internal', 'outgoing'], true) && $this->running_number) {
+            return 'ยล 77301/' . $this->running_number;
+        }
+
+        return $this->doc_number;
+    }
+
+    /** เลขทะเบียนรับมาตรฐานสำหรับหนังสือเข้า */
+    public function getFormattedReceiveNumberAttribute(): ?string
+    {
+        if ($this->doc_type === 'incoming' && $this->running_number) {
+            return 'ยล 77301/' . $this->running_number;
+        }
+
+        return $this->receive_number;
     }
     
 }

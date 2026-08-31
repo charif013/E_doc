@@ -122,6 +122,8 @@
                         <input type="file" name="file" class="form-control mx-auto" accept=".pdf" required style="border-radius: 8px; max-width: 400px;">
                     </div>
 
+                    @include('documents.partials.route_selector')
+
                     <div class="text-center">
                         <button type="submit" class="btn btn-primary btn-lg rounded-pill fw-bold shadow-sm px-5" style="background-color: var(--primary);">
                             <i class="fas fa-cloud-upload-alt me-2"></i>อัปโหลดและไปหน้าลงนาม

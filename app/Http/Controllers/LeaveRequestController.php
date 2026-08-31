@@ -9,6 +9,9 @@ use App\Models\Holiday; // 🌟 เพิ่มบรรทัดนี้เพ
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
+use App\Services\LeaveWorkflowService;
+use App\Services\NotificationDispatcher;
+use App\Http\Requests\ReviewLeaveRequest;
 
 class LeaveRequestController extends Controller
 {
@@ -104,11 +107,7 @@ class LeaveRequestController extends Controller
     public function cancel($id)
     {
         $leave = LeaveRequest::findOrFail($id);
-
-        // 1. ป้องกันไม่ให้คนอื่นมายกเลิก
-        if ($leave->user_id !== auth()->id()) {
-            return back()->with('error', 'คุณไม่มีสิทธิ์ยกเลิกใบลาของผู้อื่น');
-        }
+        $this->authorize('cancel', $leave);
 
         // 2. ป้องกันไม่ให้ยกเลิกใบลาที่พิจารณาจบไปแล้ว
         if (in_array($leave->status, ['APPROVED', 'REJECTED', 'CANCELED'])) {
@@ -120,6 +119,13 @@ class LeaveRequestController extends Controller
             'status' => 'CANCELED',
             'workflow_status' => 'canceled',
         ]);
+
+        if ($leave->delegate) {
+            app(NotificationDispatcher::class)->toUser(
+                $leave->delegate,
+                "❌ ใบลาที่มอบหมายให้คุณปฏิบัติงานแทนถูกยกเลิกแล้ว\nผู้ลา: " . ($leave->user?->name ?: '-') . "\nประเภท: {$leave->leave_type}"
+            );
+        }
 
         return back()->with('success', 'ยกเลิกใบลาเรียบร้อยแล้ว');
     }
@@ -152,7 +158,7 @@ class LeaveRequestController extends Controller
             'delegate_id'  => 'nullable|exists:users,id', // เพิ่มตรวจสอบผู้รับมอบงาน
         ]);
 
-        LeaveRequest::create([
+        $leave = LeaveRequest::create([
             'user_id'      => Auth::id(),
             'leave_type'   => $request->leave_type,
             'start_date'   => $request->start_date,
@@ -161,12 +167,15 @@ class LeaveRequestController extends Controller
             'reason'       => $request->reason,
             'contact_info' => $request->contact_info,
             'delegate_id'  => $request->delegate_id, // บันทึก ID ผู้รับมอบงาน
+            'delegate_requested_at' => $request->delegate_id ? now() : null,
             
             // ตั้งสถานะเริ่มต้น
             'status'          => 'PENDING',
             // ถ้าระบุผู้รับมอบงาน ให้ไปรอด่านรับมอบงาน ถ้าไม่ระบุ ให้ข้ามไปหาธุรการเลย
             'workflow_status' => $request->delegate_id ? 'pending_delegate' : 'pending_inspector',
         ]);
+
+        $this->notifyNextLeaveStage($leave);
 
         return redirect()->route('leaves.index')->with('success', 'ยื่นใบลาเรียบร้อยแล้ว ระบบกำลังเข้าสู่ขั้นตอนการอนุมัติ');
     }
@@ -176,18 +185,36 @@ class LeaveRequestController extends Controller
     // ==========================================
     public function delegateAction(Request $request, $id)
     {
+        $data = $request->validate([
+            'action' => ['required', 'in:accept,decline'],
+            'decline_reason' => ['required_if:action,decline', 'nullable', 'string', 'max:1000'],
+        ]);
         $leave = LeaveRequest::findOrFail($id);
         $user = auth()->user();
 
-        if ($leave->delegate_id == $user->id && $leave->workflow_status == 'pending_delegate') {
-            $leave->update([
-                'delegate_status' => 'accepted',
-                'workflow_status' => 'pending_inspector' // ส่งไม้ต่อให้ธุรการ
-            ]);
-            return back()->with('success', 'คุณได้กดยอมรับการปฏิบัติหน้าที่แทนเรียบร้อยแล้ว');
-        }
+        app(LeaveWorkflowService::class)->respondToDelegation(
+            $leave, $user, $data['action'], $data['decline_reason'] ?? null
+        );
 
-        return back()->with('error', 'ไม่สามารถดำเนินการได้');
+        return back()->with(
+            'success',
+            $data['action'] === 'accept'
+                ? 'ยอมรับการปฏิบัติหน้าที่แทนเรียบร้อยแล้ว'
+                : 'ปฏิเสธคำขอและแจ้งผู้ยื่นให้เลือกผู้รับมอบงานคนใหม่แล้ว'
+        );
+    }
+
+    public function reassignDelegate(Request $request, $id)
+    {
+        $data = $request->validate([
+            'delegate_id' => ['required', 'integer', 'exists:users,id', 'not_in:'.auth()->id()],
+        ]);
+        $leave = LeaveRequest::findOrFail($id);
+        $delegate = User::findOrFail($data['delegate_id']);
+
+        app(LeaveWorkflowService::class)->reassignDelegate($leave, $request->user(), $delegate);
+
+        return back()->with('success', 'เปลี่ยนผู้รับมอบงานและส่งคำขอใหม่เรียบร้อยแล้ว');
     }
 
     // ==========================================
@@ -200,15 +227,25 @@ class LeaveRequestController extends Controller
         $query = LeaveRequest::with('user')->orderBy('created_at', 'desc');
 
         // 🌟 เปลี่ยนจาก officer เป็น saraban
-        if ($user->hasRole('saraban')) {
-            $query->where('workflow_status', 'pending_inspector'); // ด่านที่ 2: ธุรการ
+        if ($user->hasRole('hr')) {
+            $query->where('workflow_status', 'pending_inspector');
+        } elseif ($user->hasRole('saraban')) {
+            $query->where('workflow_status', 'pending_numbering');
         } elseif ($user->hasRole('head')) {
-            $query->where('workflow_status', 'pending_head');      // ด่านที่ 3: หัวหน้าสำนัก/ผอ.
+            $query->where('workflow_status', 'pending_head')
+                ->whereHas('user', function ($userQuery) use ($user) {
+                    $userQuery->where('department', $user->department);
+                });
         // 🌟 รองรับสิทธิ์รองปลัดควบคู่ปลัด
         } elseif ($user->hasAnyRole(['palad', 'deputy-palad'])) {
             $query->where('workflow_status', 'pending_palad');     // ด่านที่ 4: ปลัด/รองปลัด
         } elseif ($user->hasRole('executive')) {
-            $query->whereIn('workflow_status', ['pending_nayok', 'approved']); // ด่านที่ 5: นายก
+            $query->where('workflow_status', 'pending_nayok');
+        } elseif ($user->hasRole('super-admin')) {
+            $query->whereIn('workflow_status', [
+                'pending_inspector', 'pending_head', 'pending_palad',
+                'pending_nayok', 'pending_numbering',
+            ]);
         } else {
             $query->where('id', 0); // ไม่มีสิทธิ์
         }
@@ -222,33 +259,31 @@ class LeaveRequestController extends Controller
     // ==========================================
     public function show($id)
     {
-        $leave = LeaveRequest::with(['user', 'delegate', 'inspector', 'head', 'palad', 'nayok'])->findOrFail($id);
-        return view('leaves.show', compact('leave'));
+        $leave = LeaveRequest::with(['user', 'delegate', 'inspector', 'head', 'palad', 'nayok', 'numberedBy'])->findOrFail($id);
+        $this->authorize('view', $leave);
+
+        $delegateCandidates = $leave->user_id === auth()->id()
+            ? User::whereKeyNot(auth()->id())->orderBy('name')->get()
+            : collect();
+
+        return view('leaves.show', compact('leave', 'delegateCandidates'));
     }
 
     // ==========================================
     // 7. จัดการการกด อนุมัติ / ตีกลับ (ด้วยรหัส PIN)
     // ==========================================
-    public function reviewAction(Request $request, $id)
+    public function reviewAction(ReviewLeaveRequest $request, $id)
     {
-        $request->validate([
-            'is_approved'   => 'required|boolean',
-            'pin'           => 'required_if:is_approved,1|nullable|string',
-            'reject_reason' => 'required_if:is_approved,0|nullable|string',
-        ]);
-
         $leave = LeaveRequest::findOrFail($id);
 
         /** @var User $user */
         $user = auth()->user();
 
+        $this->authorize('review', $leave);
+
         // กรณีตีกลับไม่อนุมัติ
         if (!$request->is_approved) {
-            $leave->update([
-                'status'          => 'REJECTED',
-                'workflow_status' => 'rejected',
-                'reject_reason'   => "[$user->position] : " . $request->reject_reason
-            ]);
+            app(LeaveWorkflowService::class)->reject($leave, $user, $request->reject_reason);
             return redirect()->route('leaves.approve_list')->with('error', 'คุณได้ทำการตีกลับใบลาเรียบร้อยแล้ว');
         }
 
@@ -257,44 +292,22 @@ class LeaveRequestController extends Controller
             return back()->with('error', 'รหัส PIN ไม่ถูกต้อง กรุณาลองอีกครั้ง');
         }
 
-        // บันทึกการอนุมัติตามด่านที่ล็อกอินอยู่
-        // 🌟 เปลี่ยนจาก officer เป็น saraban
-        if ($user->hasRole('saraban') && $leave->workflow_status === 'pending_inspector') {
-            $leave->update([
-                'workflow_status'     => 'pending_head', // ส่งต่อให้หัวหน้า
-                'inspector_id'        => $user->id,
-                'inspector_status'    => 'approved',
-                'inspector_signature' => $user->signature,
-                'inspector_at'        => now(),
-            ]);
-        } elseif ($user->hasRole('head') && $leave->workflow_status === 'pending_head') {
-            $leave->update([
-                'workflow_status' => 'pending_palad', // ส่งต่อให้ปลัด
-                'head_id'         => $user->id,
-                'head_status'     => 'approved',
-                'head_signature'  => $user->signature,
-                'head_at'         => now(),
-            ]);
-        // 🌟 รองรับสิทธิ์รองปลัดควบคู่ปลัด
-        } elseif ($user->hasAnyRole(['palad', 'deputy-palad']) && $leave->workflow_status === 'pending_palad') {
-            $leave->update([
-                'workflow_status' => 'pending_nayok', // ส่งต่อให้นายก
-                'palad_id'        => $user->id,
-                'palad_status'    => 'approved',
-                'palad_signature' => $user->signature,
-                'palad_at'        => now(),
-            ]);
-        } elseif ($user->hasRole('executive') && $leave->workflow_status === 'pending_nayok') {
-            $leave->update([
-                'status'          => 'APPROVED', // สิ้นสุดกระบวนการ!
-                'workflow_status' => 'approved',
-                'nayok_id'        => $user->id,
-                'nayok_status'    => 'approved',
-                'nayok_signature' => $user->signature,
-                'nayok_at'        => now(),
-            ]);
-        }
+        app(LeaveWorkflowService::class)->approve(
+            $leave,
+            $user,
+            $request->filled('running_number') ? (int) $request->running_number : null
+        );
 
         return redirect()->route('leaves.approve_list')->with('success', 'ลงนามตรวจสอบ/อนุมัติใบลาเรียบร้อยแล้ว');
+    }
+
+    private function canReviewStage(User $user, LeaveRequest $leave): bool
+    {
+        return app(LeaveWorkflowService::class)->canReview($user, $leave);
+    }
+
+    private function notifyNextLeaveStage(LeaveRequest $leave): void
+    {
+        app(LeaveWorkflowService::class)->notifyNext($leave);
     }
 }

@@ -42,13 +42,12 @@
                         <td>
                             <div class="fw-bold text-dark">{{ $user->name }}</div>
                             <div class="mt-1">
-                                @if($user->gender == 'male')
-                                    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle"><i class="fas fa-mars"></i> ชาย</span>
-                                @elseif($user->gender == 'female')
-                                    <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle"><i class="fas fa-venus"></i> หญิง</span>
-                                @else
-                                    <span class="badge bg-secondary-subtle text-secondary border">ไม่ระบุ</span>
-                                @endif
+                                @php
+                                    $displayPrefix = $user->name_prefix ?: ($user->gender === 'male' ? 'นาย' : ($user->gender === 'female' ? 'นางสาว' : null));
+                                @endphp
+                                <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+                                    <i class="fas fa-id-card me-1"></i>{{ $displayPrefix ?? 'ไม่ระบุ' }}
+                                </span>
                             </div>
                         </td>
                         <td class="text-muted small">{{ $user->email }}</td>
@@ -105,8 +104,7 @@
                                     @csrf
                                     @method('PUT')
                                     
-                                    {{-- รักษาข้อมูลเดิมไว้ --}}
-                                    <input type="hidden" name="name" value="{{ $user->name }}">
+                                    {{-- รักษาข้อมูลส่วนที่ยังไม่ได้เปิดแก้ไขไว้ --}}
                                     <input type="hidden" name="email" value="{{ $user->email }}">
                                     <input type="hidden" name="department" value="{{ $user->department }}">
                                     <input type="hidden" name="division" value="{{ $user->division }}">
@@ -119,14 +117,21 @@
                                         <h6 class="fw-bold mb-1 text-dark">{{ $user->name }}</h6>
                                         <p class="text-muted small mb-4">{{ $user->position }} / {{ $user->department }}</p>
 
-                                        <div class="text-start">
-                                            <div class="mb-3">
-                                                <label class="form-label fw-bold">เพศ <span class="text-danger">*</span></label>
-                                                <select name="gender" class="form-select border-2" required>
-                                                    <option value="male" {{ $user->gender == 'male' ? 'selected' : '' }}>ชาย</option>
-                                                    <option value="female" {{ $user->gender == 'female' ? 'selected' : '' }}>หญิง</option>
-                                                </select>
-                                            </div>
+                                         <div class="text-start">
+                                             <div class="mb-3">
+                                                 <label class="form-label fw-bold">ชื่อ-นามสกุล <span class="text-danger">*</span></label>
+                                                 <input type="text" name="name" class="form-control border-2" value="{{ $user->name }}" required maxlength="255">
+                                             </div>
+
+                                             <div class="mb-3">
+                                                 <label class="form-label fw-bold">คำนำหน้าชื่อ <span class="text-danger">*</span></label>
+                                                 @php $currentPrefix = $user->name_prefix ?: ($user->gender === 'male' ? 'นาย' : 'นางสาว'); @endphp
+                                                 <select name="name_prefix" class="form-select border-2" required>
+                                                     <option value="นาย" {{ $currentPrefix === 'นาย' ? 'selected' : '' }}>นาย</option>
+                                                     <option value="นาง" {{ $currentPrefix === 'นาง' ? 'selected' : '' }}>นาง</option>
+                                                     <option value="นางสาว" {{ $currentPrefix === 'นางสาว' ? 'selected' : '' }}>นางสาว</option>
+                                                 </select>
+                                             </div>
 
                                             <div class="mb-2">
                                                 <label class="form-label fw-bold text-primary">กำหนดสิทธิ์ (Role) ในระบบ e-Doc:</label>
@@ -192,11 +197,12 @@
                     <input type="text" name="name" class="form-control" placeholder="ระบุชื่อภาษาไทย" value="{{ old('name') }}" required>
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label class="form-label small fw-bold">เพศ <span class="text-danger">*</span></label>
-                    <select name="gender" class="form-select" required>
-                        <option value="">-- เลือกเพศ --</option>
-                        <option value="male" {{ old('gender') == 'male' ? 'selected' : '' }}>ชาย</option>
-                        <option value="female" {{ old('gender') == 'female' ? 'selected' : '' }}>หญิง</option>
+                    <label class="form-label small fw-bold">คำนำหน้าชื่อ <span class="text-danger">*</span></label>
+                    <select name="name_prefix" class="form-select" required>
+                        <option value="">-- เลือกคำนำหน้าชื่อ --</option>
+                        <option value="นาย" {{ old('name_prefix') === 'นาย' ? 'selected' : '' }}>นาย</option>
+                        <option value="นาง" {{ old('name_prefix') === 'นาง' ? 'selected' : '' }}>นาง</option>
+                        <option value="นางสาว" {{ old('name_prefix') === 'นางสาว' ? 'selected' : '' }}>นางสาว</option>
                     </select>
                 </div>
             </div>

@@ -28,7 +28,7 @@
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label class="form-label fw-bold text-secondary">เลขที่รับ <span class="text-danger">*</span></label>
-                            <input type="text" name="receive_number" class="form-control" value="{{ $document->receive_number }}" required style="border-radius: 10px;">
+                            <input type="text" name="receive_number" class="form-control" value="{{ $document->formatted_receive_number }}" required style="border-radius: 10px;">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label fw-bold text-secondary">วันที่รับ <span class="text-danger">*</span></label>

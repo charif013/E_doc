@@ -5,7 +5,7 @@
 <div class="container-fluid px-4 py-4" style="background-color: var(--bg-page); min-height: 100vh;">
     @php
         $user = auth()->user();
-        $isReviewer = (
+        $isReviewer = (isset($canApprove) && $canApprove) || (
             ($user->hasRole('saraban') && in_array($document->status, ['WAITING_ADMIN', 'WAITING_NUMBERING'])) || 
             ($user->hasRole('head') && $document->status === 'WAITING_SUPERVISOR') || 
             ($user->hasAnyRole(['palad', 'deputy-palad']) && $document->status === 'WAITING_PALAD') || 
@@ -71,77 +71,6 @@
             </div>
         @endif
 
-        {{-- กล่องพิจารณา --}}
-        @if($isReviewer)
-            <div class="card border-0 shadow-sm overflow-hidden mb-4 no-print" style="border-radius: 16px; border-left: 5px solid var(--primary) !important;">
-                <div class="card-header bg-white py-3 border-bottom-0"><h6 class="fw-bold mb-0 text-dark"><i class="fas fa-signature text-primary me-2"></i>ส่วนการพิจารณา</h6></div>
-                <div class="card-body pt-0">@include('documents.partials.review_box_internal')</div>
-            </div>
-        @endif
-
-        {{-- เส้นทางลงนาม (Signature Track) --}}
-        <div class="mb-4 page-break-inside-avoid no-print">
-            <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom">
-                <span style="width:4px;height:18px;background:var(--accent-green);border-radius:4px;display:inline-block;"></span>
-                <span style="font-size:14px;font-weight:700;color:var(--primary-dark);">เส้นทางลงนามเอกสาร</span>
-            </div>
-            <div class="row g-3 justify-content-center">
-                @foreach($sigSteps as $i => $s)
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="rounded-3 p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center shadow-sm print-sig-box"
-                             style="border: 1px solid {{ $s['sig'] ? '#bbf7d0' : '#e2e8f0' }}; border-top: 3px solid {{ $s['sig'] ? 'var(--accent-green)' : '#cbd5e1' }}; background: {{ $s['sig'] ? '#f0fdf4' : '#f8fafc' }}; min-height: 180px;">
-                            <div class="mb-2 rounded-circle d-flex align-items-center justify-content-center fw-bold no-print" 
-                                 style="width:28px;height:28px;background:{{ $s['sig'] ? 'var(--accent-green)' : '#e2e8f0' }};color:{{ $s['sig'] ? '#fff' : '#64748b' }};font-size:13px;">{{ $i + 1 }}</div>
-                            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">{{ $s['label'] }}</div>
-                            
-                            @if($s['sig'])
-                                <img src="{{ getSigUrl($s['sig']) }}" style="max-height:55px;mix-blend-mode:multiply;margin-bottom:6px;">
-                                <div style="font-size:13px;font-weight:700;color:var(--text-primary);">{{ $s['name'] }}</div>
-                                <div style="font-size:12px;color:var(--text-muted);">{{ $s['pos'] }}</div>
-                                <div class="mt-2 rounded-pill px-2 fw-bold shadow-sm no-print" style="font-size:10px;background:#fff;border:1px solid #d1fae5;color:var(--accent-green);padding:3px 8px;"><i class="far fa-clock me-1"></i>{{ $s['at'] }}</div>
-                            @else
-                                <i class="fas {{ $s['icon'] }} mb-2 mt-2 no-print" style="font-size:24px;color:#cbd5e1;"></i>
-                                <div class="no-print" style="font-size:13px;color:#94a3b8;font-weight:600;">รอการพิจารณา</div>
-                            @endif
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-        </div>
-
-        {{-- กล่องลงนามสำหรับฉบับร่าง (ผู้สร้าง) --}}
-        @if(($document->status === 'DRAFT' || $document->status === 'REJECTED') && $document->created_by === auth()->id())
-        <div class="text-center mb-5 p-4 rounded-3 shadow-sm no-print" style="background:var(--primary-light);border:1px solid var(--primary-border);">
-            <div class="mx-auto mb-3 rounded-circle d-flex align-items-center justify-content-center text-white shadow-sm" style="width:55px;height:55px;background:var(--primary);font-size:22px;">
-                <i class="fas fa-paper-plane"></i>
-            </div>
-            <h5 class="fw-bold mb-1" style="color:var(--primary-dark);">ขั้นตอนสุดท้าย: ยืนยันการส่งเรื่อง</h5>
-            <p class="mb-4" style="font-size:14px;color:var(--primary);">ยืนยันความถูกต้องและลงนามเพื่อส่งเอกสารเข้าสู่ระบบ</p>
-            
-            <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
-                <a href="{{ route('documents.edit', $document->id) }}" class="btn rounded-pill fw-bold px-4 shadow-sm" style="background:#fef08a; border:2px solid #fde047; color:#854d0e; padding:10px 22px; font-size:14px;">
-                    <i class="fas fa-edit me-2"></i>แก้ไขข้อมูล
-                </a>
-                <form action="{{ route('documents.destroy', $document->id) }}" method="POST">
-                    @csrf @method('DELETE')
-                    <button type="submit" class="btn rounded-pill fw-bold px-4 bg-white" style="border:2px solid #fca5a5;color:#dc2626;padding:10px 22px;font-size:14px;"
-                            onclick="return confirm('ต้องการลบเอกสารนี้?\n(ข้อมูลจะถูกลบถาวร)')">
-                        <i class="fas fa-trash-alt me-2"></i>ลบทิ้ง
-                    </button>
-                </form>
-                
-                <form id="signDocumentForm" action="{{ route('documents.sign', $document->id) }}" method="POST" class="ms-md-2">
-                    @csrf
-                    <input type="hidden" name="pin" id="signaturePinInput">
-                    <input type="hidden" name="stamp_creator" id="stampCreatorInput" value="1">
-                    <button type="button" onclick="promptSignaturePin()" class="btn rounded-pill fw-bold text-white px-4 shadow-sm" style="background:var(--primary);border:none;padding:12px 28px;font-size:15px;white-space:nowrap;">
-                        <i class="fas fa-paper-plane me-2"></i>ส่งเรื่องทันที
-                    </button>
-                </form>
-            </div>
-        </div>
-        @endif
-
         {{-- ซ่อนกระดาษ A4 ถ้าเป็นการอัปโหลดไฟล์เข้ามาล้วนๆ --}}
         @if(!str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ'))
         <div class="card border-0 shadow-sm mb-4 doc-container" style="border-radius: 0; background: #525659; padding: 40px 0;">
@@ -171,6 +100,30 @@
                     </div>
                 </div>
             </div>
+        @endif
+
+        {{-- เส้นทางและส่วนอนุมัติอยู่ท้ายหน้า โดยแสดงตามรายชื่อที่เลือกจริง --}}
+        @include('documents.partials.dynamic_route_track')
+
+        @if($isReviewer)
+            <div class="card border-0 shadow-sm overflow-hidden mb-4 no-print" style="border-radius: 16px; border-left: 5px solid var(--primary) !important;">
+                <div class="card-header bg-white py-3 border-bottom-0"><h6 class="fw-bold mb-0 text-dark"><i class="fas fa-signature text-primary me-2"></i>ส่วนการพิจารณาและอนุมัติ</h6></div>
+                <div class="card-body pt-0">@include('documents.partials.review_box_internal')</div>
+            </div>
+        @endif
+
+        {{-- การดำเนินการของเจ้าของเรื่องอยู่ล่างสุดของหน้า --}}
+        @if(($document->status === 'DRAFT' || $document->status === 'REJECTED') && $document->created_by === auth()->id())
+        <div class="text-center mb-5 p-4 rounded-3 shadow-sm no-print" style="background:var(--primary-light);border:1px solid var(--primary-border);">
+            <div class="mx-auto mb-3 rounded-circle d-flex align-items-center justify-content-center text-white shadow-sm" style="width:55px;height:55px;background:var(--primary);font-size:22px;"><i class="fas fa-paper-plane"></i></div>
+            <h5 class="fw-bold mb-1" style="color:var(--primary-dark);">ขั้นตอนสุดท้าย: ยืนยันการส่งเรื่อง</h5>
+            <p class="mb-4" style="font-size:14px;color:var(--primary);">ยืนยันความถูกต้องและลงนามเพื่อส่งเอกสารเข้าสู่ระบบ</p>
+            <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
+                <a href="{{ route('documents.edit', $document->uuid ?? $document->id) }}" class="btn rounded-pill fw-bold px-4 shadow-sm" style="background:#fef08a;border:2px solid #fde047;color:#854d0e;padding:10px 22px;font-size:14px;"><i class="fas fa-edit me-2"></i>แก้ไขข้อมูล</a>
+                <form action="{{ route('documents.destroy', $document->uuid ?? $document->id) }}" method="POST">@csrf @method('DELETE')<button type="submit" class="btn rounded-pill fw-bold px-4 bg-white" style="border:2px solid #fca5a5;color:#dc2626;padding:10px 22px;font-size:14px;" onclick="return confirm('ต้องการลบเอกสารนี้?\n(ข้อมูลจะถูกลบถาวร)')"><i class="fas fa-trash-alt me-2"></i>ลบทิ้ง</button></form>
+                <form id="signDocumentForm" action="{{ route('documents.sign', $document->uuid ?? $document->id) }}" method="POST" class="ms-md-2">@csrf<input type="hidden" name="pin" id="signaturePinInput"><input type="hidden" name="stamp_creator" id="stampCreatorInput" value="1"><button type="button" onclick="promptSignaturePin()" class="btn rounded-pill fw-bold text-white px-4 shadow-sm" style="background:var(--primary);border:none;padding:12px 28px;font-size:15px;white-space:nowrap;"><i class="fas fa-paper-plane me-2"></i>ส่งเรื่องทันที</button></form>
+            </div>
+        </div>
         @endif
 
     </div>

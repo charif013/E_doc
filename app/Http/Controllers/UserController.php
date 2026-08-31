@@ -6,8 +6,8 @@ use Illuminate\Http\Request;
 use App\Models\User;
 use Spatie\Permission\Models\Role;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
+use App\Services\AuditLogger;
 
 class UserController extends Controller
 {
@@ -50,7 +50,7 @@ class UserController extends Controller
             'department' => 'required|string',
             'division' => 'required|string',
             'position' => ['required', 'string', Rule::in($this->positions)],
-            'gender' => 'required|in:male,female',
+            'name_prefix' => 'required|in:นาย,นาง,นางสาว',
         ]);
 
         // 3. บันทึกข้อมูล
@@ -61,7 +61,8 @@ class UserController extends Controller
             'department' => $request->department,
             'division' => $request->division,
             'position' => $request->position,
-            'gender' => $request->gender,
+            'name_prefix' => $request->name_prefix,
+            'gender' => $request->name_prefix === 'นาย' ? 'male' : 'female',
         ]);
 
         // 4. จ่าย Role อัตโนมัติ
@@ -78,13 +79,14 @@ class UserController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email,' . $user->id,
             'password' => 'nullable|string|min:6',
-            'gender' => 'required|in:male,female',
+            'name_prefix' => 'required|in:นาย,นาง,นางสาว',
             'role' => 'nullable|string'
         ]);
 
         $user->name = $request->name;
         $user->email = $request->email;
-        $user->gender = $request->gender;
+        $user->name_prefix = $request->name_prefix;
+        $user->gender = $request->name_prefix === 'นาย' ? 'male' : 'female';
 
         if ($request->filled('password')) {
             $user->password = Hash::make($request->password);
@@ -94,7 +96,11 @@ class UserController extends Controller
 
         // อัปเดตสิทธิ์ (ถ้าเลือกใหม่ใน Modal ให้ใช้ตามนั้น ถ้าไม่เลือกให้เช็คตามตำแหน่งเดิม)
         if ($request->filled('role')) {
+            $oldRoles = $user->getRoleNames()->values()->all();
             $user->syncRoles([$request->role]);
+            app(AuditLogger::class)->log('user.roles_changed', $user, ['roles' => $oldRoles], [
+                'roles' => $user->getRoleNames()->values()->all(),
+            ]);
         }
 
         return redirect()->route('users.index')->with('success', 'อัปเดตข้อมูลเรียบร้อยแล้ว');
@@ -175,6 +181,7 @@ class UserController extends Controller
         }
 
         $user->syncRoles($roles);
+        app(AuditLogger::class)->log('user.roles_changed', $user, [], ['roles' => $roles]);
     }
 
     // =========================================================================

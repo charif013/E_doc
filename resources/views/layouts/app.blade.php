@@ -70,7 +70,11 @@
             color: var(--text-primary);
             font-size: 15px;
             line-height: 1.6;
+            overflow-x: hidden;
         }
+
+        img, svg, video, canvas { max-width: 100%; }
+        input, select, textarea, button { max-width: 100%; }
 
         /* ─── App Layout ─────────────────────────────────── */
         .app-wrapper {
@@ -278,6 +282,26 @@
             padding: 24px;
             scrollbar-width: thin;
             scrollbar-color: #cbd5e1 transparent;
+            min-width: 0;
+        }
+
+        /* Shared responsive safeguards for every Blade page. */
+        .content-area > .container,
+        .content-area > .container-fluid { max-width: 1440px; }
+
+        .card, .row, [class*="col-"] { min-width: 0; }
+        .card-body { overflow-wrap: anywhere; }
+        .table-responsive {
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+        }
+        .table-responsive > .table { margin-bottom: 0; }
+        iframe { display: block; max-width: 100%; border: 0; }
+
+        /* Keep controls comfortable on touch devices. */
+        @media (pointer: coarse) {
+            .btn, .form-control, .form-select, .input-group-text { min-height: 44px; }
+            .nav-link-item { min-height: 44px; }
         }
 
         .content-area::-webkit-scrollbar       { width: 6px; }
@@ -294,7 +318,7 @@
         }
 
         /* ─── Responsive ─────────────────────────────────── */
-        @media (max-width: 768px) {
+        @media (max-width: 991.98px) {
             .sidebar {
                 position: fixed;
                 top: 0; left: 0; bottom: 0;
@@ -305,14 +329,89 @@
             .sidebar.open         { transform: translateX(0); }
             .sidebar-overlay.open { display: block; }
             .hamburger-btn        { display: flex; }
-            .content-area         { padding: 16px; }
+            .content-area         { padding: 18px; }
             .topbar               { padding: 0 16px; }
-            .user-info            { display: none; }
         }
 
-        @media (min-width: 769px) and (max-width: 1024px) {
-            :root { --sidebar-width: 230px; }
-            .content-area { padding: 20px; }
+        @media (max-width: 767.98px) {
+            :root { --topbar-height: 56px; }
+
+            body { font-size: 14px; }
+            .sidebar { width: min(86vw, 300px); min-width: min(86vw, 300px); }
+            .content-area { padding: 12px; }
+            .topbar { padding: 0 12px; gap: 8px; }
+            .topbar-left { min-width: 0; gap: 9px; }
+            .topbar-title {
+                font-size: 15px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .user-info { display: none; }
+            .user-badge { padding: 3px; border: 0; box-shadow: none; }
+            .user-avatar { width: 34px; height: 34px; }
+
+            .content-area > .container,
+            .content-area > .container-fluid {
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                padding-top: 8px !important;
+            }
+
+            .content-area .card-body { padding: 1rem; }
+            .content-area .card-header { padding-left: 1rem; padding-right: 1rem; }
+            .content-area h1 { font-size: 1.65rem; }
+            .content-area h2 { font-size: 1.45rem; }
+            .content-area h3, .content-area h4 { font-size: 1.2rem; }
+
+            /* Common page headers and action bars wrap instead of overflowing. */
+            .content-area .d-flex.justify-content-between {
+                flex-wrap: wrap;
+                gap: .75rem;
+            }
+            .content-area .d-flex.justify-content-end { flex-wrap: wrap; gap: .5rem; }
+            .content-area .d-flex.justify-content-end > .btn,
+            .content-area .d-flex.justify-content-end > button { flex: 1 1 auto; }
+
+            .table-responsive {
+                margin-inline: -1rem;
+                width: calc(100% + 2rem);
+            }
+            .table-responsive > .table { min-width: 680px; }
+            .table-responsive::after {
+                content: 'เลื่อนตารางซ้าย–ขวาเพื่อดูข้อมูลเพิ่มเติม';
+                display: block;
+                position: sticky;
+                left: 0;
+                width: 100vw;
+                padding: 6px 16px;
+                color: var(--text-muted);
+                background: #fff;
+                font-size: 11px;
+                text-align: center;
+            }
+
+            /* A4 previews become a readable fluid page on small screens. */
+            .doc-container { padding: 12px !important; overflow-x: hidden !important; }
+            .doc-container .doc-paper,
+            .doc-paper[style*="210mm"] {
+                width: 100% !important;
+                min-height: 0 !important;
+                padding: 24px 18px !important;
+            }
+            iframe[height="800px"], iframe[height="850px"], iframe[height="600px"] {
+                height: 65vh !important;
+                min-height: 420px;
+            }
+
+            .modal-dialog { margin: .75rem; }
+            .dropdown-menu { max-width: calc(100vw - 24px); }
+        }
+
+        @media (max-width: 374.98px) {
+            .content-area { padding: 8px; }
+            .topbar-title { max-width: 190px; }
+            .content-area .card-body { padding: .8rem; }
         }
     </style>
 </head>
@@ -350,19 +449,19 @@
                 <span class="nav-text">หน้าหลักของฉัน</span>
             </a>
 
-            @hasanyrole('saraban|head|palad|deputy-palad|executive|super-admin')
+            @hasanyrole('hr|saraban|head|palad|deputy-palad|executive|super-admin')
             <a href="{{ route('dashboard.executive') }}" class="nav-link-item {{ request()->routeIs('dashboard.executive') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-chart-pie"></i></span>
                 <span class="nav-text">รายงานภาพรวม</span>
             </a>
             @endhasanyrole
             
-            @role('head')
+            
             <a href="{{ route('documents.assigned') }}" class="nav-link-item {{ request()->routeIs('documents.assigned') ? 'active' : '' }}">
                 <span class="nav-icon" style="color: var(--warning-text);"><i class="fas fa-clipboard-list"></i></span>
                 <span class="nav-text">งานที่ได้รับมอบหมาย</span>
             </a>
-            @endrole
+
         </div>
 
         {{-- 🌟 2. งานสารบรรณ (สร้างและลงทะเบียน) --}}
@@ -392,8 +491,7 @@
             @endhasrole
         </div>
 
-        {{-- 🌟 3. งานพิจารณา / อนุมัติ (สำหรับผู้ที่มีสิทธิ์) --}}
-        @hasanyrole('saraban|head|palad|deputy-palad|executive|super-admin')
+        {{-- ผู้ใช้ทุกคนอาจได้รับเลือกให้อยู่ในเส้นทางเอกสาร --}}
         <div class="sidebar-section">
             <div class="sidebar-label">แฟ้มพิจารณาอนุมัติ</div>
 
@@ -402,10 +500,12 @@
                 <span class="nav-text">พิจารณาแฟ้มเอกสาร</span>
             </a>
 
+            @hasanyrole('saraban|head|palad|deputy-palad|executive|super-admin')
             <a href="{{ route('leaves.approve_list') }}" class="nav-link-item {{ request()->routeIs('leaves.approve_list') ? 'active' : '' }}">
                 <span class="nav-icon" style="color: var(--accent-green);"><i class="fa-solid fa-clipboard-check"></i></span>
                 <span class="nav-text">พิจารณาใบลา</span>
             </a>
+            @endhasanyrole
             
           {{--  @role('executive')
             <a href="{{ route('documents.secret') }}" class="nav-link-item {{ request()->routeIs('documents.secret') ? 'active' : '' }}">
@@ -413,8 +513,9 @@
                 <span class="nav-text">แฟ้มเอกสารความลับ</span>
             </a>
             @endrole --}}
+
         </div>
-        @endhasanyrole
+        
 
         {{-- 🌟 4. ระบบบริการบุคลากร (HR & Facilities) --}}
         <div class="sidebar-section">
@@ -429,6 +530,13 @@
                 <span class="nav-icon"><i class="fa-solid fa-clock-rotate-left"></i></span>
                 <span class="nav-text">ประวัติการลาของฉัน</span>
             </a>
+
+            @role('hr')
+            <a href="{{ route('leaves.approve_list') }}" class="nav-link-item {{ request()->routeIs('leaves.approve_list') ? 'active' : '' }}">
+                <span class="nav-icon" style="color: var(--accent-green);"><i class="fa-solid fa-user-check"></i></span>
+                <span class="nav-text">พิจารณาการลา</span>
+            </a>
+            @endrole
 
             <a href="{{ route('bookings.index') }}" class="nav-link-item {{ request()->routeIs('bookings.*') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-calendar-check"></i></span>
@@ -446,12 +554,32 @@
                 <span class="nav-text">จัดการผู้ใช้งาน (Users)</span>
             </a>
 
+            <a href="{{ route('admin.rooms.index') }}" class="nav-link-item {{ request()->routeIs('admin.rooms.*') ? 'active' : '' }}">
+                <span class="nav-icon"><i class="fa-solid fa-door-open"></i></span>
+                <span class="nav-text">จัดการห้องประชุม</span>
+            </a>
+
+            <a href="{{ route('admin.audit_logs.index') }}" class="nav-link-item {{ request()->routeIs('admin.audit_logs.*') ? 'active' : '' }}">
+                <span class="nav-icon"><i class="fa-solid fa-shield-halved"></i></span>
+                <span class="nav-text">ประวัติการใช้งานระบบ</span>
+            </a>
+
             <a href="{{ route('holidays.index') }}" class="nav-link-item {{ request()->routeIs('holidays.*') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-calendar-days"></i></span>
                 <span class="nav-text">ตั้งค่าปฏิทินวันหยุด</span>
             </a>
         </div>
         @endhasrole
+
+        @role('auditor')
+        <div class="sidebar-section" style="background: #f8fafc;">
+            <div class="sidebar-label" style="color: var(--primary);">การตรวจสอบระบบ</div>
+            <a href="{{ route('admin.audit_logs.index') }}" class="nav-link-item {{ request()->routeIs('admin.audit_logs.*') ? 'active' : '' }}">
+                <span class="nav-icon"><i class="fa-solid fa-shield-halved"></i></span>
+                <span class="nav-text">ประวัติการใช้งานระบบ</span>
+            </a>
+        </div>
+        @endrole
 
         {{-- 🌟 Logout --}}
         <div class="sidebar-footer">
@@ -524,11 +652,20 @@
         document.body.style.overflow = '';
     }
 
-    // ปิด sidebar เมื่อกดลิงก์บนมือถือ
+    // ปิด sidebar เมื่อกดลิงก์บนมือถือและแท็บเล็ตแนวตั้ง
     document.querySelectorAll('.nav-link-item').forEach(function (el) {
         el.addEventListener('click', function () {
-            if (window.innerWidth <= 768) closeSidebar();
+            if (window.innerWidth < 992) closeSidebar();
         });
+    });
+
+    // ปิดด้วย Escape และล้างสถานะเมื่อหมุนจอ/ขยายกลับเป็นเดสก์ท็อป
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeSidebar();
+    });
+
+    window.addEventListener('resize', function () {
+        if (window.innerWidth >= 992) closeSidebar();
     });
 
     // Keyboard support สำหรับ user-badge
@@ -544,6 +681,7 @@
 @endauth
 
 @yield('scripts')
+@stack('scripts')
 
 </body>
 </html>

@@ -10,13 +10,18 @@ class RoomBooking extends Model
     use HasFactory;
 
     protected $fillable = [
-        'title', 'booking_type', 'description', 
-        'room_id', 'created_by', 'start_time', 'end_time'
+        'title', 'booking_type', 'description', 'document_id',
+        'room_id', 'room_name_snapshot', 'created_by', 'start_time', 'end_time',
+    ];
+
+    protected $casts = [
+        'start_time' => 'datetime',
+        'end_time' => 'datetime',
     ];
 
     public function room()
     {
-        return $this->belongsTo(Room::class);
+        return $this->belongsTo(Room::class)->withTrashed();
     }
 
     public function creator()
@@ -24,16 +29,20 @@ class RoomBooking extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    public function attendees()
+    public function document()
     {
-        return $this->belongsToMany(User::class, 'booking_user')
-                    ->withPivot('status')
-                    ->withTimestamps();
+        return $this->belongsTo(Document::class);
     }
 
-    // ความสัมพันธ์: 1 การจอง มีคนถูกเชิญได้หลายคน
+    public function getRoomDisplayNameAttribute(): string
+    {
+        return $this->room_name_snapshot ?: ($this->room?->name ?: '-');
+    }
+
     public function invitees()
     {
-        return $this->belongsToMany(User::class, 'room_booking_user');
+        return $this->belongsToMany(User::class, 'room_booking_user')
+            ->withPivot('status')
+            ->withTimestamps();
     }
 }

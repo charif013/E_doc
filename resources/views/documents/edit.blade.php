@@ -79,7 +79,7 @@
                             <span style="font-size: 20pt; font-weight: bold; margin-right: 12px; white-space: nowrap; flex-shrink: 0; color: #000;">ที่</span>
                             {{-- 🌟 ปรับเป็นอ่านอย่างเดียว --}}
                             <input type="text" name="doc_number" class="dfv-input flex-grow-1 text-muted" 
-                                   value="{{ $document->doc_number ?? 'รอธุรการลงทะเบียนเลข' }}" readonly style="background-color: transparent;">
+                                   value="{{ $document->formatted_doc_number ?? 'รอธุรการลงทะเบียนเลข' }}" readonly style="background-color: transparent;">
                         </div>
                         <div class="col-6 d-flex align-items-baseline ps-2">
                             <span style="font-size: 20pt; font-weight: bold; margin-right: 12px; white-space: nowrap; flex-shrink: 0; color: #000;">วันที่</span>

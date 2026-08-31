@@ -73,13 +73,14 @@
                             <div class="step {{ $leave->delegate_status == 'accepted' ? 'completed' : ($leave->delegate_status == 'pending' ? 'active' : 'pending') }}">
                                 <div class="step-icon"><i class="fas fa-user-friends"></i></div>
                                 <div class="step-label">ผู้รับมอบงาน</div>
+                                @if($leave->delegate_status === 'declined')<small class="text-danger">ปฏิเสธแล้ว</small>@endif
                             </div>
 
                             <div class="step-line {{ $leave->delegate_status == 'accepted' ? 'completed' : '' }}"></div>
 
                             <div class="step {{ $leave->inspector_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_inspector' ? 'active' : 'pending') }}">
                                 <div class="step-icon"><i class="fas fa-search"></i></div>
-                                <div class="step-label">ธุรการตรวจสอบ</div>
+                                <div class="step-label">นักทรัพยากรบุคคลตรวจสิทธิ์</div>
                             </div>
 
                             <div class="step-line {{ $leave->inspector_status == 'approved' ? 'completed' : '' }}"></div>
@@ -101,6 +102,13 @@
                             <div class="step {{ $leave->nayok_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_nayok' ? 'active' : 'pending') }}">
                                 <div class="step-icon"><i class="fas fa-signature"></i></div>
                                 <div class="step-label">นายก อบต.</div>
+                            </div>
+
+                            <div class="step-line {{ $leave->numbered_at ? 'completed' : '' }}"></div>
+
+                            <div class="step {{ $leave->numbered_at ? 'completed' : ($leave->workflow_status == 'pending_numbering' ? 'active' : 'pending') }}">
+                                <div class="step-icon"><i class="fas fa-hashtag"></i></div>
+                                <div class="step-label">ธุรการลงเลข</div>
                             </div>
                         </div>
                         

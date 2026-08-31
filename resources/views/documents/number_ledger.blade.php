@@ -24,6 +24,7 @@
                     <option value="outgoing" {{ $type == 'outgoing' ? 'selected' : '' }}>📤 หนังสือส่งออก</option>
                     <option value="incoming" {{ $type == 'incoming' ? 'selected' : '' }}>📥 หนังสือรับเข้า</option>
                     <option value="internal" {{ $type == 'internal' ? 'selected' : '' }}>📝 บันทึกข้อความ</option>
+                    <option value="leave" {{ $type == 'leave' ? 'selected' : '' }}>🏖️ ทะเบียนใบลา</option>
                 </select>
 
                 {{-- 🌟 ถ้าเป็นบันทึกข้อความ ให้โชว์ตัวเลือกกอง --}}
@@ -61,18 +62,9 @@
                             $reservePrefix = '';
                             $thDigits = ['๐','๑','๒','๓','๔','๕','๖','๗','๘','๙'];
                             if($type === 'incoming') {
-                                $reservePrefix = 'เลขรับที่ ';
-                            } elseif($type === 'outgoing') {
-                                $reservePrefix = 'ยล ๗๗๓๐๑/';
-                            } elseif($type === 'internal') {
-                                $short = 'ก.';
-                                if (str_contains($dept ?? '', 'ปลัด')) $short = 'สป';
-                                elseif (str_contains($dept ?? '', 'คลัง')) $short = 'กค';
-                                elseif (str_contains($dept ?? '', 'ช่าง')) $short = 'กช';
-                                elseif (str_contains($dept ?? '', 'ศึกษา')) $short = 'กศ';
-                                elseif (str_contains($dept ?? '', 'สาธารณสุข')) $short = 'กส';
-                                elseif (str_contains($dept ?? '', 'สวัสดิการ')) $short = 'กสว';
-                                $reservePrefix = "($short) ";
+                                $reservePrefix = 'ยล 77301/';
+                            } elseif(in_array($type, ['outgoing', 'internal'])) {
+                                $reservePrefix = 'ยล 77301/';
                             }
                         @endphp
 
@@ -105,9 +97,21 @@
                                     <span class="badge bg-success text-white rounded-pill px-3 shadow-sm"><i class="fas fa-check-circle me-1"></i> อนุมัติแล้ว</span>
                                 @endif
                             </td>
-                            <td class="fw-bold text-dark">{{ $doc->doc_number ?? '-' }}</td>
+                            <td class="fw-bold text-dark">
+                                {{ $type === 'leave'
+                                    ? ($doc->leave_number ?? '-')
+                                    : ($type === 'incoming' ? ($doc->formatted_receive_number ?? '-') : ($doc->formatted_doc_number ?? '-')) }}
+                            </td>
                             <td class="text-start">
-                                @if($doc)
+                                @if($doc && $type === 'leave')
+                                    <a href="{{ route('leaves.show', $doc->id) }}" class="text-decoration-none text-success-emphasis fw-bold">
+                                        {{ $doc->leave_type }} — {{ $doc->user->name ?? 'ไม่ทราบชื่อ' }}
+                                    </a>
+                                    <div class="small text-muted mt-1">
+                                        {{ \Carbon\Carbon::parse($doc->start_date)->format('d/m/Y') }} - {{ \Carbon\Carbon::parse($doc->end_date)->format('d/m/Y') }}
+                                        · ลงเลขโดย {{ $doc->numberedBy->name ?? 'ระบบ' }}
+                                    </div>
+                                @elseif($doc)
                                     @if($status === 'จองรออนุมัติ' || $status === 'จองเลขมือ')
                                         {{-- 🌟 ลิงก์ UUID --}}
                                         <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="text-warning-emphasis fw-bold text-decoration-none">{{ $doc->title }}</a><br>
@@ -128,7 +132,7 @@
                                 @endif
                             </td>
                             <td>
-                                @if($status === 'ว่าง')
+                                @if($status === 'ว่าง' && $type !== 'leave' && auth()->user()->hasAnyRole(['super-admin', 'palad', 'saraban']))
                                     <form action="{{ route('documents.reserve_number_slot') }}" method="POST" class="m-0">
                                         @csrf
                                         <input type="hidden" name="type" value="{{ $type }}">
@@ -138,6 +142,8 @@
                                             <i class="fas fa-lock"></i> จองเลขนี้
                                         </button>
                                     </form>
+                                @elseif($status === 'ว่าง')
+                                    <button class="btn btn-light btn-sm text-muted rounded-pill" disabled>ออกเลขจากหน้าใบลา</button>
                                 @else
                                     <button class="btn btn-light btn-sm text-muted rounded-pill shadow-none" disabled>ถูกใช้งานแล้ว</button>
                                 @endif

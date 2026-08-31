@@ -50,6 +50,7 @@
                 <span class="small fw-bold"><i class="fas fa-circle text-primary me-1"></i> นัดประชุม</span>
                 <span class="small fw-bold"><i class="fas fa-circle text-success me-1"></i> ใช้งานทั่วไป</span>
                 <span class="small fw-bold"><i class="fas fa-circle text-danger me-1"></i> ปิดปรับปรุง</span>
+                <span class="small fw-bold"><i class="fas fa-circle me-1" style="color:#f59e0b"></i> วันหยุด</span>
             </div>
         </div>
 
@@ -96,10 +97,16 @@
                                 </div>
                                 
                                 <p class="mb-1 small text-secondary mt-2">
-                                    <i class="fas fa-door-open me-1"></i> <strong>{{ $booking->room->name }}</strong><br>
+                                    <i class="fas fa-door-open me-1"></i> <strong>{{ $booking->room_display_name }}</strong><br>
                                     <i class="far fa-calendar-check me-1"></i> {{ \Carbon\Carbon::parse($booking->start_time)->addYears(543)->format('d/m/Y') }} <br>
                                     <i class="far fa-clock me-1"></i> {{ \Carbon\Carbon::parse($booking->start_time)->format('H:i') }} น. - {{ \Carbon\Carbon::parse($booking->end_time)->format('H:i') }} น.
                                 </p>
+
+                                @if($canSeeTitle && $booking->document)
+                                    <a href="{{ route('documents.show', $booking->document->uuid ?? $booking->document->id) }}" class="small text-decoration-none fw-bold">
+                                        <i class="fas fa-paperclip me-1"></i>เอกสารแนบ: {{ Str::limit($booking->document->title, 45) }}
+                                    </a>
+                                @endif
 
                                 {{-- ส่วนล่าง: ชื่อผู้จอง และปุ่มยกเลิก --}}
                                 <div class="d-flex justify-content-between align-items-center mt-2">
@@ -154,7 +161,7 @@
             'booking_type' => $booking->booking_type,
             'start_time' => $booking->start_time,
             'end_time' => $booking->end_time,
-            'room' => ['name' => $booking->room->name],
+            'room' => ['name' => $booking->room_display_name],
             'creator' => $booking->creator ? ['name' => $booking->creator->name] : ['name' => '-'],
             'description' => $displayDesc
         ];
@@ -166,6 +173,7 @@
   document.addEventListener('DOMContentLoaded', function() {
     var calendarEl = document.getElementById('calendar');
     var bookings = @json($safeBookings);
+    var holidays = @json($holidays);
     
     var events = bookings.map(function(booking) {
         let eventColor = '#10b981'; 
@@ -185,6 +193,21 @@
         };
     });
 
+    holidays.forEach(function(holiday) {
+        events.push({
+            title: 'วันหยุด: ' + holiday.name,
+            start: holiday.holiday_date,
+            allDay: true,
+            color: '#f59e0b',
+            textColor: '#422006',
+            display: 'block',
+            extendedProps: {
+                isHoliday: true,
+                holidayName: holiday.name
+            }
+        });
+    });
+
     var calendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth', 
       locale: 'th', 
@@ -196,6 +219,10 @@
       },
       events: events, 
       eventClick: function(info) {
+          if (info.event.extendedProps.isHoliday) {
+              alert('วันหยุด: ' + info.event.extendedProps.holidayName + '\nวันที่: ' + info.event.start.toLocaleDateString('th-TH'));
+              return;
+          }
           let msg = "หัวข้อ: " + info.event.title.replace(/ \(.+\)$/, '') + "\n";
           msg += "ห้อง: " + info.event.extendedProps.room + "\n";
           msg += "ผู้จอง: " + info.event.extendedProps.creator + "\n";

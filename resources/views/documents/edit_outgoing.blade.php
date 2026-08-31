@@ -98,7 +98,7 @@
                                 <label class="form-label small fw-bold text-muted mb-1">เลขที่หนังสือออก <span class="text-danger">*</span></label>
                                 <div class="input-group shadow-sm" style="border-radius: 8px; overflow: hidden;">
                                     <input type="hidden" name="running_number" id="running_number" value="{{ old('running_number', $document->running_number) }}">
-                                    <input type="text" name="doc_number" id="doc_number" class="form-control border-0 bg-light" required value="{{ old('doc_number', $document->doc_number) }}">
+                                    <input type="text" name="doc_number" id="doc_number" class="form-control border-0 bg-light" required value="{{ old('doc_number', $document->formatted_doc_number) }}">
                                     <button type="button" onclick="autoDocNo()" class="btn btn-primary fw-bold px-3">รันเลข</button>
                                 </div>
                             </div>

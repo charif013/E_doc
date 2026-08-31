@@ -96,7 +96,7 @@
                                     <tr>
                                         <td class="ps-4">
                                             <div class="fw-bold text-dark text-truncate" style="max-width: 200px;" title="{{ $doc->title }}">{{ $doc->title }}</div>
-                                            <div class="small text-muted">{{ $doc->doc_number ?? 'ยังไม่ออกเลข' }}</div>
+                                            <div class="small text-muted">{{ $doc->formatted_doc_number ?? 'ยังไม่ออกเลข' }}</div>
                                         </td>
                                         <td>
                                             <span class="badge bg-light text-dark border">{{ $doc->assigned_to ?? $doc->creator->department ?? '-' }}</span>

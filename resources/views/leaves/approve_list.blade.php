@@ -20,9 +20,9 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h4 class="fw-bold mb-0" style="color: var(--primary-dark);">
-                <i class="fas fa-inbox text-warning me-2"></i>รายการใบลาที่รออนุมัติ
+                <i class="fas fa-inbox text-warning me-2"></i>{{ auth()->user()->hasRole('hr') ? 'พิจารณาการลา' : 'รายการใบลาที่รออนุมัติ' }}
             </h4>
-            <small class="text-muted">ตรวจสอบและพิจารณาคำร้องขอลาของพนักงาน</small>
+            <small class="text-muted">{{ auth()->user()->hasRole('hr') ? 'ตรวจสอบสิทธิ์ สถิติ และรายละเอียดการลาก่อนส่งให้หัวหน้าสังกัด' : 'ตรวจสอบและพิจารณาคำร้องขอลาของพนักงาน' }}</small>
         </div>
         <div class="d-flex align-items-center gap-3">
             <span class="text-muted fw-bold d-none d-md-inline">{{ now()->locale('th')->translatedFormat('d M Y') }}</span>
@@ -58,10 +58,11 @@
                                 @php
                                     $badges = [
                                         'pending_delegate'  => ['bg-secondary-subtle text-secondary-emphasis', 'รอผู้รับมอบงาน'],
-                                        'pending_inspector' => ['bg-warning-subtle text-warning-emphasis', 'รอธุรการตรวจสอบ'],
+                                        'pending_inspector' => ['bg-warning-subtle text-warning-emphasis', 'รอนักทรัพยากรบุคคลตรวจสิทธิ์'],
                                         'pending_head'      => ['bg-info-subtle text-info-emphasis', 'รอหัวหน้า/ผอ.'],
                                         'pending_palad'     => ['bg-primary-subtle text-primary-emphasis', 'รอปลัด อบต.'],
                                         'pending_nayok'     => ['bg-purple-subtle text-purple-emphasis', 'รอนายก อบต.'],
+                                        'pending_numbering' => ['bg-info-subtle text-info-emphasis', 'รอธุรการลงเลข'],
                                         'approved'          => ['bg-success-subtle text-success-emphasis', 'อนุมัติแล้ว'],
                                         'rejected'          => ['bg-danger-subtle text-danger-emphasis', 'ถูกตีกลับ'],
                                     ];

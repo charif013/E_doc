@@ -62,7 +62,7 @@
                                 <div style="font-size: 11px;">เวลา {{ $doc->created_at->format('H:i') }} น.</div>
                             </td>
                             
-                            <td class="fw-semibold text-dark">{{ $doc->doc_number ?? '-' }}</td>
+                            <td class="fw-semibold text-dark">{{ $doc->formatted_doc_number ?? '-' }}</td>
                             
                             <td class="text-start">
                                 <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="text-decoration-none text-dark fw-bold">

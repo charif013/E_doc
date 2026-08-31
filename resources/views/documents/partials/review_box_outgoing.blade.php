@@ -19,7 +19,7 @@
                     <input type="text" name="doc_number" id="doc_number" 
                            class="form-control border-0 bg-white fw-bold text-primary px-3" 
                            placeholder="คลิกปุ่มรันเลข หรือพิมพ์เลขเอง..." 
-                           value="{{ $document->doc_number }}" required>
+                           value="{{ $document->formatted_doc_number }}" required>
                     
                     @if($hasReservedNumber)
                         <button type="button" class="btn btn-success fw-bold px-3" style="cursor: default;" title="ใช้เลขที่จองไว้">

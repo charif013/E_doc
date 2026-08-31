@@ -10,6 +10,9 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\HolidayController;
 use App\Http\Controllers\LeaveRequestController;
 use App\Http\Controllers\RoomBookingController;
+use App\Http\Controllers\DocumentAccessController;
+use App\Http\Controllers\DocumentNumberingController;
+use App\Http\Controllers\AuditLogController;
 
 // =============================================================================
 // หน้าแรก redirect ไปหน้า login
@@ -51,7 +54,14 @@ Route::middleware(['auth'])->group(function () {
     // =========================================================================
     // ระบบจองห้องประชุม — ทุก role ดู/จองได้ แก้/ลบเฉพาะเจ้าของ (จัดการใน Controller)
     // =========================================================================
-    Route::resource('bookings', RoomBookingController::class);
+    Route::resource('bookings', RoomBookingController::class)->only(['index', 'create', 'store', 'destroy']);
+
+    Route::middleware(['role:super-admin'])->prefix('admin/rooms')->name('admin.rooms.')->group(function () {
+        Route::get('/', [RoomBookingController::class, 'rooms'])->name('index');
+        Route::post('/', [RoomBookingController::class, 'storeRoom'])->name('store');
+        Route::put('/{room}', [RoomBookingController::class, 'updateRoom'])->name('update');
+        Route::delete('/{room}', [RoomBookingController::class, 'destroyRoom'])->name('destroy');
+    });
 
     // =========================================================================
     // ระบบใบลา — ฝั่งผู้ขอลา (ทุก role ยื่นและดูประวัติตัวเองได้)
@@ -62,6 +72,7 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/',                     [LeaveRequestController::class, 'store'])->name('store');
         Route::put('/{id}/cancel',           [LeaveRequestController::class, 'cancel'])->name('cancel');
         Route::post('/{id}/delegate-action', [LeaveRequestController::class, 'delegateAction'])->name('delegateAction');
+        Route::post('/{id}/reassign-delegate', [LeaveRequestController::class, 'reassignDelegate'])->name('reassign_delegate');
     });
 
     // =========================================================================
@@ -78,7 +89,7 @@ Route::middleware(['auth'])->group(function () {
     });
 
     // =========================================================================
-    // เอกสาร — ดูรายการและรายละเอียด
+        // เอกสาร — ดูรายการและรายละเอียด
     // =========================================================================
     Route::prefix('documents')->name('documents.')->group(function () {
 
@@ -86,9 +97,17 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/', [DocumentController::class, 'index'])->name('index');
         
         // 🌟 ย้าย Static Routes ของสมุดคุมเลขมาไว้ด้านบน เพื่อความปลอดภัย
-        Route::get('/number-ledger', [DocumentController::class, 'numberLedger'])->name('number_ledger');
-        Route::post('/reserve-number-slot', [DocumentController::class, 'reserveNumberSlot'])->name('reserve_number_slot');
-        Route::get('/api/next-number', [DocumentController::class, 'apiNextNumber'])->name('api_next_number');
+        Route::middleware('role:super-admin|palad|deputy-palad|saraban')->group(function () {
+            Route::get('/number-ledger', [DocumentNumberingController::class, 'ledger'])->name('number_ledger');
+            Route::get('/api/next-number', [DocumentNumberingController::class, 'next'])->name('api_next_number');
+        });
+        Route::post('/reserve-number-slot', [DocumentNumberingController::class, 'reserveSlot'])
+            ->middleware('role:super-admin|palad|saraban')
+            ->name('reserve_number_slot');
+
+        Route::post('/auto-extract', [\App\Http\Controllers\DocumentController::class, 'autoExtract'])->name('auto_extract');
+        Route::get('/auto-extract/{taskId}', [\App\Http\Controllers\DocumentController::class, 'autoExtractStatus'])
+            ->name('auto_extract_status');
 
         // -------------------------------------------------------------------------
         // โซนสร้าง / แก้ไข / อัปโหลดเอกสาร
@@ -118,21 +137,20 @@ Route::middleware(['auth'])->group(function () {
             
             Route::post('/{id}/upload',          [DocumentController::class, 'uploadAttachment'])->name('upload');
             Route::get('/{id}/download-signed',  [DocumentController::class, 'downloadSignedPdf'])->name('download_signed');
-            Route::post('/{id}/reserve-number',  [DocumentController::class, 'reserveNumber'])->name('reserve_number');
+            Route::post('/{id}/reserve-number',  [DocumentNumberingController::class, 'reserve'])->name('reserve_number');
         });
 
         // -------------------------------------------------------------------------
         // โซนพิจารณา / อนุมัติเอกสาร
         // -------------------------------------------------------------------------
-        Route::middleware([
-            'role:super-admin|executive|palad|deputy-palad|head|saraban|officer'
-        ])->group(function () {
-            Route::get('/approve-list',    [DocumentController::class, 'approveList'])->name('approve_list');
-            Route::post('/{id}/review',    [DocumentController::class, 'reviewDocument'])->name('review');
-        });
+        // ผู้ใช้ทุกบทบาทอาจถูกเลือกเป็นผู้พิจารณาใน dynamic workflow ได้
+        // Controller จะตรวจอีกชั้นว่าต้องเป็นคิวปัจจุบันของผู้ใช้นั้นจริง
+        Route::get('/approve-list', [DocumentController::class, 'approveList'])->name('approve_list');
+        Route::post('/{id}/review', [DocumentController::class, 'reviewDocument'])->name('review');
 
         // 🌟 ระบบรับทราบคำสั่ง (สำหรับ ผอ.กอง)
         Route::post('/{id}/acknowledge', [DocumentController::class, 'acknowledge'])->name('acknowledge');
+        Route::post('/{id}/assignment-action', [DocumentController::class, 'assignmentAction'])->name('assignment_action');
 
         // -------------------------------------------------------------------------
         // สมุดทะเบียนเลข (ธุรการ)
@@ -140,8 +158,8 @@ Route::middleware(['auth'])->group(function () {
         Route::middleware([
             'role:super-admin|palad|saraban'
         ])->group(function () {
-            Route::get('/registry',                    [DocumentController::class, 'registry'])->name('registry');
-            Route::post('/registry/{id}/assign-number',[DocumentController::class, 'assignNumber'])->name('assign_number');
+            Route::get('/registry',                    [DocumentNumberingController::class, 'registry'])->name('registry');
+            Route::post('/registry/{id}/assign-number',[DocumentNumberingController::class, 'assign'])->name('assign_number');
         });
 
         // -------------------------------------------------------------------------
@@ -151,16 +169,16 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/{id}/routing-slip', [DocumentController::class, 'routingSlip'])->name('routing_slip');
         
         // 🌟 ฟังก์ชันจัดการเอกสารลับ (ตัด /documents และ name(documents.) ออกเพราะอยู่ใน Group แล้ว)
-        Route::post('/{id}/unlock-secret', [DocumentController::class, 'unlockSecret'])->name('unlock_secret');
-        Route::post('/{id}/request-access', [DocumentController::class, 'requestAccess'])->name('request_access');
-        Route::post('/access-requests/{request_id}/{status}', [DocumentController::class, 'approveAccess'])->name('approve_access');
+        Route::post('/{id}/unlock-secret', [DocumentAccessController::class, 'unlock'])->name('unlock_secret');
+        Route::post('/{id}/request-access', [DocumentAccessController::class, 'request'])->name('request_access');
+        Route::post('/access-requests/{requestId}/{status}', [DocumentAccessController::class, 'decide'])->name('approve_access');
     });
 
     // =========================================================================
     // โซนพิจารณาใบลา (5 ด่านตามระเบียบ อบต.)
     // =========================================================================
     Route::middleware([
-        'role:super-admin|executive|palad|deputy-palad|head|saraban|officer'
+        'role:super-admin|executive|palad|deputy-palad|head|hr|saraban|officer'
     ])->prefix('leaves')->name('leaves.')->group(function () {
         Route::get('/approve-list',       [LeaveRequestController::class, 'approveList'])->name('approve_list');
         Route::get('/{id}/show',          [LeaveRequestController::class, 'show'])->name('show');
@@ -175,6 +193,10 @@ Route::middleware(['auth'])->group(function () {
         Route::put('/users/{id}/restore',          [UserController::class, 'restore'])->name('users.restore');
         Route::post('/admin/users/{id}/clear-pin', [UserController::class, 'clearUserPin'])->name('admin.users.clear_pin');
     });
+
+    Route::get('/admin/audit-logs', [AuditLogController::class, 'index'])
+        ->middleware('role:super-admin|auditor')
+        ->name('admin.audit_logs.index');
 
     // =========================================================================
     // 🤖 AI API — สร้างร่างเอกสาร (Typhoon 2.5)

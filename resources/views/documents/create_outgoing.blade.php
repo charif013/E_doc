@@ -133,7 +133,7 @@
                                 <label class="form-label small fw-bold text-muted mb-2">เลขที่หนังสือออก <span class="text-danger">*</span></label>
                                 <div class="input-group shadow-sm" style="border-radius: 8px; overflow: hidden;">
                                     <input type="hidden" name="running_number" id="running_number" value="{{ old('running_number') }}">
-                                    <input type="text" name="doc_number" id="doc_number" class="form-control border-0 bg-light" placeholder="ยล ๗๗๓๐๑/..." required value="{{ old('doc_number') }}">
+                                    <input type="text" name="doc_number" id="doc_number" class="form-control border-0 bg-light" placeholder="ยล 77301/..." required value="{{ old('doc_number') }}">
                                     <button type="button" onclick="autoDocNo()" class="btn btn-primary fw-bold px-3" title="ดึงเลขรันนิ่งล่าสุด"><i class="fas fa-magic"></i></button>
                                 </div>
                             </div>
@@ -310,6 +310,8 @@
                         </div>
                     </div>
                 </div>
+
+                @include('documents.partials.route_selector')
 
                 {{-- 📍 ปุ่มดำเนินการ --}}
                 <div class="d-flex justify-content-end pt-2 pb-5">

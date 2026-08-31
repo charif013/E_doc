@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Document;
+use App\Models\DocumentRoute;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -14,6 +16,13 @@ use Illuminate\Support\Facades\File;
 use setasign\Fpdi\Fpdi;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Process\Exception\ProcessFailedException;
+use App\Services\LineMessagingService;
+use App\Jobs\ArchiveExternalDocument;
+use App\Services\AuditLogger;
+use App\Services\NotificationDispatcher;
+use App\Jobs\ProcessDocumentExtraction;
+use App\Models\DocumentExtractionTask;
+use Illuminate\Support\Str;
 
 
 class DocumentController extends Controller
@@ -29,18 +38,59 @@ class DocumentController extends Controller
 
     public function show($id)
     {
-        // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
-        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+       $document = Document::with(['creator', 'supervisor', 'palad', 'nayok', 'routes.user'])
+            ->whereIdentifier($id)->firstOrFail();
+            
+        // 🌟 1. ประกาศตัวแปรจดจำ ID หน้าเดิมไว้
+        $targetDocId = $document->uuid ?? $document->id;
+        
         /** @var \App\Models\User $user */
         $user = Auth::user();
+        $this->authorize('view', $document);
 
-        // 🌟 1. ดักตรวจสอบถ้าเป็น "เอกสารลับ"
+        // Dynamic workflow เปิดเผยเอกสารตามลำดับคิวเท่านั้น ผู้รับในอนาคต
+        // แม้ทราบ URL ก็ยังเปิดไม่ได้จนกว่าคิวก่อนหน้าจะดำเนินการเสร็จ
+        if ($document->routes->isNotEmpty() && !$user->hasRole('super-admin')) {
+            $routeForUser = $document->routes->firstWhere('user_id', $user->id);
+            $hasBookingAccess = \App\Models\RoomBooking::where('document_id', $document->id)
+                ->where(function ($bookingQuery) use ($user) {
+                    $bookingQuery->where('created_by', $user->id)
+                        ->orWhereHas('invitees', function ($inviteeQuery) use ($user) {
+                            $inviteeQuery->where('users.id', $user->id);
+                        });
+                })->exists();
+            $hasAssignmentAccess = $document->assigned_user_id === $user->id
+                || ($user->hasRole('head') && $document->assigned_to === $user->department);
+            $hasReachedUser = $routeForUser
+                && $document->current_step !== null
+                && $routeForUser->step_order <= $document->current_step;
+
+            if ($document->created_by !== $user->id && !$hasReachedUser && !$hasAssignmentAccess && !$hasBookingAccess) {
+                abort(403, 'เอกสารฉบับนี้ยังไม่ถึงลำดับพิจารณาของคุณ');
+            }
+        }
+
+        // ⚠️ หมายเหตุ: เอาโค้ดเช็ค "status !== DRAFT แล้ว redirect" ออกจากตรงนี้
+        // เพราะ show() มีหน้าที่แค่แสดงผลเอกสาร ไม่ควรกันเหมือน sign()/store()
+        // ตัวกันกดซ้ำที่ถูกต้องอยู่ใน sign() บรรทัด 255-258 อยู่แล้ว
+
+        // ==========================================
+        // 🔒 ระบบความปลอดภัย: ตรวจสอบเอกสารลับ
+        // ==========================================
         if (in_array($document->doc_secret, ['ลับ', 'ลับเฉพาะ', 'ลับที่สุด'])) {
             
             // สิทธิ์มาตรฐาน (เจ้าของเรื่อง หรือ ตำแหน่งผู้บริหาร/ธุรการ)
             $isAllowed = $user->id === $document->created_by || 
-                         $user->hasAnyRole(['saraban', 'head', 'palad', 'deputy-palad', 'executive']);
+                         (isset($hasBookingAccess) && $hasBookingAccess) ||
+                         $document->routes->contains(function ($route) use ($user, $document) {
+                             return $route->user_id === $user->id
+                                 && $route->step_order <= $document->current_step;
+                         }) ||
+                         $user->hasRole('saraban') || 
+                         $user->hasRole('head') || 
+                         $user->hasRole('palad') || 
+                         $user->hasRole('deputy-palad') || 
+                         $user->hasRole('executive');
             
             // เช็คว่าเคยขอสิทธิ์และ "ได้รับการอนุมัติ" หรือไม่
             $hasApprovedRequest = \App\Models\DocumentAccessRequest::where('document_id', $document->id)
@@ -59,7 +109,7 @@ class DocumentController extends Controller
                 return view('documents.request_access', compact('document', 'accessRequest'));
             }
 
-            // 🌟 1.2 ระบบจับเวลา 3 นาที (180 วินาที) ของการเปิดเอกสารลับ
+            // ระบบจับเวลา 3 นาที (180 วินาที) ของการเปิดเอกสารลับ
             $unlockedAt = session('secret_unlocked_' . $document->id);
             $timeoutSeconds = 180; // ตั้งเวลาหมดอายุที่ 3 นาที
 
@@ -70,28 +120,44 @@ class DocumentController extends Controller
                 // โยนไปหน้ากรอกรหัสผ่าน
                 return view('documents.unlock_secret', compact('document'));
             } else {
-                // 🌟 ต่อเวลาให้ ถ้าผู้ใช้กำลังอ่านหรือรีเฟรชหน้าเอกสารนี้อยู่ (ไม่ให้เด้งหลุดขณะทำงาน)
+                // ต่อเวลาให้ ถ้าผู้ใช้กำลังอ่านหรือรีเฟรชหน้าเอกสารนี้อยู่
                 session(['secret_unlocked_' . $document->id => now()->timestamp]);
+                app(AuditLogger::class)->log('document.secret_viewed', $document);
             }
         }
 
-        // --- (โค้ดแสดงผลเอกสารตามปกติ) ---
-        if ($document->doc_type === 'outgoing') {
-            return view('documents.show_outgoing', compact('document'));
-        } 
-        elseif ($document->doc_type === 'internal') {
-            return view('documents.show_internal', compact('document'));
-        } 
-        elseif ($document->doc_type === 'incoming') {
-            return view('documents.show_incoming', compact('document'));
+        // ==========================================
+        // 🌟 ระบบเข้าคิวพิจารณาเอกสาร (Workflow Queue)
+        // ==========================================
+        
+        // 🌟 ตรวจสอบคิวพิจารณาปัจจุบัน
+        $currentRoute = $document->routes->where('step_order', $document->current_step)->first();
+
+        $canApprove = false;
+        // 🌟 ดักไว้ว่าคิวที่ 1 (คนสร้าง) จะไม่เห็นปุ่ม "อนุมัติ" เพราะต้องไปกด "ลงนามส่งเรื่อง"
+        if ($currentRoute && $currentRoute->user_id === $user->id && $currentRoute->status === 'pending' && $document->current_step > 1) {
+            $canApprove = true; 
         }
 
-        return view('documents.show', compact('document'));
+        // ==========================================
+        // 🖥️ ส่งข้อมูลไปแสดงผลที่หน้าเว็บ (แยกตามประเภทเอกสาร)
+        // ==========================================
+        if ($document->doc_type === 'outgoing') {
+            return view('documents.show_outgoing', compact('document', 'currentRoute', 'canApprove'));
+        } 
+        elseif ($document->doc_type === 'internal') {
+            return view('documents.show_internal', compact('document', 'currentRoute', 'canApprove'));
+        } 
+        elseif ($document->doc_type === 'incoming') {
+            return view('documents.show_incoming', compact('document', 'currentRoute', 'canApprove'));
+        }
+
+        return view('documents.show', compact('document', 'currentRoute', 'canApprove'));
     }
 
     public function createUpload()
     {
-        return view('documents.create_upload');
+        return view('documents.create_upload', ['users' => $this->routeUsers()]);
     }
 
     public function storeUpload(Request $request)
@@ -106,6 +172,8 @@ class DocumentController extends Controller
             // 🌟 เพิ่มให้รองรับชั้นความลับและชั้นความเร็วในการอัปโหลด
             'doc_secret'     => 'nullable|string|max:50',
             'doc_speed'      => 'nullable|string|max:50',
+            'routing_users'   => 'required|array|min:1',
+            'routing_users.*' => 'required|integer|distinct|exists:users,id|not_in:' . Auth::id(),
         ], [
             'doc_from.required'       => 'กรุณาระบุส่วนราชการ',
             'title.required'          => 'กรุณาระบุเรื่อง',
@@ -129,6 +197,7 @@ class DocumentController extends Controller
         $document->content        = 'อ้างอิงจากไฟล์แนบในระบบ'; // 🌟 แบบอัปโหลดไม่มีการพิมพ์เนื้อหา ให้ใส่คำนี้แทน
         $document->created_by     = Auth::id();
         $document->status         = 'DRAFT'; 
+        $document->current_step   = 1;
         
         // 🌟 บันทึกชั้นความลับและความเร็ว (ถ้าไม่ได้เลือกจะตั้งเป็น ปกติ อัตโนมัติ)
         $document->doc_secret     = $request->doc_secret ?? 'ปกติ';
@@ -140,15 +209,20 @@ class DocumentController extends Controller
         }
 
         $document->save();
+        $this->saveDocumentRoute($document, $request->input('routing_users', []));
 
         return redirect()
             ->route('documents.show', $document->uuid ?? $document->id)
             ->with('success', 'อัปโหลดบันทึกข้อความเรียบร้อย กรุณาลงนามเพื่อส่งเรื่อง');
     }
 
-    public function create()
+        public function create()
     {
-        return view('documents.create');
+        // 🌟 1. ดึงรายชื่อผู้ใช้งานทั้งหมดจากฐานข้อมูล (ยกเว้นตัวเอง)
+        $users = $this->routeUsers();
+        
+        // 🌟 2. ส่งตัวแปร $users แนบไปให้หน้าเว็บด้วยคำสั่ง compact('users')
+        return view('documents.create', compact('users'));
     }
 
     public function store(Request $request)
@@ -157,8 +231,11 @@ class DocumentController extends Controller
             'title'    => 'required|string|max:255',
             'content'  => 'required|string',
             'doc_date' => 'required'
+            ,'routing_users' => 'required|array|min:1'
+            ,'routing_users.*' => 'required|integer|distinct|exists:users,id|not_in:' . Auth::id()
         ]);
 
+        // 1. สร้างและบันทึกเอกสาร
         $document = new Document();
         $document->doc_type   = 'internal';
         $document->title      = $request->title;
@@ -168,35 +245,69 @@ class DocumentController extends Controller
         $document->running_number = $request->running_number;
         $document->created_by = Auth::id();
         $document->status     = 'DRAFT';
+        $document->current_step = 1; 
         $document->save();
 
+        // ====================================================
+        // 🌟 แก้ไขส่วนบันทึกเส้นทางตรงนี้ครับ ให้ก๊อปปี้ไปทับเลย
+        // ====================================================
+
+        // 🌟 1. บังคับยัดคนสร้าง (คนปัจจุบัน) เป็นคิวที่ 1 เสมอ (อยู่นอกลูป ทำรอบเดียว)
+        $this->saveDocumentRoute($document, $request->input('routing_users', []));
+        // ====================================================
+
+        // 3. เด้งกลับไปหน้าแสดงเอกสาร (ต้องอยู่ล่างสุดเสมอ)
         return redirect()
             ->route('documents.show', $document->uuid ?? $document->id)
-            ->with('success', 'บันทึกร่างเอกสารเรียบร้อย กรุณาตรวจสอบและลงนาม');
+            ->with('success', 'บันทึกร่างเอกสารและกำหนดเส้นทางสำเร็จ กรุณาตรวจสอบและลงนาม');
     }
 
     public function sign(Request $request, $id)
     {
         $request->validate(['pin' => 'required|digits:6']);
-        // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
-        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $id) {
+        
+        // 🌟 1. ดึงข้อมูลเอกสาร (เพิ่ม 'routes.user' เข้ามาด้วย)
+        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok', 'routes.user'])
+            ->whereIdentifier($id)->lockForUpdate()->firstOrFail();
+            
+        // 🌟 2. กำหนดตัวแปรอ้างอิงหน้าเดิม
+        $targetDocId = $document->uuid ?? $document->id;
+
         /** @var \App\Models\User $user */
         $user = Auth::user();
+
+        // 🌟 3. ดักตรวจสอบสิทธิ์และสถานะเอกสาร (ห้ามเซ็นซ้ำ)
+        if ($document->status !== 'DRAFT') {
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error', 'เอกสารฉบับนี้ได้รับการลงนามส่งเรื่องไปแล้ว ไม่สามารถลงนามซ้ำได้');
+        }
+
+        if ($document->created_by !== $user->id) {
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error', 'คุณไม่มีสิทธิ์ลงนามในเอกสารฉบับนี้');
+        }
 
         $throttleKey = 'pin-sign-attempts:' . $user->id;
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
-            return back()->with('error_pin', 'คุณกรอกรหัส PIN ผิดเกินกำหนด (5 ครั้ง) กรุณารออีก ' . $seconds . ' วินาที');
+            // 🌟 เปลี่ยนจาก back()
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error_pin', 'คุณกรอกรหัส PIN ผิดเกินกำหนด (5 ครั้ง) กรุณารออีก ' . $seconds . ' วินาที');
         }
 
         if (empty($user->signature) || empty($user->pin)) {
-            return back()->with('error_signature', 'กรุณาอัปโหลดลายเซ็นและตั้งรหัส PIN ก่อนทำการลงนามส่งเรื่องครับ');
+            // 🌟 เปลี่ยนจาก back()
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error_signature', 'กรุณาอัปโหลดลายเซ็นและตั้งรหัส PIN ก่อนทำการลงนามส่งเรื่องครับ');
         }
 
         if (!Hash::check($request->pin, $user->pin)) {
             RateLimiter::hit($throttleKey, 60); 
-            return back()->with('error_pin', 'รหัสผ่าน (PIN) ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+            // 🌟 เปลี่ยนจาก back()
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error_pin', 'รหัสผ่าน (PIN) ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
         }
 
         RateLimiter::clear($throttleKey);
@@ -205,41 +316,63 @@ class DocumentController extends Controller
             
             $document->creator_signature = $user->signature;
 
-            if ($document->doc_type === 'outgoing') {
-                if ($user->hasRole('saraban')) {
-                    if (str_contains($document->signer_name ?? '', 'นายก')) {
-                        $document->status = 'WAITING_NAYOK';
-                    } elseif (str_contains($document->signer_name ?? '', 'ปลัด')) {
-                        $document->status = 'WAITING_PALAD';
+            // ==========================================
+            // 🌟 4. ระบบคิว (Dynamic Workflow)
+            // ==========================================
+            
+            // 4.1 ติ๊กผ่าน (Approve) ให้คิวที่ 1 (คนสร้าง)
+            $creatorRoute = $document->routes->where('step_order', 1)->where('user_id', $user->id)->first();
+            if ($creatorRoute) {
+                $creatorRoute->update(['status' => 'approved']);
+            }
+
+            // 4.2 ดึงคิวที่ 2 (คนที่ส่งให้พิจารณาคนแรก)
+            $nextRoute = $document->routes->where('step_order', 2)->first();
+
+            if ($nextRoute) {
+                // หากมีการตั้งคิวไว้ ให้เปลี่ยนสถานะและเลื่อนคิวไปขั้น 2
+                $document->status = 'PROCESSING';
+                $document->current_step = 2; // 🌟 เลื่อนไปคิว 2
+                $success_msg = 'ลงนามและส่งเรื่องให้ ' . ($nextRoute->user?->name ?? 'ผู้พิจารณาท่านต่อไป') . ' พิจารณาเรียบร้อยแล้ว';            } else {
+                // ==========================================
+                // 🌟 ระบบเดิม (Legacy Role-based) กรณีไม่ได้ระบุคิว
+                // ==========================================
+                if ($document->doc_type === 'outgoing') {
+                    if ($user->hasRole('saraban')) {
+                        if (str_contains($document->signer_name ?? '', 'นายก')) {
+                            $document->status = 'WAITING_NAYOK';
+                        } elseif (str_contains($document->signer_name ?? '', 'ปลัด')) {
+                            $document->status = 'WAITING_PALAD';
+                        } else {
+                            $document->status = 'WAITING_SUPERVISOR';
+                        }
+                        $success_msg = 'ลงนามและส่งเอกสารให้ผู้ลงนามพิจารณาเรียบร้อยแล้ว';
                     } else {
-                        $document->status = 'WAITING_SUPERVISOR';
+                        $document->status = 'WAITING_NUMBERING'; 
+                        $success_msg = 'ลงนามและส่งเรื่องให้ธุรการตรวจสอบและออกเลขเรียบร้อยแล้ว';
                     }
-                    $success_msg = 'ลงนามและส่งเอกสารให้ผู้ลงนามพิจารณาเรียบร้อยแล้ว';
-                } else {
-                    $document->status = 'WAITING_NUMBERING'; 
-                    $success_msg = 'ลงนามและส่งเรื่องให้ธุรการตรวจสอบและออกเลขเรียบร้อยแล้ว';
-                }
-            } 
-            else {
-                if ($user->hasRole('executive')) {
-                    $document->status = 'WAITING_NUMBERING'; 
-                    $success_msg = 'ลงนามเสนอเรื่องเรียบร้อยแล้ว (ส่งไปรอออกเลข)';
-                } elseif ($user->hasRole('palad') || $user->hasRole('deputy-palad')) {
-                    $document->status = 'WAITING_NAYOK'; 
-                    $success_msg = 'ลงนามเสนอเรื่องและส่งต่อให้ นายก อบต. พิจารณาเรียบร้อยแล้ว';
-                } elseif ($user->hasRole('head')) {
-                    $document->supervisor_id = $user->id;
-                    $document->supervisor_signature = $user->signature;
-                    $document->supervisor_approved_at = now();
-                    $document->supervisor_comment = 'ผู้เสนอเรื่องเป็นหัวหน้าส่วนราชการ';
-                    $document->status = 'WAITING_PALAD'; 
-                    $success_msg = 'ลงนามเสนอเรื่องและส่งต่อให้ ปลัด อบต. พิจารณาเรียบร้อยแล้ว';
-                } elseif ($user->hasRole('saraban')) {
-                    $document->status = 'WAITING_SUPERVISOR'; 
-                    $success_msg = 'ลงนามและส่งเรื่องให้หัวหน้าสำนักปลัดตรวจสอบเรียบร้อยแล้ว';
-                } else {
-                    $document->status = 'WAITING_ADMIN'; 
-                    $success_msg = 'ลงนามและส่งเรื่องให้ธุรการตรวจสอบเรียบร้อยแล้ว';
+                } 
+                else {
+                    if ($user->hasRole('executive')) {
+                        $document->status = 'WAITING_NUMBERING'; 
+                        $success_msg = 'ลงนามเสนอเรื่องเรียบร้อยแล้ว (ส่งไปรอออกเลข)';
+                    } elseif ($user->hasRole('palad') || $user->hasRole('deputy-palad')) {
+                        $document->status = 'WAITING_NAYOK'; 
+                        $success_msg = 'ลงนามเสนอเรื่องและส่งต่อให้ นายก อบต. พิจารณาเรียบร้อยแล้ว';
+                    } elseif ($user->hasRole('head')) {
+                        $document->supervisor_id = $user->id;
+                        $document->supervisor_signature = $user->signature;
+                        $document->supervisor_approved_at = now();
+                        $document->supervisor_comment = 'ผู้เสนอเรื่องเป็นหัวหน้าส่วนราชการ';
+                        $document->status = 'WAITING_PALAD'; 
+                        $success_msg = 'ลงนามเสนอเรื่องและส่งต่อให้ ปลัด อบต. พิจารณาเรียบร้อยแล้ว';
+                    } elseif ($user->hasRole('saraban')) {
+                        $document->status = 'WAITING_SUPERVISOR'; 
+                        $success_msg = 'ลงนามและส่งเรื่องให้หัวหน้าสำนักปลัดตรวจสอบเรียบร้อยแล้ว';
+                    } else {
+                        $document->status = 'WAITING_ADMIN'; 
+                        $success_msg = 'ลงนามและส่งเรื่องให้ธุรการตรวจสอบเรียบร้อยแล้ว';
+                    }
                 }
             }
 
@@ -266,7 +399,7 @@ class DocumentController extends Controller
            // =========================================================
             // 🌟 แจ้งเตือน LINE เมื่อมีการเซ็นส่งเรื่อง
             // =========================================================
-            $docUrl = route('documents.show', $document->uuid ?? $document->id);
+            $docUrl = route('documents.show', $targetDocId);
             $lineMsg = "🔔 มีเอกสารรอการพิจารณาใหม่!\n";
             $lineMsg .= "เรื่อง: " . $document->title . "\n";
             $lineMsg .= "ผู้เสนอ: " . $user->name . " (" . ($user->department ?? '-') . ")\n";
@@ -280,21 +413,20 @@ class DocumentController extends Controller
             $this->sendLineMessage($lineMsg, $document);
             // =========================================================
 
-            return redirect()->route('home')->with('success', $success_msg);
+            // 🌟 เปลี่ยนเป้าหมายจาก route('home') เป็นให้เด้งกลับหน้าเดิม!
+            return redirect()->route('documents.show', $targetDocId)->with('success', $success_msg);
         }
 
         return back()->with('error', 'คุณไม่มีสิทธิ์เซ็นเอกสารในขั้นตอนนี้');
+        }, 3);
     }
 
     public function edit($id)
     {
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
-
-        if ($document->created_by !== Auth::id() || !in_array($document->status, ['DRAFT', 'REJECTED'])) {
-            return back()->with('error', 'คุณไม่มีสิทธิ์แก้ไขเอกสารนี้');
-        }
+            ->whereIdentifier($id)->firstOrFail();
+        $this->authorize('update', $document);
 
         if ($document->doc_type === 'incoming') {
             return view('documents.edit_incoming', compact('document'));
@@ -321,10 +453,8 @@ class DocumentController extends Controller
     {
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
-        if ($document->created_by !== Auth::id() || !in_array($document->status, ['DRAFT', 'REJECTED'])) {
-            return back()->with('error', 'คุณไม่มีสิทธิ์แก้ไขเอกสารนี้');
-        }
+            ->whereIdentifier($id)->firstOrFail();
+        $this->authorize('update', $document);
 
         // 🌟 1. ลบไฟล์ที่ประทับลายเซ็นหรือต่อใบแนบท้ายเก่าทิ้งไป (เพราะเอกสารถูกแก้ไขเนื้อหาแล้ว)
         if ($document->signed_path) {
@@ -338,6 +468,7 @@ class DocumentController extends Controller
         // 🌟 2. เพิ่มการเคลียร์ signed_path และ creator_signature ให้กลับเป็นค่าว่าง
         $resetApprovals = [
             'status'                 => 'DRAFT',
+            'current_step'           => 1,
             'signed_path'            => null,
             'creator_signature'      => null,
             'reject_reason'          => null,
@@ -455,6 +586,12 @@ class DocumentController extends Controller
             $document->update($updateData);
         }
 
+        $document->routes()->update([
+            'status' => 'pending',
+            'comment' => null,
+            'actioned_at' => null,
+        ]);
+
         return redirect()->route('documents.show', $document->uuid ?? $document->id)
             ->with('success', 'แก้ไขเอกสารเรียบร้อยแล้ว กรุณาลงนามเพื่อส่งเรื่องใหม่อีกครั้ง');
     }
@@ -465,13 +602,14 @@ class DocumentController extends Controller
 
     public function createIncoming()
     {
-        return view('documents.create_incoming');
+        return view('documents.create_incoming', ['users' => $this->routeUsers()]);
     }
 
     public function storeIncoming(Request $request)
     {
         $request->validate([
             'receive_number'    => 'required|string|max:255',
+            'running_number'    => 'required|integer|min:1',
             'receive_date'      => 'required|date',
             'doc_number'        => 'required|string|max:255',
             'doc_date'          => 'required|date',
@@ -480,12 +618,16 @@ class DocumentController extends Controller
             'doc_type_category' => 'required|string|max:255',
             'doc_speed'         => 'nullable|string|max:50',
             'doc_secret'        => 'nullable|string|max:50',
-            'file'              => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            'file'              => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'external_url'      => 'nullable|url',
+            'routing_users'     => 'required|array|min:1',
+            'routing_users.*'   => 'required|integer|distinct|exists:users,id|not_in:' . Auth::id(),
         ], [
+            'receive_number.required' => 'กรุณากดรันเลขรับ หรือรอให้ระบบรันเลขให้อัตโนมัติ',
+            'running_number.required' => 'ไม่พบเลขลำดับรับ กรุณากดรันเลขใหม่',
             'title.required'    => 'กรุณาระบุเรื่อง',
             'file.mimes'        => 'รองรับเฉพาะไฟล์ PDF, JPG, PNG เท่านั้น',
-            'file.max'          => 'ขนาดไฟล์ต้องไม่เกิน 5MB',
+            'file.max'          => 'ขนาดไฟล์ต้องไม่เกิน 10MB',
             'external_url.url'  => 'รูปแบบลิงก์จากการสแกนไม่ถูกต้อง',
         ]);
 
@@ -509,18 +651,25 @@ class DocumentController extends Controller
         $document->running_number    = $request->running_number;
         $document->created_by        = Auth::id();
         $document->status            = 'DRAFT';
+        $document->current_step      = 1;
+        $document->external_url      = $request->filled('external_url')
+            ? trim($request->external_url)
+            : null;
 
         if ($request->hasFile('file')) {
             $path = $request->file('file')->store('incoming_docs', 'public');
             $document->attachment_path = $path;
             $document->content = 'อ้างอิงจากไฟล์แนบในระบบ';
         } else {
-            $document->content = '<p>เอกสารรับเข้าผ่านการสแกน QR Code:</p>
-                <a href="' . e($request->external_url) . '" target="_blank" class="btn btn-outline-primary">
-                <i class="fas fa-external-link-alt"></i> คลิกเพื่อเปิดดูเอกสารต้นฉบับ</a>';
+            $document->content = 'อ้างอิงจากเอกสารใน QR Code';
         }
 
         $document->save();
+        $this->saveDocumentRoute($document, $request->input('routing_users', []));
+
+        if ($document->external_url) {
+            ArchiveExternalDocument::dispatch($document->id)->afterCommit();
+        }
 
         return redirect()
             ->route('documents.show', $document->uuid ?? $document->id)
@@ -545,7 +694,8 @@ class DocumentController extends Controller
             })
             ->get();
 
-        return view('documents.create_outgoing', compact('incomingDocs', 'signers'));
+        $users = $this->routeUsers();
+        return view('documents.create_outgoing', compact('incomingDocs', 'signers', 'users'));
     }
 
     public function storeOutgoing(Request $request)
@@ -559,6 +709,8 @@ class DocumentController extends Controller
             'signer_name'       => 'required|string|max:255', 
             'file'              => 'required|file|mimes:pdf|max:20480',
             'running_number'    => 'nullable|integer',
+            'routing_users'     => 'required|array|min:1',
+            'routing_users.*'   => 'required|integer|distinct|exists:users,id|not_in:' . Auth::id(),
         ], [
             'title.required'       => 'กรุณาระบุเรื่อง',
             'doc_to.required'      => 'กรุณาระบุผู้รับ (เรียน)',
@@ -583,6 +735,7 @@ class DocumentController extends Controller
         $document->running_number    = $request->running_number;
         $document->created_by        = Auth::id();
         $document->status            = 'DRAFT';
+        $document->current_step      = 1;
 
         if ($request->hasFile('file')) {
             $path = $request->file('file')->store('outgoing_docs', 'public');
@@ -594,6 +747,7 @@ class DocumentController extends Controller
         }
 
         $document->save();
+        $this->saveDocumentRoute($document, $request->input('routing_users', []));
 
         return redirect()
             ->route('documents.show', $document->uuid ?? $document->id)
@@ -645,6 +799,30 @@ class DocumentController extends Controller
               ->where('created_by', $user->id);
         });
 
+        $query->orWhereHas('routes', function ($routeQuery) use ($user) {
+            $routeQuery->where('user_id', $user->id)
+                ->where('status', 'pending')
+                ->whereColumn('document_routes.step_order', 'documents.current_step');
+        });
+
+        // งานที่หัวหน้าฝ่ายส่งต่อมาให้ผู้ใช้โดยตรง แสดงในกล่องงานเดียวกับ
+        // เอกสารรอพิจารณา เพื่อไม่ให้ผู้รับต้องตามหาจากคนละเมนู
+        $query->orWhere(function ($assignmentQuery) use ($user) {
+            $assignmentQuery->where('assigned_user_id', $user->id)
+                ->whereIn('assignment_status', ['pending', 'delegated']);
+        });
+
+        if ($user->hasRole('head')) {
+            $query->orWhere(function ($headAssignmentQuery) use ($user) {
+                $headAssignmentQuery->where('assigned_to', $user->department)
+                    ->whereNull('assigned_user_id')
+                    ->where(function ($statusQuery) {
+                        $statusQuery->whereNull('assignment_status')
+                            ->orWhere('assignment_status', 'pending');
+                    });
+            });
+        }
+
         $documents = $query->orderBy('created_at', 'desc')->get();
 
         return view('documents.approve_list', compact('documents'));
@@ -652,188 +830,263 @@ class DocumentController extends Controller
 
     public function reviewDocument(Request $request, $id)
     {
-        // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
-        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $id) {
+        // 🌟 1. ดึงข้อมูลเอกสาร (เพิ่ม 'routes.user' เข้ามาด้วย)
+        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok', 'routes.user'])
+            ->whereIdentifier($id)->lockForUpdate()->firstOrFail();
+            
+        // 🌟 2. ประกาศตัวแปร $targetDocId ไว้บังคับกลับหน้าเดิม
+        $targetDocId = $document->uuid ?? $document->id;
+        
         /** @var \App\Models\User $user */
         $user = Auth::user();
+
+        if ($document->routes->isNotEmpty()) {
+            $this->authorize('review', $document);
+        }
 
         $throttleKey = 'pin-review-attempts:' . $user->id;
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
-            return back()->with('error_pin', 'คุณกรอกรหัส PIN ผิดเกินกำหนด (5 ครั้ง) กรุณารออีก ' . $seconds . ' วินาที');
+            // 🌟 เปลี่ยนจาก back() เป็น redirect กลับหน้าเดิม
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error_pin', 'คุณกรอกรหัส PIN ผิดเกินกำหนด (5 ครั้ง) กรุณารออีก ' . $seconds . ' วินาที');
         }
 
         if (empty($user->signature) || empty($user->pin)) {
-            return back()->with('error_signature', 'กรุณาอัปโหลดลายเซ็นและตั้งรหัส PIN ก่อนดำเนินการครับ');
+            // 🌟 เปลี่ยนจาก back() เป็น redirect กลับหน้าเดิม
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error_signature', 'กรุณาอัปโหลดลายเซ็นและตั้งรหัส PIN ก่อนดำเนินการครับ');
         }
 
         if (!Hash::check($request->pin, $user->pin)) {
             RateLimiter::hit($throttleKey, 60);
-            return back()->with('error_pin', 'รหัสผ่าน (PIN) ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+            // 🌟 เปลี่ยนจาก back() เป็น redirect กลับหน้าเดิม
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error_pin', 'รหัสผ่าน (PIN) ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
         }
 
         RateLimiter::clear($throttleKey);
 
         $signature = $user->signature;
-        $comment = $request->input('comment'); 
+        $comment = $request->input('comment');
 
-        // กรณี อนุมัติ / เห็นชอบ (Approve)
+        // 🌟 ดึงข้อมูลคิวพิจารณาปัจจุบัน (Dynamic Route)
+        $currentRoute = $document->routes
+            ->where('step_order', $document->current_step)
+            ->where('user_id', $user->id)
+            ->where('status', 'pending')
+            ->first();
+
+        $isLegacyReviewer =
+            ($user->hasRole('saraban') && in_array($document->status, ['WAITING_ADMIN', 'WAITING_NUMBERING'])) ||
+            ($user->hasRole('head') && $document->status === 'WAITING_SUPERVISOR') ||
+            ($user->hasAnyRole(['palad', 'deputy-palad']) && $document->status === 'WAITING_PALAD') ||
+            ($user->hasRole('executive') && $document->status === 'WAITING_NAYOK');
+
+        if (!$currentRoute && !$isLegacyReviewer) {
+            return redirect()->route('documents.show', $targetDocId)
+                ->with('error', 'เอกสารฉบับนี้ยังไม่ถึงลำดับพิจารณาของคุณ');
+        }
+
+        // ==========================================
+        // 🟢 กรณีที่ 1: อนุมัติ / เห็นชอบ (Approve)
+        // ==========================================
         if ($request->is_approved == '1') {
             
             $msg = ''; // ตัวแปรเก็บข้อความสำเร็จ
 
-            if ($user->hasRole('saraban') && $document->status === 'WAITING_ADMIN') {
-                $document->update(['status' => 'WAITING_SUPERVISOR']);
-                $msg = 'ตรวจสอบและส่งต่อให้หัวหน้าส่วนราชการเรียบร้อย';
-            
-            } elseif ($user->hasRole('head') && $document->status === 'WAITING_SUPERVISOR') {
-                
-                $isFinalSigner = ($document->doc_type === 'outgoing' && !str_contains($document->signer_name ?? '', 'ปลัด') && !str_contains($document->signer_name ?? '', 'นายก'));
-                $nextStatus = $isFinalSigner ? 'APPROVED' : 'WAITING_PALAD';
+            // อัปเดตข้อมูลลายเซ็นลงตาราง
+            if ($user->hasRole('executive')) {
+                $document->nayok_id = $user->id; $document->nayok_signature = $signature; $document->nayok_approved_at = now(); $document->nayok_comment = $comment;
+            } elseif ($user->hasRole('palad') || $user->hasRole('deputy-palad')) {
+                $document->palad_id = $user->id; $document->palad_signature = $signature; $document->palad_approved_at = now(); $document->palad_comment = $comment;
+            } elseif ($user->hasRole('head')) {
+                $document->supervisor_id = $user->id; $document->supervisor_signature = $signature; $document->supervisor_approved_at = now(); $document->supervisor_comment = $comment;
+            }
 
-                $document->update([
-                    'status'                 => $nextStatus,
-                    'supervisor_id'          => $user->id,
-                    'supervisor_signature'   => $signature,
-                    'supervisor_approved_at' => now(),
-                    'supervisor_comment'     => $comment,
+            // 🌟 เช็กว่ามีคิวพิจารณาไหม
+            if ($currentRoute) {
+                // อัปเดตสถานะคิวคนนี้ว่า "ผ่านแล้ว"
+                $currentRoute->update([
+                    'status' => 'approved',
+                    'comment' => $comment,
+                    'actioned_at' => now(),
                 ]);
                 
-                // 🌟 ประทับลายเซ็นอัตโนมัติ (สำหรับหนังสือส่งออก)
-                if ($isFinalSigner) {
-                    $this->autoStampPdf($document, $user);
-                }
-                
-                // 🌟 อัปเดตวาดใบแนบท้าย PDF ใหม่ (สำหรับบันทึกข้อความภายใน)
-                if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) {
-                    $this->autoAppendSignaturePage($document);
-                }
+                // เช็กว่ามีคนรอคิวถัดไปไหม
+                $nextStep = $document->current_step + 1;
+                $hasNextRoute = \App\Models\DocumentRoute::where('document_id', $document->id)
+                    ->where('step_order', $nextStep)
+                    ->exists();
 
-                $msg = $isFinalSigner ? 'ลงนามหนังสือส่งออกและประทับลายเซ็นเรียบร้อยแล้ว (เอกสารสมบูรณ์)' : 'หัวหน้าส่วนราชการพิจารณาเห็นชอบและส่งเรื่องต่อให้ ปลัด อบต. แล้ว';
-
-            } elseif (($user->hasRole('palad') || $user->hasRole('deputy-palad')) && $document->status === 'WAITING_PALAD') {
-                
-                $assignedTo = $request->filled('assigned_to') ? $request->assigned_to : $document->assigned_to;
-                $isFinalSigner = ($document->doc_type === 'outgoing' && str_contains($document->signer_name ?? '', 'ปลัด'));
-                $nextStatus = $isFinalSigner ? 'APPROVED' : 'WAITING_NAYOK';
-
-                $document->update([
-                    'status'           => $nextStatus,
-                    'palad_id'         => $user->id,
-                    'palad_signature'  => $signature,
-                    'palad_approved_at'=> now(),
-                    'palad_comment'    => $comment, 
-                    'assigned_to'      => $assignedTo, 
-                ]);
-                
-                // 🌟 ประทับลายเซ็นอัตโนมัติ
-                if ($isFinalSigner) {
-                    $this->autoStampPdf($document, $user);
-                }
-
-                // 🌟 อัปเดตวาดใบแนบท้าย PDF ใหม่ (สำหรับบันทึกข้อความภายใน)
-                if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) {
-                    $this->autoAppendSignaturePage($document);
-                }
-
-                $msg = $isFinalSigner ? 'ลงนามหนังสือส่งออกและประทับลายเซ็นเรียบร้อยแล้ว (เอกสารสมบูรณ์)' : 'พิจารณาเห็นชอบส่งต่อให้นายกฯ เรียบร้อย';
-            
-            } elseif ($user->hasRole('executive') && $document->status === 'WAITING_NAYOK') {
-                
-                if ($document->doc_type === 'incoming') {
-                    $newStatus = 'APPROVED'; 
-                    $successMsg = 'ลงนามสั่งการหนังสือรับเข้าเรียบร้อยแล้ว';
-                } elseif ($document->doc_type === 'outgoing') {
-                    $newStatus = 'APPROVED'; 
-                    $successMsg = 'ลงนามหนังสือส่งออกและประทับลายเซ็นเรียบร้อยแล้ว (เอกสารสมบูรณ์)';
+                if ($hasNextRoute) {
+                    $document->update(['current_step' => $nextStep, 'status' => 'PROCESSING']);
+                    $msg = 'อนุมัติสำเร็จ ระบบได้ส่งเรื่องให้ผู้พิจารณาลำดับถัดไปเรียบร้อยแล้ว';
                 } else {
-                    $newStatus = 'WAITING_NUMBERING'; 
-                    $successMsg = 'ลงนามอนุมัติและส่งให้ธุรการลงทะเบียนเลขเรียบร้อยแล้ว';
-                }
-
-                $assignedTo = $request->filled('assigned_to') ? $request->assigned_to : $document->assigned_to;
-
-                $document->update([
-                    'status'           => $newStatus,
-                    'nayok_id'         => $user->id,
-                    'nayok_signature'  => $signature,
-                    'nayok_approved_at'=> now(),
-                    'nayok_comment'    => $comment, 
-                    'assigned_to'      => $assignedTo, 
-                ]);
-                
-                // 🌟 ประทับลายเซ็นอัตโนมัติ (นายกเซ็นหนังสือส่งออก ถือว่าจบงานเสมอ)
-                if ($document->doc_type === 'outgoing') {
-                    $this->autoStampPdf($document, $user);
-                }
-
-                // 🌟 อัปเดตวาดใบแนบท้าย PDF ใหม่ (สำหรับบันทึกข้อความภายใน)
-                if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) {
-                    $this->autoAppendSignaturePage($document);
-                }
-
-                $msg = $successMsg;
-
-            } elseif ($user->hasRole('saraban') && $document->status === 'WAITING_NUMBERING') {
-
-                $finalDocNumber = trim($request->doc_number);
-                
-                if ($document->doc_type === 'outgoing') {
-                    if (str_contains($document->signer_name ?? '', 'นายก')) {
-                        $nextStatus = 'WAITING_NAYOK';
-                    } elseif (str_contains($document->signer_name ?? '', 'ปลัด')) {
-                        $nextStatus = 'WAITING_PALAD';
-                    } else {
-                        $nextStatus = 'WAITING_SUPERVISOR';
+                    $finalData = [
+                        'status' => $document->doc_type === 'internal' ? 'WAITING_NUMBERING' : 'APPROVED',
+                    ];
+                    if ($document->doc_type === 'incoming' && $request->filled('assigned_to')) {
+                        $finalData['assigned_to'] = $request->assigned_to;
+                        $finalData['assignment_status'] = 'pending';
+                        $finalData['assigned_at'] = now();
+                        $finalData['assigned_user_id'] = null;
+                        $finalData['delegated_by'] = null;
                     }
-                    
-                    $document->update([
-                        'status'         => $nextStatus,
-                        'doc_number'     => $finalDocNumber,
-                        'running_number' => $request->running_number,
-                        'doc_date'       => now()->toDateString()
-                    ]);
-                    $msg = 'ออกเลขและส่งต่อให้ผู้ลงนามพิจารณาเรียบร้อยแล้ว';
-                } 
-                else {
-                    $document->update([
-                        'status'         => 'APPROVED',
-                        'doc_number'     => $finalDocNumber,
-                        'running_number' => $request->running_number,
-                        'doc_date'       => now()->toDateString()
-                    ]);
-                    $msg = 'ออกเลขและจัดเก็บเอกสารเรียบร้อยแล้ว: ' . $finalDocNumber;
+                    $document->update($finalData);
+                    if ($document->doc_type === 'outgoing') $this->autoStampPdf($document, $user);
+                    if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) $this->autoAppendSignaturePage($document);
+                    $msg = $document->doc_type === 'internal'
+                        ? 'เห็นชอบเรียบร้อยแล้ว ระบบส่งเอกสารให้ธุรการลงเลขต่อไป'
+                        : 'อนุมัติสมบูรณ์! เอกสารฉบับนี้ผ่านการพิจารณาครบทุกขั้นตอนแล้ว';
                 }
-            } else {
-                return back()->with('error', 'คุณไม่มีสิทธิ์ดำเนินการในขั้นตอนนี้');
+            } 
+            else {
+                // 🌟 ระบบสิทธิ์ Role ตามลำดับชั้นแบบเดิม (Legacy)
+                if ($user->hasRole('saraban') && $document->status === 'WAITING_ADMIN') {
+                    $document->update(['status' => 'WAITING_SUPERVISOR']);
+                    $msg = 'ตรวจสอบและส่งต่อให้หัวหน้าส่วนราชการเรียบร้อย';
+                
+                } elseif ($user->hasRole('head') && $document->status === 'WAITING_SUPERVISOR') {
+                    $isFinalSigner = ($document->doc_type === 'outgoing' && !str_contains($document->signer_name ?? '', 'ปลัด') && !str_contains($document->signer_name ?? '', 'นายก'));
+                    $nextStatus = $isFinalSigner ? 'APPROVED' : 'WAITING_PALAD';
+
+                    $document->update([
+                        'status'                 => $nextStatus,
+                        'supervisor_id'          => $user->id,
+                        'supervisor_signature'   => $signature,
+                        'supervisor_approved_at' => now(),
+                        'supervisor_comment'     => $comment,
+                    ]);
+                    
+                    if ($isFinalSigner) $this->autoStampPdf($document, $user);
+                    if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) $this->autoAppendSignaturePage($document);
+
+                    $msg = $isFinalSigner ? 'ลงนามหนังสือส่งออกและประทับลายเซ็นเรียบร้อยแล้ว (เอกสารสมบูรณ์)' : 'หัวหน้าส่วนราชการพิจารณาเห็นชอบและส่งเรื่องต่อให้ ปลัด อบต. แล้ว';
+
+                } elseif (($user->hasRole('palad') || $user->hasRole('deputy-palad')) && $document->status === 'WAITING_PALAD') {
+                    $assignedTo = $request->filled('assigned_to') ? $request->assigned_to : $document->assigned_to;
+                    $isFinalSigner = ($document->doc_type === 'outgoing' && str_contains($document->signer_name ?? '', 'ปลัด'));
+                    $nextStatus = $isFinalSigner ? 'APPROVED' : 'WAITING_NAYOK';
+
+                    $document->update([
+                        'status'           => $nextStatus,
+                        'palad_id'         => $user->id,
+                        'palad_signature'  => $signature,
+                        'palad_approved_at'=> now(),
+                        'palad_comment'    => $comment, 
+                        'assigned_to'      => $assignedTo, 
+                    ]);
+                    
+                    if ($isFinalSigner) $this->autoStampPdf($document, $user);
+                    if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) $this->autoAppendSignaturePage($document);
+
+                    $msg = $isFinalSigner ? 'ลงนามหนังสือส่งออกและประทับลายเซ็นเรียบร้อยแล้ว (เอกสารสมบูรณ์)' : 'พิจารณาเห็นชอบส่งต่อให้นายกฯ เรียบร้อย';
+                
+                } elseif ($user->hasRole('executive') && $document->status === 'WAITING_NAYOK') {
+                    if ($document->doc_type === 'incoming') {
+                        $newStatus = 'APPROVED'; $successMsg = 'ลงนามสั่งการหนังสือรับเข้าเรียบร้อยแล้ว';
+                    } elseif ($document->doc_type === 'outgoing') {
+                        $newStatus = 'APPROVED'; $successMsg = 'ลงนามหนังสือส่งออกและประทับลายเซ็นเรียบร้อยแล้ว (เอกสารสมบูรณ์)';
+                    } else {
+                        $newStatus = 'WAITING_NUMBERING'; $successMsg = 'ลงนามอนุมัติและส่งให้ธุรการลงทะเบียนเลขเรียบร้อยแล้ว';
+                    }
+
+                    $assignedTo = $request->filled('assigned_to') ? $request->assigned_to : $document->assigned_to;
+
+                    $document->update([
+                        'status'           => $newStatus,
+                        'nayok_id'         => $user->id,
+                        'nayok_signature'  => $signature,
+                        'nayok_approved_at'=> now(),
+                        'nayok_comment'    => $comment, 
+                        'assigned_to'      => $assignedTo, 
+                    ]);
+                    
+                    if ($document->doc_type === 'outgoing') $this->autoStampPdf($document, $user);
+                    if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) $this->autoAppendSignaturePage($document);
+
+                    $msg = $successMsg;
+
+                } elseif ($user->hasRole('saraban') && $document->status === 'WAITING_NUMBERING') {
+                    $finalDocNumber = trim($request->doc_number);
+                    
+                    if ($document->doc_type === 'outgoing') {
+                        if (str_contains($document->signer_name ?? '', 'นายก')) {
+                            $nextStatus = 'WAITING_NAYOK';
+                        } elseif (str_contains($document->signer_name ?? '', 'ปลัด')) {
+                            $nextStatus = 'WAITING_PALAD';
+                        } else {
+                            $nextStatus = 'WAITING_SUPERVISOR';
+                        }
+                        
+                        $document->update([
+                            'status'         => $nextStatus,
+                            'doc_number'     => $finalDocNumber,
+                            'running_number' => $request->running_number,
+                            'doc_date'       => now()->toDateString()
+                        ]);
+                        $msg = 'ออกเลขและส่งต่อให้ผู้ลงนามพิจารณาเรียบร้อยแล้ว';
+                    } 
+                    else {
+                        $document->update([
+                            'status'         => 'APPROVED',
+                            'doc_number'     => $finalDocNumber,
+                            'running_number' => $request->running_number,
+                            'doc_date'       => now()->toDateString()
+                        ]);
+                        $msg = 'ออกเลขและจัดเก็บเอกสารเรียบร้อยแล้ว: ' . $finalDocNumber;
+                    }
+                } else {
+                    return redirect()->route('documents.show', $targetDocId)
+                        ->with('error', 'คุณไม่มีสิทธิ์ดำเนินการในขั้นตอนนี้');
+                }
             }
 
-            // =========================================================
-            // 🌟 แจ้งเตือน LINE ทันทีที่มีการเปลี่ยนสถานะส่งต่อ 🌟
-            // =========================================================
+            // แจ้งเตือน LINE
             if (!in_array($document->status, ['APPROVED', 'CANCELED'])) {
-                $docUrl = route('documents.show', $document->uuid ?? $document->id);
-                $lineMsg = "🔔 มีเอกสารส่งต่อถึงคุณ!\n";
-                $lineMsg .= "เรื่อง: " . $document->title . "\n";
-                
-                if ($document->doc_speed !== 'ปกติ') $lineMsg .= "ความเร็ว: ⚡" . $document->doc_speed . "\n";
-                
-                $lineMsg .= "สถานะ: ต้องพิจารณา/ลงนาม\n";
-                $lineMsg .= "\n👇 เปิดดูเอกสารที่นี่:\n" . $docUrl;
-
-                // สั่งให้บอทเช็คว่าคิวต่อไปคือใคร แล้วส่งหาคนนั้น
+                $lineMsg = "🔔 มีเอกสารส่งต่อถึงคุณ!\nเรื่อง: " . $document->title . "\n👇 เปิดดูเอกสารที่นี่:\n" . route('documents.show', $targetDocId);
                 $this->sendLineMessage($lineMsg, $document);
+            } elseif ($document->status === 'APPROVED') {
+                $docUrl = route('documents.show', $targetDocId);
+                app(NotificationDispatcher::class)->toUser(
+                    $document->creator,
+                    "✅ เอกสารของคุณดำเนินการเสร็จสิ้นแล้ว\nเรื่อง: {$document->title}\nเลขที่: " . ($document->doc_number ?: '-') . "\n\nเปิดดูเอกสาร:\n{$docUrl}"
+                );
+
+                if (!empty($document->assigned_to)) {
+                    $assignedUsers = app(LineMessagingService::class)
+                        ->usersWithRoles('head', $document->assigned_to);
+                    app(NotificationDispatcher::class)->toUsers(
+                        $assignedUsers,
+                        "📨 มีเอกสารมอบหมายถึงหน่วยงานของคุณ\nเรื่อง: {$document->title}\nเลขที่: " . ($document->doc_number ?: '-') . "\n\nเปิดดูเอกสาร:\n{$docUrl}"
+                    );
+                }
             }
-            // =========================================================
 
-            return redirect()->route('documents.approve_list')->with('success', $msg);
+            // 🌟 3. บังคับโหลดกลับหน้าเอกสารใบเดิม! (แก้ไขจากของเดิมที่ไป approve_list)
+            return redirect()->route('documents.show', $targetDocId)->with('success', $msg);
 
-        } else {
-            // กรณี ตีกลับ / ไม่อนุมัติ (Reject)
+        } 
+        // ==========================================
+        // 🔴 กรณีที่ 2: ตีกลับ / ไม่อนุมัติ (Reject)
+        // ==========================================
+        else {
             $request->validate(['comment' => 'required|string|max:1000'], [
                 'comment.required' => 'กรุณาระบุความเห็นหรือเหตุผลการตีกลับเอกสารในช่องความเห็น'
             ]);
+
+            // ล้างสถานะคิวที่ค้างอยู่ (ถ้ามี)
+            if ($currentRoute) {
+                \App\Models\DocumentRoute::where('document_id', $document->id)
+                    ->where('status', 'pending')
+                    ->update([
+                        'status' => 'rejected',
+                        'comment' => $comment,
+                        'actioned_at' => now(),
+                    ]);
+            }
 
             if (!empty($document->doc_number)) {
                 $newStatus = 'CANCELED';
@@ -848,47 +1101,19 @@ class DocumentController extends Controller
             $document->update([
                 'status'                 => $newStatus,
                 'reject_reason'          => $comment,
-                'supervisor_id'          => null,
-                'supervisor_signature'   => null,
-                'supervisor_comment'     => null,
-                'supervisor_approved_at' => null,
-                'palad_id'               => null,
-                'palad_signature'        => null,
-                'palad_comment'          => null,
-                'palad_approved_at'      => null,
-                'nayok_id'               => null,
-                'nayok_signature'        => null,
-                'nayok_comment'          => null,
-                'nayok_approved_at'      => null,
+                'supervisor_id'          => null, 'supervisor_signature'   => null, 'supervisor_comment'     => null, 'supervisor_approved_at' => null,
+                'palad_id'               => null, 'palad_signature'        => null, 'palad_comment'          => null, 'palad_approved_at'      => null,
+                'nayok_id'               => null, 'nayok_signature'        => null, 'nayok_comment'          => null, 'nayok_approved_at'      => null,
             ]);
 
-            // =========================================================
-            // 🌟 แจ้งเตือน LINE กรณีโดนตีกลับเอกสาร 🌟
-            // =========================================================
-            if ($document->creator && !empty($document->creator->line_id)) {
-                $docUrl = route('documents.show', $document->uuid ?? $document->id);
-                $lineMsg = "⚠️ เอกสารของคุณถูกตีกลับ/ตีตก!\n";
-                $lineMsg .= "เรื่อง: " . $document->title . "\n";
-                $lineMsg .= "เหตุผล: " . $comment . "\n";
-                $lineMsg .= "\n👇 ดูรายละเอียด:\n" . $docUrl;
-                
-                $token = env('LINE_BOT_TOKEN');
-                if (!empty($token)) {
-                    try {
-                        \Illuminate\Support\Facades\Http::withToken($token)
-                            ->post('https://api.line.me/v2/bot/message/push', [
-                                'to' => $document->creator->line_id,
-                                'messages' => [['type' => 'text', 'text' => $lineMsg]]
-                            ]);
-                    } catch (\Exception $e) {
-                        // ปล่อยผ่านไปหากเชื่อมต่อ API ไม่สำเร็จ
-                    }
-                }
-            }
-            // =========================================================
+            $docUrl = route('documents.show', $targetDocId);
+            $lineMsg = "⚠️ เอกสารของคุณถูกตีกลับ/ตีตก!\nเรื่อง: " . $document->title . "\nเหตุผล: " . $comment . "\n👇 ดูรายละเอียด:\n" . $docUrl;
+            app(NotificationDispatcher::class)->toUser($document->creator, $lineMsg);
 
-            return redirect()->route('documents.approve_list')->with('success', $msg);
+            // 🌟 4. บังคับโหลดกลับหน้าเอกสารใบเดิม! (แก้ไขจากของเดิมที่ไป approve_list)
+            return redirect()->route('documents.show', $targetDocId)->with('success', $msg);
         }
+        }, 3);
     }
 
     private function autoStampPdf($doc, $user)
@@ -923,7 +1148,7 @@ class DocumentController extends Controller
 
         // เรียกใช้ Python
         $scriptPath = base_path('scripts/stamper.py');
-        $pythonCommand = env('PYTHON_COMMAND', 'C:\\Users\\chari\\AppData\\Local\\Programs\\Python\\Python312\\python.exe');
+        $pythonCommand = config('services.docling.python', 'python');
         
         $process = new Process([$pythonCommand, $scriptPath, $originalPdf, $tempSigPath, $outputPdf]);
         
@@ -976,7 +1201,7 @@ class DocumentController extends Controller
 
         // --- เรียกใช้ Python ที่อัปเกรดความฉลาดแล้ว ---
         $scriptPath = base_path('scripts/stamper.py');
-        $pythonCommand = env('PYTHON_COMMAND', 'C:\\Users\\chari\\AppData\\Local\\Programs\\Python\\Python312\\python.exe');
+        $pythonCommand = config('services.docling.python', 'python');
         
         $process = new \Symfony\Component\Process\Process([$pythonCommand, $scriptPath, $originalPdf, $tempSigPath, $outputPdf]);
         
@@ -1066,7 +1291,7 @@ class DocumentController extends Controller
 
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+            ->whereIdentifier($id)->firstOrFail();
 
         if ($document->created_by !== Auth::id() || !in_array($document->status, ['DRAFT', 'REJECTED'])) {
             return back()->with('error', 'คุณไม่มีสิทธิ์แนบไฟล์ในขั้นตอนนี้');
@@ -1087,29 +1312,31 @@ class DocumentController extends Controller
     {
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
-        /** @var \App\Models\User $user */
-        $user = Auth::user();
+            ->whereIdentifier($id)->firstOrFail();
+        $this->authorize('delete', $document);
 
-        if (in_array($document->status, ['DRAFT', 'REJECTED']) && $document->created_by === $user->id) {
-            if ($document->attachment_path) {
-                Storage::disk('public')->delete($document->attachment_path);
-            }
-            $document->delete();
-
-            return redirect()
-                ->route('documents.approve_list')
-                ->with('success', 'ลบเอกสารเรียบร้อยแล้ว');
+        if ($document->attachment_path) {
+            Storage::disk('public')->delete($document->attachment_path);
         }
+        if ($document->external_attachment_path) {
+            Storage::disk('public')->delete($document->external_attachment_path);
+        }
+        $document->delete();
 
-        return back()->with('error', 'คุณไม่สามารถลบเอกสารนี้ได้ เนื่องจากส่งพิจารณาไปแล้ว หรือถูกบันทึกเป็นเลขเสีย');
+        return redirect()
+            ->route('documents.approve_list')
+            ->with('success', 'ลบเอกสารเรียบร้อยแล้ว');
     }
 
     public function downloadSignedPdf($id)
     {
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+            ->whereIdentifier($id)->firstOrFail();
+        $this->authorize('accessConfidential', $document);
+        app(AuditLogger::class)->log('document.downloaded', $document, [], [
+            'signed' => true,
+        ]);
 
         if (in_array($document->status, ['DRAFT', 'REJECTED', 'CANCELED'])) {
             return back()->with('error', 'ไม่สามารถดาวน์โหลดเอกสารที่ถูกยกเลิก หรือยังไม่สิ้นสุดกระบวนการได้');
@@ -1152,7 +1379,8 @@ class DocumentController extends Controller
     {
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+            ->whereIdentifier($id)->firstOrFail();
+        $this->authorize('view', $document);
 
         if ($document->doc_type !== 'incoming') {
             return back()->with('error', 'ใบเกษียนหนังสือใช้สำหรับหนังสือรับเข้าเท่านั้น');
@@ -1165,121 +1393,11 @@ class DocumentController extends Controller
     // --- โซนที่ 6: สมุดคุมเลข และ API รันเลขอัตโนมัติ ---
     // ========================================================================
 
-    public function numberLedger(Request $request)
-    {
-        $type = $request->input('type', 'outgoing'); 
-        $userDept = Auth::user()->department;
-        $dept = $request->input('department', $userDept); 
-        
-        $currentMonth = date('m');
-        $currentYear = date('Y');
-        $defaultFiscalYear = ($currentMonth >= 10) ? $currentYear + 1 : $currentYear;
-        $year = $request->input('year', $defaultFiscalYear);
-        
-        $start = ($year - 1) . '-10-01 00:00:00';
-        $end = $year . '-09-30 23:59:59';
-
-        $query = Document::where('doc_type', $type)
-            ->whereBetween('created_at', [$start, $end])
-            ->whereNotNull('running_number');
-
-        if ($type === 'internal') {
-            $query->whereHas('creator', function ($q) use ($dept) {
-                $q->where('department', $dept);
-            });
-        }
-
-        $documents = $query->orderBy('running_number', 'asc')->get();
-
-        $usedNumbers = $documents->keyBy('running_number');
-        $maxNumber = $documents->max('running_number') ?? 0;
-        
-        $ledger = [];
-        $limit = max(50, $maxNumber + 20); 
-        
-        for ($i = 1; $i <= $limit; $i++) {
-            if ($usedNumbers->has($i)) {
-                $doc = $usedNumbers->get($i);
-                
-                if ($doc->status === 'APPROVED') {
-                    $status = 'ออกเลขแล้ว';
-                } elseif ($doc->status === 'CANCELED') {
-                    $status = 'ยกเลิก';
-                } elseif ($doc->status === 'RESERVED') {
-                    $status = 'จองเลขมือ'; 
-                } else {
-                    $status = 'จองรออนุมัติ'; 
-                }
-
-                $ledger[$i] = [
-                    'status' => $status,
-                    'doc' => $doc
-                ];
-            } else {
-                $ledger[$i] = ['status' => 'ว่าง', 'doc' => null];
-            }
-        }
-
-        $departments = \App\Models\User::select('department')->distinct()->pluck('department')->filter();
-
-        return view('documents.number_ledger', compact('ledger', 'type', 'year', 'maxNumber', 'dept', 'departments'));
-    }
-
-    public function apiNextNumber(Request $request)
-    {
-        $type = $request->input('type', 'outgoing');
-        $user = Auth::user();
-        
-        $currentMonth = date('m');
-        $currentYear = date('Y');
-        $fiscalYear = ($currentMonth >= 10) ? $currentYear + 1 : $currentYear;
-
-        $start = ($fiscalYear - 1) . '-10-01 00:00:00';
-        $end = $fiscalYear . '-09-30 23:59:59';
-
-        $query = Document::where('doc_type', $type)
-            ->whereBetween('created_at', [$start, $end]);
-
-        if ($type === 'internal') {
-            $dept = $user->department;
-            $query->whereHas('creator', function ($q) use ($dept) {
-                $q->where('department', $dept);
-            });
-        }
-
-        $maxNumber = $query->max('running_number') ?? 0;
-        $nextNumber = $maxNumber + 1;
-        
-        $thDigits = ['๐','๑','๒','๓','๔','๕','๖','๗','๘','๙'];
-        $thNum = str_replace(range(0,9), $thDigits, (string)$nextNumber);
-
-        $formatted = (string)$nextNumber;
-        if ($type === 'incoming') {
-            $formatted = 'เลขรับที่ ' . $nextNumber; 
-        } elseif ($type === 'outgoing') {
-            $formatted = 'ยล ๗๗๓๐๑/' . $thNum;
-        } elseif ($type === 'internal') {
-            $deptName = $user->department;
-            $shortDept = 'ก.';
-            if (str_contains($deptName, 'ปลัด')) $shortDept = 'สป';
-            elseif (str_contains($deptName, 'คลัง')) $shortDept = 'กค';
-            elseif (str_contains($deptName, 'ช่าง')) $shortDept = 'กช';
-            elseif (str_contains($deptName, 'ศึกษา')) $shortDept = 'กศ';
-            elseif (str_contains($deptName, 'สาธารณสุข')) $shortDept = 'กส';
-            elseif (str_contains($deptName, 'สวัสดิการ')) $shortDept = 'กสว';
-            
-            $formatted = '(' . $shortDept . ') ' . $nextNumber;
-        }
-        
-        return response()->json([
-            'next_number' => $nextNumber,
-            'formatted' => $formatted
-        ]);
-    }
-
     public function assignedList()
     {
-        $userDepartment = auth()->user()->department;
+        /** @var User $user */
+        $user = Auth::user();
+        $userDepartment = $user->department;
 
         $departmentAliases = [
             'สำนักงานปลัด'                    => ['สำนักงานปลัด', 'สำนักปลัด'],
@@ -1291,11 +1409,26 @@ class DocumentController extends Controller
 
         $aliases = $departmentAliases[$userDepartment] ?? [$userDepartment];
 
-        $documents = Document::whereIn('assigned_to', $aliases)
+        $documents = Document::with(['assignee', 'delegator'])
+            ->where(function ($query) use ($aliases, $user) {
+                $query->where('assigned_user_id', $user->id);
+
+                if ($user->hasRole('head')) {
+                    $query->orWhere(function ($departmentQuery) use ($aliases) {
+                        $departmentQuery->whereIn('assigned_to', $aliases)
+                            ->whereNull('assigned_user_id');
+                    })->orWhere('delegated_by', $user->id);
+                }
+            })
             ->orderBy('created_at', 'desc')
             ->get();
 
-        return view('documents.assigned_list', compact('documents'));
+        $subordinates = User::where('department', $userDepartment)
+            ->where('id', '!=', $user->id)
+            ->orderBy('name')
+            ->get(['id', 'name', 'position']);
+
+        return view('documents.assigned_list', compact('documents', 'subordinates'));
     }
 
     public function changePassword(Request $request)
@@ -1327,87 +1460,11 @@ class DocumentController extends Controller
         return back()->with('success', 'อัปเดตรหัสผ่านเข้าสู่ระบบเรียบร้อยแล้ว');
     }
 
-    public function registry(Request $request)
-    {
-        $year = $request->input('year', date('Y')); 
-        $search = $request->input('search');
-
-        $docQuery = Document::query()
-            ->when($year, function($q) use ($year) {
-                return $q->whereYear('created_at', $year);
-            })
-            ->when($search, function($q) use ($search) {
-                return $q->where('title', 'like', "%{$search}%")
-                         ->orWhere('doc_number', 'like', "%{$search}%");
-            });
-
-        $pendingDocuments = (clone $docQuery)->where('status', 'WAITING_NUMBERING')
-            ->orderBy('updated_at', 'asc')->get();
-
-        $outgoingDocuments = (clone $docQuery)->whereIn('status', ['APPROVED', 'CANCELED'])
-            ->whereIn('doc_type', ['internal', 'outgoing']) 
-            ->whereNotNull('doc_number')
-            ->orderBy('updated_at', 'desc')->get();
-
-        $incomingDocuments = (clone $docQuery)
-            ->where('doc_type', 'incoming')
-            ->whereNotNull('receive_number') 
-            ->orderBy('updated_at', 'desc')
-            ->get();
-
-        $summary = [
-            'pending' => $pendingDocuments->count(),
-            'outgoing' => $outgoingDocuments->count(),
-            'incoming' => $incomingDocuments->count(),
-        ];
-
-        return view('documents.registry', compact('pendingDocuments', 'outgoingDocuments', 'incomingDocuments', 'summary', 'year', 'search'));
-    }
-
-    public function assignNumber(Request $request, $id)
-    {
-        // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
-        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
-
-        if ($document->status !== 'WAITING_NUMBERING') {
-            return redirect()->back()->with('error', 'เอกสารฉบับนี้เสร็จสิ้นกระบวนการออกเลขแล้ว ไม่สามารถออกเลขซ้ำได้');
-        }
-
-        $request->validate([
-            'doc_number' => 'required|string|max:255'
-        ]);
-        
-        $document->doc_number = $request->doc_number;
-        $document->status = 'APPROVED';
-        $document->save();
-
-        return redirect()->back()->with('success', 'ลงทะเบียนเลขที่เอกสารเรียบร้อยแล้ว');
-    }
-
-    public function reserveNumber(Request $request, $id)
-    {
-       // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
-        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
-        
-        $request->validate([
-            'doc_number' => 'required|string|max:255'
-        ]);
-
-        $document->update([
-            'doc_number' => $request->doc_number,
-            'running_number' => $request->running_number
-        ]);
-
-        return back()->with('success', 'จองเลขที่หนังสือ: ' . $request->doc_number . ' ล่วงหน้าเรียบร้อยแล้ว');
-    }
-
     public function acknowledge($id)
     {
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
+            ->whereIdentifier($id)->firstOrFail();
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
@@ -1422,11 +1479,69 @@ class DocumentController extends Controller
         return back()->with('error', 'คุณไม่มีสิทธิ์ดำเนินการในขั้นตอนนี้');
     }
 
+    public function assignmentAction(Request $request, $id)
+    {
+        $request->validate([
+            'action' => 'required|in:accept,delegate',
+            'delegate_user_id' => 'nullable|required_if:action,delegate|integer|exists:users,id',
+        ]);
+
+        $document = Document::whereIdentifier($id)->firstOrFail();
+        /** @var User $user */
+        $user = Auth::user();
+
+        $isDepartmentHead = $user->hasRole('head')
+            && $document->assigned_to === $user->department
+            && $document->assigned_user_id === null;
+        $isCurrentAssignee = $document->assigned_user_id === $user->id;
+
+        if (!$isDepartmentHead && !$isCurrentAssignee) {
+            return back()->with('error', 'คุณไม่ใช่ผู้รับมอบหมายปัจจุบันของเอกสารฉบับนี้');
+        }
+
+        if ($request->action === 'accept') {
+            $document->update([
+                'assigned_user_id' => $user->id,
+                'assignment_status' => 'accepted',
+                'assigned_at' => now(),
+                'acknowledged_at' => now(),
+                'acknowledged_by' => $user->id,
+            ]);
+
+            return back()->with('success', 'รับเรื่องไว้ดำเนินการเองเรียบร้อยแล้ว');
+        }
+
+        $delegate = User::whereKey($request->delegate_user_id)
+            ->where('department', $user->department)
+            ->where('id', '!=', $user->id)
+            ->first();
+
+        if (!$delegate) {
+            return back()->with('error', 'เลือกส่งต่อได้เฉพาะบุคลากรในฝ่ายเดียวกันเท่านั้น');
+        }
+
+        $document->update([
+            'assigned_user_id' => $delegate->id,
+            'delegated_by' => $user->id,
+            'assignment_status' => 'delegated',
+            'assigned_at' => now(),
+            'acknowledged_at' => null,
+            'acknowledged_by' => null,
+        ]);
+
+        app(NotificationDispatcher::class)->toUser(
+            $delegate,
+            "📨 มีเอกสารมอบหมายถึงคุณ\nเรื่อง: {$document->title}\nผู้มอบหมาย: {$user->name}\n\nเปิดดูเอกสาร:\n" . route('documents.show', $document->uuid ?? $document->id)
+        );
+
+        return back()->with('success', 'ส่งต่อเรื่องให้ ' . $delegate->name . ' เรียบร้อยแล้ว');
+    }
+
     public function generateDraft(Request $request)
     {
         $request->validate(['topic' => 'required|string']);
 
-        $apiKey = env('TYPHOON_API_KEY');
+        $apiKey = config('services.typhoon.api_key');
         
         if (!$apiKey) {
             return response()->json(['error' => 'ระบบติดต่อปัญญาประดิษฐ์ยังไม่พร้อมใช้งาน'], 500);
@@ -1438,7 +1553,7 @@ class DocumentController extends Controller
             $response = Http::withToken($apiKey)
                 ->timeout(60) 
                 ->post('https://api.opentyphoon.ai/v1/chat/completions', [
-                    'model' => 'typhoon-v2.5-30b-a3b-instruct', 
+                    'model' => config('services.typhoon.model'),
                     'messages' => [
                         ['role' => 'system', 'content' => $systemPrompt],
                         ['role' => 'user', 'content' => "หัวข้อที่ต้องการให้ร่าง: " . $request->topic]
@@ -1468,131 +1583,300 @@ class DocumentController extends Controller
     // 🌟 โซนฟังก์ชันสำหรับระบบ "เอกสารลับ" (ปลดล็อก และ ขอสิทธิ์)
     // =========================================================================
 
-    public function unlockSecret(Request $request, $id)
-    {
-        $request->validate(['pin' => 'required|digits:6']);
-       // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
-        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
-        
-        /** @var \App\Models\User $user */
-        $user = Auth::user();
-
-        $throttleKey = 'pin-unlock-attempts:' . $user->id;
-        if (\Illuminate\Support\Facades\RateLimiter::tooManyAttempts($throttleKey, 5)) {
-            $seconds = \Illuminate\Support\Facades\RateLimiter::availableIn($throttleKey);
-            return back()->with('error_pin', 'คุณกรอกรหัส PIN ผิดเกินกำหนด กรุณารออีก ' . $seconds . ' วินาที');
-        }
-
-        if (empty($user->pin)) {
-            return back()->with('error_signature', 'คุณยังไม่ได้ตั้งรหัส PIN! กรุณาตั้งค่าที่หน้าโปรไฟล์ก่อนเปิดเอกสารลับ');
-        }
-
-        if (!\Illuminate\Support\Facades\Hash::check($request->pin, $user->pin)) {
-            \Illuminate\Support\Facades\RateLimiter::hit($throttleKey, 60);
-            return back()->with('error_pin', 'รหัสผ่าน (PIN) ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
-        }
-
-        \Illuminate\Support\Facades\RateLimiter::clear($throttleKey);
-
-        // 🌟 ปลดล็อกสำเร็จ: บันทึก เวลา (Timestamp) ปัจจุบัน เพื่อเริ่มจับเวลา 3 นาที
-        session(['secret_unlocked_' . $document->id => now()->timestamp]);
-
-        // 🌟 เปลี่ยน Redirect กลับไปเป็น uuid 
-        return redirect()->route('documents.show', $document->uuid ?? $document->id);
-    }
-
-    public function requestAccess($id)
-    {
-        // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
-        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
-            ->where('uuid', $id)->orWhere('id', $id)->firstOrFail();
-        $user = Auth::user();
-
-        \App\Models\DocumentAccessRequest::updateOrCreate(
-            ['document_id' => $document->id, 'user_id' => $user->id],
-            ['status' => 'pending']
-        );
-
-        return back()->with('success', 'ส่งคำขอสิทธิ์การเข้าถึงเรียบร้อยแล้ว กรุณารอเจ้าของเรื่องหรือธุรการอนุมัติ');
-    }
-
-    public function approveAccess($requestId, $status)
-    {
-        $accessRequest = \App\Models\DocumentAccessRequest::findOrFail($requestId);
-        $document = Document::findOrFail($accessRequest->document_id);
-        
-        /** @var \App\Models\User $user */
-        $user = Auth::user();
-
-        // เช็คว่าคนกดอนุมัติ เป็น "เจ้าของเรื่อง" หรือ "ธุรการ" หรือไม่
-        if ($user->id !== $document->created_by && !$user->hasRole('saraban')) {
-            return back()->with('error', 'คุณไม่มีสิทธิ์จัดการคำขอของเอกสารนี้');
-        }
-
-        $accessRequest->update(['status' => $status]); // 'approved' หรือ 'rejected'
-
-        $msg = $status === 'approved' ? 'อนุมัติสิทธิ์สำเร็จ ผู้ขอสามารถเปิดดูเอกสารได้แล้ว' : 'ปฏิเสธคำขอสิทธิ์สำเร็จ';
-        return back()->with('success', $msg);
-    }
-
     // =========================================================================
     // 🌟 โซนฟังก์ชันสำหรับระบบแจ้งเตือนผ่าน LINE Messaging API (LINE Bot)
     // =========================================================================
     private function sendLineMessage($messageText, $document = null)
     {
-        $token = env('LINE_BOT_TOKEN');
-        $targetId = env('LINE_TARGET_ID'); // ไอดีแอดมิน (เอาไว้กันเหนียวถ้าหาใครไม่เจอ)
-        
-        // 🎯 ถ้าระบุเอกสารมาด้วย ให้บอทค้นหา LINE ID ของคนรับตามสถานะปัจจุบัน
-        if ($document) {
-            $foundLineId = null;
-
-            if ($document->status === 'WAITING_SUPERVISOR') {
-                // หา ผอ.กอง หรือ หัวหน้าส่วนราชการ (แผนกเดียวกับเจ้าของเรื่อง)
-                $creatorDept = $document->creator->department ?? '';
-                $head = \App\Models\User::role('head')->where('department', $creatorDept)->first();
-                $foundLineId = $head->line_id ?? null;
-            } 
-            elseif ($document->status === 'WAITING_PALAD') {
-                // หา ปลัด หรือ รองปลัด
-                $palad = \App\Models\User::role(['palad', 'deputy-palad'])->first();
-                $foundLineId = $palad->line_id ?? null;
-            } 
-            elseif ($document->status === 'WAITING_NAYOK') {
-                // หา นายก อบต.
-                $nayok = \App\Models\User::role('executive')->first();
-                $foundLineId = $nayok->line_id ?? null;
-            } 
-            elseif (in_array($document->status, ['WAITING_NUMBERING', 'WAITING_ADMIN'])) {
-                // หา ธุรการ (สารบรรณ)
-                $saraban = \App\Models\User::role('saraban')->first();
-                $foundLineId = $saraban->line_id ?? null;
-            }
-
-            // ถ้าเจอไอดีของคนที่ต้องพิจารณา ให้เปลี่ยนเป้าหมายการส่ง
-            if (!empty($foundLineId)) {
-                $targetId = $foundLineId;
-            }
-        }
-
-        if (empty($token) || empty($targetId)) {
+        if (!$document) {
             return;
         }
 
+        $line = app(LineMessagingService::class);
+        $document->loadMissing(['creator', 'routes.user']);
+
+        // Dynamic route has priority because it identifies the exact next reviewer.
+        $currentRoute = $document->routes
+            ->first(fn ($route) => $route->step_order == $document->current_step && $route->status === 'pending');
+        if ($currentRoute?->user) {
+            app(NotificationDispatcher::class)->toUser($currentRoute->user, $messageText);
+            return;
+        }
+
+        $recipients = match ($document->status) {
+            'WAITING_SUPERVISOR' => $line->usersWithRoles('head', $document->creator?->department),
+            'WAITING_PALAD' => $line->usersWithRoles(['palad', 'deputy-palad']),
+            'WAITING_NAYOK' => $line->usersWithRoles('executive'),
+            'WAITING_NUMBERING', 'WAITING_ADMIN' => $line->usersWithRoles('saraban'),
+            default => collect(),
+        };
+
+        app(NotificationDispatcher::class)->toUsers($recipients, $messageText);
+    }
+
+    // =========================================================================
+    // 🌟 โซน AI + OCR: ดึงข้อมูลจากไฟล์ PDF/รูปภาพ อัตโนมัติ (Auto-fill)
+    // =========================================================================
+    public function autoExtract(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240',
+        ]);
+
+        $file = $request->file('file');
+        $taskId = (string) Str::uuid();
+        $extension = strtolower($file->extension() ?: 'bin');
+        $path = $file->storeAs('document_extractions', $taskId.'.'.$extension, 'local');
+
+        if (! $path) {
+            return response()->json([
+                'success' => false,
+                'message' => 'ไม่สามารถเตรียมไฟล์สำหรับประมวลผลได้',
+            ], 500);
+        }
+
         try {
-            \Illuminate\Support\Facades\Http::withToken($token)
-                ->post('https://api.line.me/v2/bot/message/push', [
-                    'to' => $targetId,
-                    'messages' => [
-                        [
-                            'type' => 'text',
-                            'text' => $messageText
-                        ]
-                    ]
+            $task = DocumentExtractionTask::create([
+                'id' => $taskId,
+                'user_id' => $request->user()->id,
+                'file_path' => $path,
+                'original_name' => $file->getClientOriginalName(),
+                'status' => 'queued',
+            ]);
+
+            ProcessDocumentExtraction::dispatch($task->id);
+
+            return response()->json([
+                'success' => true,
+                'task_id' => $task->id,
+                'status' => $task->status,
+                'status_url' => route('documents.auto_extract_status', $task->id),
+            ], 202);
+        } catch (\Throwable $error) {
+            Storage::disk('local')->delete($path);
+            report($error);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'ไม่สามารถเริ่มงานสกัดข้อมูลเอกสารได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+            ], 500);
+        }
+    }
+
+    public function autoExtractStatus(Request $request, string $taskId)
+    {
+        $task = DocumentExtractionTask::findOrFail($taskId);
+
+        abort_unless(
+            $task->user_id === $request->user()->id || $request->user()->hasRole('super-admin'),
+            403
+        );
+
+        return response()->json([
+            'success' => true,
+            'task_id' => $task->id,
+            'status' => $task->status,
+            'data' => $task->status === 'completed' ? $task->result : null,
+            'message' => $task->status === 'failed' ? $task->error_message : null,
+        ]);
+    }
+
+    private function autoExtractLegacy(\Illuminate\Http\Request $request)
+    {
+        set_time_limit(600); // ขยายเวลาประมวลผลเป็น 10 นาที
+
+        $request->validate([
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240',
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $path = $file->storeAs('temp_extract', time() . '_' . $file->getClientOriginalName());
+            
+            // 🌟 1. ปรับสัญลักษณ์ Slash ให้เป็นสไตล์ Windows (\) ทั้งหมด ป้องกัน Path เพี้ยน
+            $fullPath = str_replace('/', '\\', storage_path('app\\' . $path));
+            $jsonOutputPath = $fullPath . '_result.json';
+            $scriptPath = base_path('extract_doc.py');
+
+            // 🌟 2. ตรวจสอบว่าไฟล์ Python สคริปต์วางถูกที่จริงๆ ไหม
+            if (!file_exists($scriptPath)) {
+                @unlink($fullPath);
+                return response()->json([
+                    'success' => false, 
+                    'message' => "หาไฟล์สคริปต์ไม่เจอ! พาร์ทที่ระบบกำลังค้นหา: " . $scriptPath
+                ], 500);
+            }
+
+            // ใช้ Process แยกแต่ละ argument ป้องกันปัญหาพาธ Windows และช่องว่างในชื่อไฟล์
+            // ใช้ Python ตัวเดียวกับ stamper.py ตามรูปแบบเดิม
+            $pythonCommand = config('services.document_extraction.python', 'python');
+            // PHP/Apache บางแบบไม่ส่ง SystemRoot ให้ child process ทำให้ Python
+            // โหลด asyncio/_overlapped ไม่ได้และเกิด WinError 10106
+            $systemRoot = getenv('SystemRoot') ?: getenv('SYSTEMROOT') ?: 'C:\\Windows';
+            // กำหนด home/cache ที่เขียนได้เสมอ เพราะ Apache บางแบบไม่มี USERPROFILE
+            // ทำให้ pathlib.Path.home() ของ Python/OCR ล้มเหลว
+            $pythonHome = storage_path('app/python_home');
+            $pythonTemp = storage_path('app/temp_extract/python_tmp');
+            $pythonAppData = $pythonHome . DIRECTORY_SEPARATOR . 'AppData';
+            File::ensureDirectoryExists($pythonHome);
+            File::ensureDirectoryExists($pythonTemp);
+            File::ensureDirectoryExists($pythonAppData . DIRECTORY_SEPARATOR . 'Roaming');
+            File::ensureDirectoryExists($pythonAppData . DIRECTORY_SEPARATOR . 'Local');
+            // Symfony Process บน Windows ใช้ TEMP ของ PHP parent สำหรับไฟล์ pipe
+            putenv('TEMP=' . $pythonTemp);
+            putenv('TMP=' . $pythonTemp);
+            $processEnvironment = [
+                'SystemRoot' => $systemRoot,
+                'SYSTEMROOT' => $systemRoot,
+                'windir' => $systemRoot,
+                'HOME' => $pythonHome,
+                'USERPROFILE' => $pythonHome,
+                'APPDATA' => $pythonAppData . DIRECTORY_SEPARATOR . 'Roaming',
+                'LOCALAPPDATA' => $pythonAppData . DIRECTORY_SEPARATOR . 'Local',
+                'TEMP' => $pythonTemp,
+                'TMP' => $pythonTemp,
+                'TORCH_COMPILE_DISABLE' => '1',
+                'TORCHDYNAMO_DISABLE' => '1',
+                'TORCH_CACHING_PRECOMPILE' => '0',
+                'TOKENIZERS_PARALLELISM' => 'false',
+                'PYTHONIOENCODING' => 'utf-8',
+                'PYTHONUTF8' => '1',
+                'PYTHONPATH' => false,
+                'PYTHONHOME' => false,
+                'VIRTUAL_ENV' => false,
+            ];
+
+            $runExtractor = function () use ($pythonCommand, $scriptPath, $fullPath, $jsonOutputPath, $processEnvironment) {
+                $process = new Process([
+                    $pythonCommand,
+                    $scriptPath,
+                    $fullPath,
+                    $jsonOutputPath,
+                ], base_path(), $processEnvironment);
+                $process->setTimeout(600);
+                $process->run();
+
+                return trim($process->getOutput() . PHP_EOL . $process->getErrorOutput());
+            };
+
+            // OCR ใช้ทรัพยากรสูง จึงป้องกันหลาย request ประมวลผลพร้อมกัน
+            $lockPath = storage_path('app/ocr-extract.lock');
+            $lockHandle = fopen($lockPath, 'c');
+            if (!$lockHandle || !flock($lockHandle, LOCK_EX)) {
+                throw new \RuntimeException('ไม่สามารถล็อกระบบประมวลผลเอกสารได้');
+            }
+
+            try {
+                $terminalOutput = $runExtractor();
+
+            } finally {
+                flock($lockHandle, LOCK_UN);
+                fclose($lockHandle);
+            }
+
+            // 🌟 4. ตรวจสอบไฟล์ผลลัพธ์ JSON
+            if (!file_exists($jsonOutputPath)) {
+                @unlink($fullPath);
+                return response()->json([
+                    'success' => false, 
+                    'message' => "ระบบ Python ขัดข้อง!\nPython: {$pythonCommand}\nไฟล์สคริปต์: {$scriptPath}\nข้อความตอบกลับ: " . ($terminalOutput ?: 'ไม่มีข้อความตอบกลับจากระบบ')
+                ], 500);
+            }
+
+            // อ่านผลลัพธ์จากไฟล์ JSON
+            $jsonContent = file_get_contents($jsonOutputPath);
+            $extractResult = json_decode($jsonContent, true);
+            
+            @unlink($fullPath);
+            @unlink($jsonOutputPath);
+
+            if (!is_array($extractResult)) {
+                return response()->json(['success' => false, 'message' => 'รูปแบบข้อมูลจาก Python ไม่ถูกต้อง'], 500);
+            }
+
+            if (isset($extractResult['status']) && $extractResult['status'] === 'error') {
+                $errMsg = is_array($extractResult['message']) ? json_encode($extractResult['message']) : ($extractResult['message'] ?? '');
+                return response()->json([
+                    'success' => false,
+                    'message' => "Python Error ({$pythonCommand}): " . $errMsg,
+                ], 500);
+            }
+
+            // ... (โค้ดก่อนหน้านี้เหมือนเดิม) ...
+            $markdownText = is_array($extractResult['text']) ? json_encode($extractResult['text']) : ($extractResult['text'] ?? '');
+
+            // ส่งข้อมูลต่อไปยัง OpenTyphoon AI
+            $prompt = "คุณคือ AI ผู้ช่วยงานสารบรรณ หน้าที่ของคุณคือดึงข้อมูลจากเอกสารราชการต่อไปนี้ และตอบกลับมาเป็น JSON เท่านั้น (ไม่ต้องมีคำอธิบายอื่น) โดยมีคีย์ดังนี้:\n{\n    \"doc_number\": \"ที่/เลขที่เอกสาร (ถ้าไม่มีให้ใส่ว่าง)\",\n    \"doc_date\": \"วันที่ในเอกสาร (แปลงเป็นรูปแบบ YYYY-MM-DD ค.ศ. เช่น 2024-05-20)\",\n    \"title\": \"เรื่องของเอกสาร\",\n    \"doc_from\": \"จาก (ชื่อหน่วยงานต้นทาง หรือชื่อบุคคลที่ส่งมา)\"\n}\n\nข้อความจากเอกสาร:\n" . $markdownText;
+
+            // ตรวจสอบว่ามีการตั้งค่า API Key หรือยัง
+            $apiKey = config('services.typhoon.api_key');
+            if (empty($apiKey)) {
+                return response()->json(['success' => false, 'message' => 'ยังไม่ได้ตั้งค่า TYPHOON_API_KEY ในไฟล์ .env ครับ'], 500);
+            }
+
+            $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
+                ->post(config('services.typhoon.endpoint'), [
+                    'model' => config('services.typhoon.model'),
+                    'messages' => [['role' => 'user', 'content' => $prompt]],
+                    'temperature' => 0.1,
                 ]);
+
+            if ($response->successful()) {
+                $aiContent = $response->json('choices.0.message.content');
+                if (is_array($aiContent)) $aiContent = json_encode($aiContent);
+                
+                $aiContent = preg_replace('/```json\s*(.*?)\s*```/s', '$1', (string)$aiContent);
+                $extractedData = json_decode(trim($aiContent), true);
+
+                if (!is_array($extractedData)) {
+                    return response()->json(['success' => false, 'message' => "AI ตอบข้อความมาผิดรูปแบบ ไม่ใช่ JSON:\n" . $aiContent], 500);
+                }
+
+                return response()->json(['success' => true, 'data' => $extractedData]);
+            }
+
+            $statusCode = $response->status();
+            report(new \RuntimeException('Typhoon API returned HTTP '.$statusCode));
+            
+            return response()->json([
+                'success' => false, 
+                'message' => 'ระบบ AI ไม่สามารถประมวลผลเอกสารได้ในขณะนี้'
+            ], 500);
+
         } catch (\Exception $e) {
-            // โยนทิ้งไปเลย ไม่ต้องแจ้ง Error หน้าเว็บ
+            if (isset($fullPath)) @unlink($fullPath);
+            if (isset($jsonOutputPath)) @unlink($jsonOutputPath);
+            
+            report($e);
+            return response()->json(['success' => false, 'message' => 'ไม่สามารถสกัดข้อมูลเอกสารได้ในขณะนี้'], 500);
+        }
+    
+    }
+
+    private function routeUsers()
+    {
+        return User::where('id', '!=', Auth::id())
+            ->orderBy('department')
+            ->orderBy('name')
+            ->get(['id', 'name', 'position', 'department']);
+    }
+
+    private function saveDocumentRoute(Document $document, array $userIds): void
+    {
+        DocumentRoute::create([
+            'document_id' => $document->id,
+            'user_id' => Auth::id(),
+            'step_order' => 1,
+            'status' => 'pending',
+        ]);
+
+        foreach (array_values($userIds) as $index => $userId) {
+            DocumentRoute::create([
+                'document_id' => $document->id,
+                'user_id' => $userId,
+                'step_order' => $index + 2,
+                'status' => 'pending',
+            ]);
         }
     }
 }

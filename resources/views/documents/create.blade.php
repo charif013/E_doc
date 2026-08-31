@@ -43,39 +43,11 @@
             
             <div class="card border-0 shadow-sm doc-paper-container" style="border-radius: 12px; overflow: hidden;">
                 
-                {{-- 🌟 Toolbar ด้านบนกระดาษ (เพิ่มชั้นความเร็ว/ชั้นความลับ) 🌟 --}}
+                {{-- แถบสถานะด้านบนกระดาษ --}}
                 <div class="bg-light border-bottom px-4 py-3">
-                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
-                        <div class="d-flex align-items-center gap-3 flex-wrap">
-                            <span class="badge bg-warning-subtle text-warning-emphasis border rounded-pill px-3 py-2 shadow-sm" style="font-size: 13px;">
-                                <i class="fas fa-pen me-1"></i> โหมดร่างเอกสาร
-                            </span>
-                            
-                            {{-- Dropdown ชั้นความเร็ว และ ความลับ --}}
-                            <div class="d-flex align-items-center gap-2 border-start ps-3 ms-1">
-                                <label class="fw-bold text-secondary small mb-0" style="font-family: sans-serif;">ชั้นความเร็ว:</label>
-                                <select name="doc_speed" class="form-select form-select-sm shadow-sm" style="width: 110px; border-radius: 8px;">
-                                    <option value="ปกติ">ปกติ</option>
-                                    <option value="ด่วน">ด่วน</option>
-                                    <option value="ด่วนมาก">ด่วนมาก</option>
-                                    <option value="ด่วนที่สุด">ด่วนที่สุด</option>
-                                </select>
-                            </div>
-                            <div class="d-flex align-items-center gap-2">
-                                <label class="fw-bold text-secondary small mb-0" style="font-family: sans-serif;">ชั้นความลับ:</label>
-                                <select name="doc_secret" id="doc_secret" class="form-select form-select-sm shadow-sm text-dark" style="width: 150px; border-radius: 8px; transition: 0.3s;">
-                                    <option value="ไม่มีชั้นความลับ">ไม่มีชั้นความลับ</option>
-                                    <option value="ลับ">ลับ</option>
-                                    <option value="ลับมาก">ลับมาก</option>
-                                    <option value="ลับที่สุด">ลับที่สุด</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold shadow-sm" style="background-color: var(--primary);">
-                            <i class="fas fa-save me-2"></i>บันทึกร่างและดำเนินการต่อ
-                        </button>
-                    </div>
+                    <span class="badge bg-warning-subtle text-warning-emphasis border rounded-pill px-3 py-2 shadow-sm" style="font-size: 13px;">
+                        <i class="fas fa-pen me-1"></i> โหมดร่างเอกสาร
+                    </span>
                 </div>
 
                 <div class="card-body p-4 p-md-5 bg-white doc-paper">
@@ -202,6 +174,53 @@
                         </div>
                     </div>
 
+                </div>
+            </div>
+
+            {{-- เลือกเส้นทางหลังกรอกเนื้อหา เพื่อจัดลำดับผู้รับได้สะดวก --}}
+            <div class="mt-4">
+                @include('documents.partials.route_selector')
+            </div>
+
+            {{-- ตั้งค่าการส่งและปุ่มดำเนินการ อยู่ท้ายฟอร์มตามลำดับการใช้งาน --}}
+            <div class="card border-0 shadow-sm mb-4 submission-settings" style="border-radius: 14px;">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="rounded-circle bg-primary-subtle text-primary d-flex align-items-center justify-content-center me-2" style="width: 34px; height: 34px;">
+                            <i class="fas fa-sliders-h"></i>
+                        </div>
+                        <div>
+                            <h6 class="fw-bold mb-0">ระดับความเร็วและความลับ</h6>
+                            <small class="text-muted">ตรวจสอบค่าก่อนส่งเอกสารเข้าสู่เส้นทางพิจารณา</small>
+                        </div>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="doc_speed" class="form-label fw-bold text-secondary small">ชั้นความเร็ว</label>
+                            <select name="doc_speed" id="doc_speed" class="form-select shadow-sm">
+                                <option value="ปกติ" {{ old('doc_speed') === 'ปกติ' ? 'selected' : '' }}>ปกติ</option>
+                                <option value="ด่วน" {{ old('doc_speed') === 'ด่วน' ? 'selected' : '' }}>ด่วน</option>
+                                <option value="ด่วนมาก" {{ old('doc_speed') === 'ด่วนมาก' ? 'selected' : '' }}>ด่วนมาก</option>
+                                <option value="ด่วนที่สุด" {{ old('doc_speed') === 'ด่วนที่สุด' ? 'selected' : '' }}>ด่วนที่สุด</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="doc_secret" class="form-label fw-bold text-secondary small">ชั้นความลับ</label>
+                            <select name="doc_secret" id="doc_secret" class="form-select shadow-sm text-dark" style="transition: 0.3s;">
+                                <option value="ไม่มีชั้นความลับ" {{ old('doc_secret') === 'ไม่มีชั้นความลับ' ? 'selected' : '' }}>ไม่มีชั้นความลับ</option>
+                                <option value="ลับ" {{ old('doc_secret') === 'ลับ' ? 'selected' : '' }}>ลับ</option>
+                                <option value="ลับมาก" {{ old('doc_secret') === 'ลับมาก' ? 'selected' : '' }}>ลับมาก</option>
+                                <option value="ลับที่สุด" {{ old('doc_secret') === 'ลับที่สุด' ? 'selected' : '' }}>ลับที่สุด</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-end mt-4 pt-3 border-top">
+                        <button type="submit" class="btn btn-primary rounded-pill px-5 py-2 fw-bold shadow-sm" style="background-color: var(--primary);">
+                            <i class="fas fa-save me-2"></i>บันทึกร่างและดำเนินการต่อ
+                        </button>
+                    </div>
                 </div>
             </div>
         </form>

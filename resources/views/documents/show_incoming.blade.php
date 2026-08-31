@@ -32,7 +32,7 @@
         @php
             $user = auth()->user();
             
-            $isReviewer = (
+            $isReviewer = (isset($canApprove) && $canApprove) || (
                 ($user->hasRole('saraban') && in_array($document->status, ['WAITING_ADMIN', 'WAITING_NUMBERING'])) ||
                 ($user->hasRole('head')      && $document->status === 'WAITING_SUPERVISOR') ||
                 ($user->hasAnyRole(['palad', 'deputy-palad']) && $document->status === 'WAITING_PALAD') ||
@@ -100,45 +100,39 @@
             </div>
         @endif
 
-        {{-- 🌟 ส่วนแจ้งเตือนสำหรับ ผอ.กอง ให้กด "รับทราบคำสั่ง" --}}
-        @if($document->status === 'APPROVED' && $document->assigned_to === $user->department && $user->hasRole('head'))
-            <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius: 12px; background: {{ $document->acknowledged_at ? '#f0fdf4' : '#e0f2fe' }}; border: 1px solid {{ $document->acknowledged_at ? '#bbf7d0' : '#bae6fd' }}; border-left: 5px solid {{ $document->acknowledged_at ? '#16a34a' : '#0284c7' }} !important;">
-                <div class="card-body p-4 d-flex justify-content-between align-items-center flex-wrap gap-3">
-                    <div>
-                        <h5 class="fw-bold text-dark mb-1">
-                            @if($document->acknowledged_at)
-                                <i class="fas fa-check-double text-success me-2"></i>รับทราบคำสั่งเรียบร้อยแล้ว
-                            @else
-                                <i class="fas fa-bell text-primary me-2"></i>หนังสือสั่งการถึง: {{ $user->department }}
-                            @endif
-                        </h5>
-                        
-                        @if($document->acknowledged_at)
-                            <p class="mb-0 text-muted small">
-                                ผู้รับทราบ: <strong>{{ $document->acknowledger->name ?? 'ไม่ทราบชื่อ' }}</strong><br>
-                                เวลาที่บันทึก: {{ \Carbon\Carbon::parse($document->acknowledged_at)->addYears(543)->format('d/m/Y H:i') }} น.
-                            </p>
-                        @else
-                            <p class="mb-0 text-muted small">นายกฯ อบต. / ปลัด อบต. ได้มอบหมายหนังสือฉบับนี้ให้กองของคุณดำเนินการ กรุณากดรับทราบเพื่อยืนยันการรับเรื่อง</p>
+        @php
+            $canHandleAssignment = $document->assigned_user_id === $user->id
+                || ($user->hasRole('head') && !$document->assigned_user_id && $document->assigned_to === $user->department);
+            $departmentUsers = $canHandleAssignment
+                ? \App\Models\User::where('department', $user->department)->where('id', '!=', $user->id)->orderBy('name')->get()
+                : collect();
+        @endphp
+        @if($document->status === 'APPROVED' && $canHandleAssignment && $document->assignment_status !== 'accepted')
+            <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius:12px;border-left:5px solid #0284c7 !important">
+                <div class="card-body p-4">
+                    <h5 class="fw-bold"><i class="fas fa-tasks text-primary me-2"></i>งานที่นายกมอบหมายให้ {{ $document->assigned_to }}</h5>
+                    <p class="text-muted small">เลือกรับดำเนินการด้วยตนเอง หรือส่งต่อให้บุคลากรในฝ่ายเดียวกัน</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST">
+                            @csrf
+                            <input type="hidden" name="action" value="accept">
+                            <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold"><i class="fas fa-check me-1"></i>รับดำเนินการเอง</button>
+                        </form>
+                        @if($departmentUsers->isNotEmpty())
+                        <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST" class="d-flex gap-2 flex-grow-1">
+                            @csrf
+                            <input type="hidden" name="action" value="delegate">
+                            <select name="delegate_user_id" class="form-select" required>
+                                <option value="">เลือกบุคลากรในฝ่าย...</option>
+                                @foreach($departmentUsers as $departmentUser)
+                                    <option value="{{ $departmentUser->id }}">{{ $departmentUser->name }}{{ $departmentUser->position ? ' — '.$departmentUser->position : '' }}</option>
+                                @endforeach
+                            </select>
+                            <button type="submit" class="btn btn-primary text-nowrap"><i class="fas fa-share me-1"></i>ส่งต่อ</button>
+                        </form>
                         @endif
                     </div>
-                    
-                    @if(!$document->acknowledged_at)
-                        <form action="{{ route('documents.acknowledge', $document->uuid ?? $document->id) }}" method="POST" class="m-0">
-                            @csrf
-                            <button type="button" class="btn btn-primary rounded-pill fw-bold px-4 shadow-sm" onclick="confirmAcknowledge(this)">
-                                <i class="fas fa-check-circle me-2"></i>กดรับทราบคำสั่ง
-                            </button>
-                        </form>
-                    @endif
                 </div>
-            </div>
-        @endif
-
-        {{-- 🌟 โหลดกล่องพิจารณา (Review Box) สำหรับหนังสือรับเข้าโดยเฉพาะ --}}
-        @if($isReviewer)
-            <div class="no-print mb-4">
-                @include('documents.partials.review_box_incoming')
             </div>
         @endif
 
@@ -212,7 +206,7 @@
                 {{-- ข้อมูลทั่วไป (หนังสือรับเข้า) --}}
                 @php
                     $infoRows = [
-                        [['เลขที่รับ',$document->receive_number??'-',false], ['วันที่รับ',$document->receive_date?\Carbon\Carbon::parse($document->receive_date)->addYears(543)->format('d/m/Y'):'-',false], ['ลงวันที่บนเอกสาร',$document->doc_date?\Carbon\Carbon::parse($document->doc_date)->addYears(543)->format('d/m/Y'):'-',false], ['ประเภทหนังสือ',$document->doc_type_category??'-',true]],
+                        [['เลขที่รับ',$document->formatted_receive_number??'-',false], ['วันที่รับ',$document->receive_date?\Carbon\Carbon::parse($document->receive_date)->addYears(543)->format('d/m/Y'):'-',false], ['ลงวันที่บนเอกสาร',$document->doc_date?\Carbon\Carbon::parse($document->doc_date)->addYears(543)->format('d/m/Y'):'-',false], ['ประเภทหนังสือ',$document->doc_type_category??'-',true]],
                         [['จาก (หน่วยงาน/บุคคล)',$document->doc_from??'-',false,'2'], ['ชั้นความเร็ว',$document->doc_speed??'ปกติ',false], ['ชั้นความลับ',$document->doc_secret??'ไม่มีชั้นความลับ',false]],
                     ];
                 @endphp
@@ -272,6 +266,63 @@
                             </div>
                         @endif
 
+                        @if($document->external_url)
+                            <hr class="my-4 no-print" style="border-color:#cbd5e1;">
+                            <div class="bg-white border rounded-3 p-3 p-md-4 no-print">
+                                <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+                                    <div>
+                                        <div class="fw-bold" style="color:var(--primary-dark);">
+                                            <i class="fas fa-qrcode me-2 text-success"></i>เอกสารสิ่งที่ส่งมาด้วยจาก QR Code
+                                        </div>
+                                        <div class="small text-muted mt-1">เก็บลิงก์ต้นฉบับไว้สำหรับตรวจสอบย้อนหลัง</div>
+                                    </div>
+                                    <a href="{{ $document->external_url }}" target="_blank" rel="noopener noreferrer"
+                                       class="btn btn-sm btn-outline-success rounded-pill fw-bold px-3">
+                                        <i class="fas fa-up-right-from-square me-1"></i>เปิดลิงก์ต้นฉบับ
+                                    </a>
+                                </div>
+
+                                @if($document->external_attachment_path)
+                                    @php
+                                        $qrArchiveUrl = asset('storage/' . $document->external_attachment_path);
+                                        $qrIsImage = str_starts_with((string) $document->external_mime_type, 'image/');
+                                        $qrIsPdf = $document->external_mime_type === 'application/pdf';
+                                    @endphp
+
+                                    @if($qrIsImage)
+                                        <div class="text-center rounded-3 border bg-light p-2">
+                                            <img src="{{ $qrArchiveUrl }}" alt="เอกสารจาก QR Code" style="max-width:100%;max-height:800px;object-fit:contain;">
+                                        </div>
+                                    @elseif($qrIsPdf)
+                                        <div class="ratio ratio-16x9 rounded-3 overflow-hidden shadow-sm border">
+                                            <iframe src="{{ $qrArchiveUrl }}" title="เอกสารจาก QR Code"></iframe>
+                                        </div>
+                                    @else
+                                        <div class="alert alert-info mb-3">
+                                            ระบบเก็บสำเนาไฟล์แล้ว แต่ไฟล์ชนิดนี้ไม่รองรับการแสดงตัวอย่างในเบราว์เซอร์
+                                        </div>
+                                    @endif
+
+                                    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mt-3">
+                                        <div class="small text-muted">
+                                            <div><strong>ไฟล์:</strong> {{ $document->external_original_name ?: basename($document->external_attachment_path) }}</div>
+                                            <div><strong>เก็บเมื่อ:</strong> {{ optional($document->external_downloaded_at)->locale('th')->translatedFormat('d M Y H:i') }}</div>
+                                            <div><strong>ขนาด:</strong> {{ number_format(($document->external_file_size ?? 0) / 1048576, 2) }} MB</div>
+                                            <div class="text-break"><strong>SHA-256:</strong> <code>{{ $document->external_sha256 }}</code></div>
+                                        </div>
+                                        <a href="{{ $qrArchiveUrl }}" target="_blank" class="btn btn-primary rounded-pill fw-bold px-4">
+                                            <i class="fas fa-file-arrow-down me-1"></i>เปิดสำเนาที่เก็บในระบบ
+                                        </a>
+                                    </div>
+                                @else
+                                    <div class="alert alert-warning mb-0">
+                                        <div class="fw-bold"><i class="fas fa-triangle-exclamation me-1"></i>ยังเก็บสำเนาจากลิงก์ไม่ได้</div>
+                                        <div class="small mt-1">{{ $document->external_download_error ?: 'ลิงก์อาจต้องเข้าสู่ระบบหรือไม่ใช่ลิงก์ดาวน์โหลดไฟล์โดยตรง' }}</div>
+                                    </div>
+                                @endif
+                            </div>
+                        @endif
+
                         @if(($document->status === 'DRAFT' || $document->status === 'REJECTED') && $document->created_by === auth()->id())
                             <hr class="my-4 no-print" style="border-color: #cbd5e1;">
                             <div class="bg-white p-3 rounded-3 border shadow-sm no-print">
@@ -307,35 +358,13 @@
                 </div>
                 @endif
 
-                {{-- Signature Track (กล่องแนวนอน 4 ช่อง) --}}
-                <div class="page-break-inside-avoid no-print">
-                    <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom">
-                        <span style="width:4px;height:18px;background:var(--accent-green);border-radius:4px;display:inline-block;"></span>
-                        <span style="font-size:14px;font-weight:700;color:var(--primary-dark);">เส้นทางเดินเอกสารและการลงนามสั่งการ</span>
+                @include('documents.partials.dynamic_route_track')
+
+                @if($isReviewer)
+                    <div class="no-print mt-4 mb-4">
+                        @include('documents.partials.review_box_incoming')
                     </div>
-                    <div class="row g-3">
-                        @foreach($sigSteps as $i => $s)
-                        <div class="col-12 col-md-6 col-lg-3">
-                            <div class="rounded-3 p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center shadow-sm print-sig-box"
-                                 style="border:1px solid {{ $s['sig'] ? '#bbf7d0' : '#e2e8f0' }}; border-top:3px solid {{ $s['sig'] ? 'var(--accent-green)' : '#cbd5e1' }}; background:{{ $s['sig'] ? '#f0fdf4' : '#f8fafc' }}; min-height:180px; transition: 0.3s;">
-                                <div class="mb-2 rounded-circle d-flex align-items-center justify-content-center fw-bold no-print" 
-                                     style="width:28px;height:28px;background:{{ $s['sig'] ? 'var(--accent-green)' : '#e2e8f0' }};color:{{ $s['sig'] ? '#fff' : '#64748b' }};font-size:13px;">{{ $i+1 }}</div>
-                                <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">{{ $s['label'] }}</div>
-                                
-                                @if($s['sig'])
-                                    <img src="{{ getSigUrl($s['sig']) }}" style="max-height:55px;mix-blend-mode:multiply;margin-bottom:6px;" alt="ลายเซ็น">
-                                    <div style="font-size:13px;font-weight:700;color:var(--text-primary);">{{ $s['name'] }}</div>
-                                    <div style="font-size:12px;color:var(--text-muted);">{{ $s['pos'] }}</div>
-                                    <div class="mt-2 rounded-pill px-2 fw-bold shadow-sm no-print" style="font-size:10px;background:#fff;border:1px solid #d1fae5;color:var(--accent-green);padding:3px 8px;"><i class="far fa-clock me-1"></i>{{ $s['at'] }}</div>
-                                @else
-                                    <i class="fas {{ $s['icon'] }} mb-2 mt-2 no-print" style="font-size:24px;color:#cbd5e1;"></i>
-                                    <div class="no-print" style="font-size:13px;color:#94a3b8;font-weight:600;">รอการพิจารณา</div>
-                                @endif
-                            </div>
-                        </div>
-                        @endforeach
-                    </div>
-                </div>
+                @endif
 
             </div>
         </div>

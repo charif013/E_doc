@@ -6,7 +6,12 @@ use Illuminate\Http\Request;
 use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\User;
+use App\Models\Document;
+use App\Models\Holiday;
 use Illuminate\Support\Facades\Auth;
+use App\Services\NotificationDispatcher;
+use App\Services\RoomBookingService;
+use App\Http\Requests\StoreRoomBookingRequest;
 
 class RoomBookingController extends Controller
 {
@@ -14,8 +19,9 @@ class RoomBookingController extends Controller
     public function index()
     {
         // ดึงข้อมูลการจองทั้งหมดมาแสดง พร้อมข้อมูลห้องและคนจอง
-        $bookings = RoomBooking::with(['room', 'creator', 'invitees'])->latest()->get();
-        return view('bookings.index', compact('bookings'));
+        $bookings = RoomBooking::with(['room', 'creator', 'invitees', 'document'])->latest()->get();
+        $holidays = Holiday::orderBy('holiday_date')->get(['holiday_date', 'name']);
+        return view('bookings.index', compact('bookings', 'holidays'));
     }
 
     // หน้าฟอร์มสำหรับสร้างการจอง / นัดประชุม
@@ -25,58 +31,101 @@ class RoomBookingController extends Controller
         $rooms = Room::where('status', 'active')->get();
         // ดึงรายชื่อพนักงานทั้งหมด (ยกเว้นตัวเอง) เพื่อเอาไว้เชิญเข้าประชุม
         $users = User::where('id', '!=', Auth::id())->get(); 
-        
-        return view('bookings.create', compact('rooms', 'users'));
+
+        $assignedDocuments = $this->assignedDocumentsFor(Auth::user())->get();
+        $holidays = Holiday::orderBy('holiday_date')->get(['holiday_date', 'name']);
+
+        return view('bookings.create', compact('rooms', 'users', 'assignedDocuments', 'holidays'));
     }
 
     // ฟังก์ชันรับข้อมูลจากฟอร์มและบันทึกลงฐานข้อมูล
-    public function store(Request $request)
+    public function store(StoreRoomBookingRequest $request, RoomBookingService $bookings, NotificationDispatcher $notifications)
     {
         // 1. ตรวจสอบความถูกต้องของข้อมูลที่ส่งมา
-        $request->validate([
-            'title' => 'required|string|max:255',
-            'room_id' => 'required|exists:rooms,id',
-            'start_time' => 'required|date',
-            'end_time' => 'required|date|after:start_time',
-            'booking_type' => 'required|in:meeting,general_use,maintenance',
-            'invitees' => 'nullable|array', // รายชื่อคนถูกเชิญ (มีหรือไม่มีก็ได้)
-            'invitees.*' => 'exists:users,id'
-        ]);
+        $data = $request->validated();
 
-        // 🌟 2. ด่านตรวจสำคัญ: เช็คว่าห้องว่างไหม? (ห้ามเวลาทับซ้อนกัน)
-        $isRoomBooked = RoomBooking::where('room_id', $request->room_id)
-            ->where(function ($query) use ($request) {
-                $query->where('start_time', '<', $request->end_time)
-                      ->where('end_time', '>', $request->start_time);
-            })->exists();
+        if ($request->filled('document_id')) {
+            $canAttach = $this->assignedDocumentsFor(Auth::user())
+                ->whereKey($request->document_id)
+                ->exists();
 
-        if ($isRoomBooked) {
-            return back()->with('error', '❌ ห้องประชุมนี้ถูกจองแล้วในช่วงเวลาดังกล่าว กรุณาเลือกเวลาหรือห้องอื่นครับ')
-                         ->withInput();
+            if (!$canAttach) {
+                return back()->withErrors(['document_id' => 'แนบได้เฉพาะเอกสารที่คุณได้รับมอบหมายเท่านั้น'])->withInput();
+            }
         }
 
-        // 3. ถ้าห้องว่าง -> บันทึกการจอง
-        $booking = new RoomBooking();
-        $booking->title = $request->title;
-        $booking->booking_type = $request->booking_type;
-        $booking->description = $request->description;
-        $booking->room_id = $request->room_id;
-        $booking->start_time = $request->start_time;
-        $booking->end_time = $request->end_time;
-        $booking->created_by = Auth::id();
-        $booking->save();
+        $booking = $bookings->create($data, Auth::user());
 
-        // 🌟 4. ถ้าเป็นการ "นัดประชุม" และมีการเลือกคนเชิญ -> บันทึกรายชื่อคนลงตาราง pivot
-        if ($request->booking_type === 'meeting' && $request->has('invitees')) {
-            // แก้จาก attendees() เป็น invitees() ให้ตรงกับใน Model ครับ
-            $booking->invitees()->attach($request->invitees); 
+        $booking->load(['room', 'creator', 'invitees']);
+        if ($booking->booking_type === 'meeting') {
+            $message = "📅 ขอเชิญเข้าร่วมประชุม\nเรื่อง: {$booking->title}\nห้อง: " . $booking->room_display_name
+                . "\nเริ่ม: " . $booking->start_time->format('d/m/Y H:i')
+                . "\nสิ้นสุด: " . $booking->end_time->format('d/m/Y H:i')
+                . "\nผู้เชิญ: " . ($booking->creator?->name ?: '-')
+                . "\n\nดูรายละเอียดการประชุม:\n" . route('bookings.index');
+            $notifications->toUsers($booking->invitees, $message);
         }
 
         return redirect()->route('bookings.index')->with('success', '✅ บันทึกการจองห้อง / นัดประชุมเรียบร้อยแล้ว!');
     }
 
+    public function rooms()
+    {
+        $rooms = Room::orderByDesc('status')->orderBy('name')->get();
+        return view('bookings.rooms', compact('rooms'));
+    }
+
+    public function storeRoom(Request $request)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:255|unique:rooms,name',
+            'capacity' => 'nullable|integer|min:1|max:1000',
+            'status' => 'required|in:active,inactive',
+        ]);
+
+        Room::create($data);
+        return back()->with('success', 'เพิ่มห้องประชุมเรียบร้อยแล้ว');
+    }
+
+    public function updateRoom(Request $request, Room $room)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:255|unique:rooms,name,' . $room->id,
+            'capacity' => 'nullable|integer|min:1|max:1000',
+            'status' => 'required|in:active,inactive',
+        ]);
+
+        $room->update($data);
+        return back()->with('success', 'แก้ไขห้องประชุมเรียบร้อยแล้ว');
+    }
+
+    public function destroyRoom(Room $room)
+    {
+        $room->update(['status' => 'inactive']);
+        $room->delete();
+
+        return back()->with('success', 'ปิดใช้งานและเก็บห้องประชุมไว้ในประวัติเรียบร้อยแล้ว');
+    }
+
+    private function assignedDocumentsFor(User $user)
+    {
+        return Document::where('status', 'APPROVED')
+            ->where(function ($query) use ($user) {
+                $query->where('created_by', $user->id)
+                    ->orWhere('assigned_user_id', $user->id);
+
+                if ($user->hasRole('head')) {
+                    $query->orWhere(function ($headQuery) use ($user) {
+                        $headQuery->where('assigned_to', $user->department)
+                            ->whereNull('assigned_user_id');
+                    });
+                }
+            })
+            ->orderByDesc('assigned_at');
+    }
+
    // ฟังก์ชันสำหรับยกเลิกการจองห้อง
-    public function destroy($id)
+    public function destroy($id, NotificationDispatcher $notifications)
     {
         $booking = RoomBooking::findOrFail($id);
 
@@ -84,10 +133,14 @@ class RoomBookingController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
-        // ด่านตรวจความปลอดภัย: เช็คสิทธิ์คนลบ
-        // อนุญาตเฉพาะ "เจ้าของการจอง" หรือ "ผู้ดูแลระบบ (super-admin)" เท่านั้น
-        if ($booking->created_by !== $user->id && !$user->hasRole('super-admin')) {
-            return back()->with('error', '❌ ไม่อนุญาต! คุณสามารถยกเลิกได้เฉพาะรายการที่คุณเป็นผู้จองเท่านั้นครับ');
+        $this->authorize('delete', $booking);
+
+        $booking->load(['room', 'creator', 'invitees']);
+        if ($booking->booking_type === 'meeting') {
+            $message = "❌ ยกเลิกการประชุม\nเรื่อง: {$booking->title}\nห้อง: " . $booking->room_display_name
+                . "\nกำหนดเดิม: " . $booking->start_time->format('d/m/Y H:i')
+                . "\nผู้ยกเลิก: {$user->name}";
+            $notifications->toUsers($booking->invitees, $message);
         }
 
         // ถ้าระบบจำคนเชิญไว้ (ใน Pivot Table) มันจะถูกลบอัตโนมัติตามที่เราตั้งค่า Cascade ไว้ตอนสร้างตารางครับ

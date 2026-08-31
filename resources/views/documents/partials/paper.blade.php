@@ -38,14 +38,9 @@
 
     {{-- 3. ที่ และ วันที่ --}}
     @php
-        $dept = $document->creator->department ?? '';
-        $prefix = 'ยล ๕๔๒๐๑';
-        if (str_contains($dept, 'คลัง')) { $prefix = 'ยล ๕๔๒๐๒'; } 
-        elseif (str_contains($dept, 'ช่าง')) { $prefix = 'ยล ๕๔๒๐๓'; } 
-        elseif (str_contains($dept, 'ศึกษา')) { $prefix = 'ยล ๕๔๒๐๔'; } 
-        elseif (str_contains($dept, 'สาธารณสุข')) { $prefix = 'ยล ๕๔๒๐๕'; }
-
-        $displayDocNumber = $document->doc_number ? toThaiNum($document->doc_number) : $prefix . '/....................';
+        $displayDocNumber = $document->running_number
+            ? 'ยล 77301/' . toThaiNum($document->running_number)
+            : 'ยล 77301/....................';
     @endphp
 
     <div style="margin-bottom: 8px; display: block; width: 100%;">
@@ -88,7 +83,7 @@
     <div style="font-size: 16pt; margin-top: 1.5em;">
         
         {{-- ผู้เสนอเรื่อง/ผู้รายงาน --}}
-        <div style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px;">
+        <div class="document-signature-block" style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px;">
             <div style="display: block; width: 50%; margin-left: 50%; text-align: center;">
                 <div style="margin-bottom: 5px; white-space: nowrap;">
                     <span style="font-size: 16pt; display: inline-block; vertical-align: bottom; margin-right: 8px;">(ลงชื่อ)</span>
@@ -103,9 +98,42 @@
             </div>
         </div>
 
+        @php
+            $dynamicReviewRoutes = $document->relationLoaded('routes')
+                ? $document->routes->where('step_order', '>', 1)->sortBy('step_order')
+                : collect();
+            $approvedDynamicRoutes = $dynamicReviewRoutes->where('status', 'approved');
+        @endphp
+
+        @if($dynamicReviewRoutes->isNotEmpty())
+            {{-- ลายเซ็นผู้พิจารณาจากเส้นทางที่ผู้สร้างเลือกจริง --}}
+            @foreach($approvedDynamicRoutes as $routeIndex => $approvalRoute)
+                <div class="document-signature-block" style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
+                    <div style="font-size: 16pt; font-weight: bold; margin-bottom: 10px;">
+                        ความเห็นผู้พิจารณาลำดับที่ {{ $loop->iteration }}
+                    </div>
+                    <div style="border-bottom: 1px dotted #555; min-height: 28px; width: 85%; color: #000; font-size: 16pt; margin-bottom: 15px; padding-left: 10px;">
+                        {{ toThaiNum($approvalRoute->comment ?: 'พิจารณาเห็นชอบ') }}
+                    </div>
+
+                    <div style="display: block; width: 50%; margin-left: 50%; text-align: center;">
+                        <div style="margin-bottom: 5px; white-space: nowrap;">
+                            <span style="font-size: 16pt; display: inline-block; vertical-align: bottom; margin-right: 8px;">(ลงชื่อ)</span>
+                            <div style="display: inline-block; border-bottom: 1px dotted #000; width: 180px; position: relative; height: 30px; vertical-align: bottom;">
+                                @if(!empty($approvalRoute->user?->signature))
+                                    <img src="{{ getSigUrl($approvalRoute->user->signature) }}" style="max-height: 50px; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); mix-blend-mode: multiply; page-break-inside: avoid;">
+                                @endif
+                            </div>
+                        </div>
+                        <div style="margin-top: 5px;">( {{ $approvalRoute->user->name ?? '......................................................' }} )</div>
+                        <div>{{ $approvalRoute->user->position ?? 'ผู้พิจารณา' }}</div>
+                    </div>
+                </div>
+            @endforeach
+        @else
         {{-- ความเห็นหัวหน้าสำนักปลัด --}}
         @if($document->supervisor_signature || in_array($document->status, ['WAITING_SUPERVISOR', 'WAITING_PALAD', 'WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED', 'REJECTED']))
-        <div style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
+        <div class="document-signature-block" style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
             <div style="font-size: 16pt; font-weight: bold; margin-bottom: 10px;">ความเห็นหัวหน้าสำนักปลัด/ผอ.กอง</div>
             <div style="border-bottom: 1px dotted #555; min-height: 28px; width: 85%; color: #000; font-size: 16pt; margin-bottom: 15px; padding-left: 10px;">
                 {{ toThaiNum($document->supervisor_comment ?? ($document->supervisor_signature ? 'ทราบ / เพื่อโปรดพิจารณาอนุมัติ' : '')) }}
@@ -128,7 +156,7 @@
 
         {{-- ความเห็นปลัด --}}
         @if($document->palad_signature || in_array($document->status, ['WAITING_PALAD', 'WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED']))
-        <div style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
+        <div class="document-signature-block" style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
             <div style="font-size: 16pt; font-weight: bold; margin-bottom: 10px;">ความเห็นปลัดองค์การบริหารส่วนตำบลพร่อน</div>
             <div style="border-bottom: 1px dotted #555; min-height: 28px; width: 85%; color: #000; font-size: 16pt; margin-bottom: 15px; padding-left: 10px;">
                 {{ toThaiNum($document->palad_comment ?? ($document->palad_signature ? 'ทราบ / เพื่อโปรดพิจารณาอนุมัติ' : '')) }}
@@ -151,7 +179,7 @@
 
         {{-- คำสั่งนายก --}}
         @if($document->nayok_signature || in_array($document->status, ['WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED']))
-        <div style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
+        <div class="document-signature-block" style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
             <div style="font-size: 16pt; font-weight: bold; margin-bottom: 10px;">คำสั่งนายกองค์การบริหารส่วนตำบลพร่อน</div>
             
             <div style="margin-bottom: 15px; padding-left: 10px; display: block;">
@@ -178,5 +206,69 @@
         </div>
         @endif
 
+        @endif {{-- จบการแยกระหว่างเส้นทางไดนามิกกับระบบตำแหน่งเดิม --}}
+
     </div>
 </div>
+
+<style>
+    .document-signature-block {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    @media print {
+        .document-page-spacer {
+            display: none !important;
+        }
+    }
+</style>
+
+<script>
+    (() => {
+        const keepSignatureBlocksOnOnePreviewPage = () => {
+            document.querySelectorAll('.doc-paper').forEach((paper) => {
+                paper.querySelectorAll('.document-page-spacer').forEach((spacer) => spacer.remove());
+
+                const paperWidth = paper.getBoundingClientRect().width;
+                if (!paperWidth) return;
+
+                const millimetre = paperWidth / 210;
+                const pageHeight = 297 * millimetre;
+                const topMargin = 20 * millimetre;
+                const bottomMargin = 15 * millimetre;
+                const paperTop = paper.getBoundingClientRect().top;
+
+                paper.querySelectorAll('.document-signature-block').forEach((block) => {
+                    const rect = block.getBoundingClientRect();
+                    const blockTop = rect.top - paperTop;
+                    const blockBottom = rect.bottom - paperTop;
+                    const nextPageBoundary = (Math.floor(blockTop / pageHeight) + 1) * pageHeight;
+
+                    if (blockBottom > nextPageBoundary - bottomMargin) {
+                        const spacer = document.createElement('div');
+                        spacer.className = 'document-page-spacer';
+                        spacer.setAttribute('aria-hidden', 'true');
+                        spacer.style.height = `${Math.max(0, nextPageBoundary + topMargin - blockTop)}px`;
+                        block.before(spacer);
+                    }
+                });
+            });
+        };
+
+        let resizeTimer;
+        const scheduleLayout = () => {
+            window.clearTimeout(resizeTimer);
+            resizeTimer = window.setTimeout(keepSignatureBlocksOnOnePreviewPage, 50);
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', keepSignatureBlocksOnOnePreviewPage, { once: true });
+        } else {
+            keepSignatureBlocksOnOnePreviewPage();
+        }
+
+        window.addEventListener('load', keepSignatureBlocksOnOnePreviewPage, { once: true });
+        window.addEventListener('resize', scheduleLayout);
+    })();
+</script>

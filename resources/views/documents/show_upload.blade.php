@@ -43,7 +43,7 @@
                         </div>
                         <div class="col-md-6">
                             <div class="text-muted small fw-bold mb-1">เลขที่เอกสาร</div>
-                            <div class="text-dark fw-bold">{{ $document->doc_number ?? 'รอธุรการออกเลข' }}</div>
+                            <div class="text-dark fw-bold">{{ $document->formatted_doc_number ?? 'รอธุรการออกเลข' }}</div>
                         </div>
                     </div>
                 </div>

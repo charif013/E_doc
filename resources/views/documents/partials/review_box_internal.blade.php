@@ -24,7 +24,7 @@
                     <input type="text" name="doc_number" id="doc_number" 
                            class="form-control border-0 bg-white fw-bold text-primary px-3" 
                            placeholder="คลิกปุ่มรันเลข หรือพิมพ์เลขเอง..." 
-                           value="{{ $document->doc_number }}" required>
+                           value="{{ $document->formatted_doc_number }}" required>
                     
                     {{-- 🌟 เปลี่ยนปุ่มตามสถานะการจอง --}}
                     @if($hasReservedNumber)
@@ -103,13 +103,7 @@
             const res = await fetch(`{{ route('documents.api_next_number') }}?type=${docType}`);
             const data = await res.json();
             
-            let finalNumber = data.formatted;
-            if(docType === 'internal') {
-                const thDigits = ['๐','๑','๒','๓','๔','๕','๖','๗','๘','๙'];
-                finalNumber = String(data.next_number).split('').map(d => thDigits[d]).join('');
-            }
-            
-            document.getElementById('doc_number').value = finalNumber;
+            document.getElementById('doc_number').value = data.formatted;
             document.getElementById('running_number').value = data.next_number;
             
             Swal.fire({

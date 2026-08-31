@@ -7,7 +7,8 @@
 @php
     // 🌟 คำนวณปีและเลขที่เอกสาร
     $thaiYear = \Carbon\Carbon::parse($leave->created_at)->addYears(543)->format('Y');
-    $docId = 'LV-' . $thaiYear . '-' . str_pad($leave->id, 3, '0', STR_PAD_LEFT);
+    $suggestedNumber = 'LV-' . $thaiYear . '-' . str_pad($leave->id, 3, '0', STR_PAD_LEFT);
+    $docId = $leave->leave_number ?: $suggestedNumber;
     $submitDate = \Carbon\Carbon::parse($leave->created_at)->addYears(543)->locale('th')->translatedFormat('d M Y | H:i');
     // 🌟 คำนวณสถิติการลาเบื้องต้น (ดึงจากประวัติที่เคยอนุมัติแล้ว)
     $sickUsed = \App\Models\LeaveRequest::where('user_id', $leave->user_id)->where('leave_type', 'ลาป่วย')->where('status', 'APPROVED')->sum('total_days');
@@ -22,14 +23,16 @@
     $rejectText = 'ไม่อนุมัติ / ตีกลับ';
 
     // 🌟 ใช้สิทธิ์ saraban เพียวๆ (ถอด officer ออก) และเพิ่ม deputy-palad ให้ด่านปลัด
-    if ($leave->workflow_status === 'pending_inspector' && $user->hasRole('saraban')) {
-        $canApprove = true; $actionTitle = 'ส่วนของธุรการ (ตรวจสอบสถิติวันลา)'; $approveText = 'ตรวจสอบถูกต้องแล้ว';
+    if ($leave->workflow_status === 'pending_inspector' && $user->hasRole('hr')) {
+        $canApprove = true; $actionTitle = 'นักทรัพยากรบุคคล (ตรวจสอบสิทธิ์และสถิติวันลา)'; $approveText = 'ตรวจสอบสิทธิ์ถูกต้องแล้ว';
     } elseif ($leave->workflow_status === 'pending_head' && $user->hasRole('head')) {
         $canApprove = true; $actionTitle = 'ส่วนของหัวหน้าสำนักปลัด/ผอ.กอง'; $approveText = 'เห็นควรอนุญาต';
     } elseif ($leave->workflow_status === 'pending_palad' && $user->hasAnyRole(['palad', 'deputy-palad'])) {
         $canApprove = true; $actionTitle = 'ส่วนของปลัด อบต.'; $approveText = 'เห็นควรอนุญาต';
     } elseif ($leave->workflow_status === 'pending_nayok' && $user->hasRole('executive')) {
         $canApprove = true; $actionTitle = 'คำสั่งนายก อบต.'; $approveText = 'อนุมัติการลา'; $rejectText = 'ไม่อนุมัติการลา';
+    } elseif ($leave->workflow_status === 'pending_numbering' && $user->hasRole('saraban')) {
+        $canApprove = true; $actionTitle = 'ส่วนของธุรการ (ลงเลขใบลา)'; $approveText = 'ลงเลขและปิดเรื่อง';
     }
 
     $isDelegate = ($leave->workflow_status === 'pending_delegate' && $user->id == $leave->delegate_id);
@@ -112,10 +115,36 @@
                         <span class="fw-bold">{{ $leave->delegate->name }}</span> ({{ $leave->delegate->position }})
                         @if($leave->delegate_status == 'accepted')
                             <span class="badge bg-success ms-2">รับทราบแล้ว</span>
+                        @elseif($leave->delegate_status == 'declined')
+                            <span class="badge bg-danger ms-2">ปฏิเสธแล้ว</span>
+                        @elseif($leave->workflow_status == 'delegate_escalated')
+                            <span class="badge bg-warning text-dark ms-2">เกินเวลาตอบรับ</span>
                         @else
                             <span class="badge bg-secondary ms-2">รอการยืนยัน</span>
                         @endif
+                        @if($leave->delegate_decline_reason)
+                            <div class="mt-2 text-danger"><strong>เหตุผล:</strong> {{ $leave->delegate_decline_reason }}</div>
+                        @endif
                     </div>
+                </div>
+                @endif
+                @if($leave->user_id === $user->id && in_array($leave->workflow_status, ['pending_delegate', 'delegate_declined', 'delegate_escalated']))
+                <div class="col-12">
+                    <form action="{{ route('leaves.reassign_delegate', $leave->id) }}" method="POST" class="card card-body border-warning-subtle bg-warning-subtle">
+                        @csrf
+                        <label class="form-label fw-bold">เปลี่ยนผู้รับมอบงาน</label>
+                        <div class="input-group">
+                            <select name="delegate_id" class="form-select" required>
+                                <option value="">-- เลือกผู้รับมอบคนใหม่ --</option>
+                                @foreach($delegateCandidates as $candidate)
+                                    <option value="{{ $candidate->id }}" @selected($candidate->id === $leave->delegate_id)>
+                                        {{ $candidate->name }} — {{ $candidate->position ?? 'ไม่ระบุตำแหน่ง' }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <button class="btn btn-warning fw-bold" type="submit">ส่งคำขอใหม่</button>
+                        </div>
+                    </form>
                 </div>
                 @endif
             </div>
@@ -150,7 +179,7 @@
                 {{-- กล่อง 1: ธุรการ --}}
                 <div class="col-md-3 col-6">
                     <div class="approval-card {{ $leave->inspector_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_inspector' ? 'active' : '') }}">
-                        <div class="small text-muted mb-1 fw-bold">ผู้ตรวจสอบ</div>
+                        <div class="small text-muted mb-1 fw-bold">นักทรัพยากรบุคคลตรวจสอบสิทธิ์</div>
                         <div class="fw-bold text-dark mb-2 text-truncate" style="min-height: 20px;">
                             {{ $leave->inspector_id ? $leave->inspector->name : '-' }}
                         </div>
@@ -216,6 +245,23 @@
                         @endif
                     </div>
                 </div>
+
+                <div class="col-12">
+                    <div class="approval-card {{ $leave->numbered_at ? 'completed' : ($leave->workflow_status == 'pending_numbering' ? 'active' : '') }}">
+                        <div class="small text-muted mb-1 fw-bold">ธุรการลงเลขใบลา</div>
+                        <div class="fw-bold text-dark mb-2">
+                            {{ $leave->leave_number ?: '-' }}
+                            @if($leave->numberedBy) — {{ $leave->numberedBy->name }} @endif
+                        </div>
+                        @if($leave->numbered_at)
+                            <span class="badge bg-success-subtle text-success-emphasis py-2 rounded-pill px-4">ลงเลขเรียบร้อยแล้ว</span>
+                        @elseif($leave->workflow_status == 'pending_numbering')
+                            <span class="badge bg-warning-subtle text-warning-emphasis py-2 rounded-pill px-4">รอธุรการลงเลข ⏳</span>
+                        @else
+                            <span class="badge bg-light text-muted border py-2 rounded-pill px-4">รอดำเนินการ</span>
+                        @endif
+                    </div>
+                </div>
             </div>
 
             {{-- 🌟 แจ้งเตือนกรณีถูกตีกลับ --}}
@@ -233,12 +279,15 @@
                     <div class="card-body p-4 text-center">
                         <h5 class="fw-bold text-warning-emphasis mb-2"><i class="fas fa-handshake me-2"></i> การรับมอบหมายงาน</h5>
                         <p class="text-muted mb-4">คุณถูกระบุให้เป็นผู้ปฏิบัติหน้าที่แทนในระหว่างที่ <b class="text-dark">{{ $leave->user->name }}</b> ลา</p>
-                        <form action="{{ route('leaves.delegateAction', $leave->id) }}" method="POST" class="d-flex justify-content-center gap-3">
+                        <form action="{{ route('leaves.delegateAction', $leave->id) }}" method="POST">
                             @csrf
-                            <button type="submit" name="action" value="reject" class="btn btn-outline-danger fw-bold rounded-pill px-5 py-2">ปฏิเสธงานนี้</button>
-                            <button type="submit" name="action" value="accept" class="btn btn-warning fw-bold rounded-pill px-5 py-2 shadow-sm text-dark">
-                                <i class="fas fa-check me-1"></i> ยินดีรับมอบงาน
-                            </button>
+                            <textarea name="decline_reason" class="form-control mb-3" rows="2" maxlength="1000" placeholder="ระบุเหตุผลหากไม่สามารถรับมอบงานได้">{{ old('decline_reason') }}</textarea>
+                            <div class="d-flex justify-content-center gap-3">
+                                <button type="submit" name="action" value="decline" class="btn btn-outline-danger fw-bold rounded-pill px-5 py-2">ปฏิเสธงานนี้</button>
+                                <button type="submit" name="action" value="accept" class="btn btn-warning fw-bold rounded-pill px-5 py-2 shadow-sm text-dark">
+                                    <i class="fas fa-check me-1"></i> ยินดีรับมอบงาน
+                                </button>
+                            </div>
                         </form>
                     </div>
                 </div>
@@ -248,6 +297,25 @@
                     @csrf
                     
                     <h6 class="fw-bold text-teal mb-3"><i class="fas fa-pen-nib me-2"></i> {{ $actionTitle }}</h6>
+
+                    @if($leave->workflow_status === 'pending_numbering')
+                        <div class="bg-warning-subtle p-3 rounded-3 border border-warning mb-3">
+                            <label class="form-label fw-bold text-dark">เลขที่ใบลา <span class="text-danger">*</span></label>
+                            <div class="input-group shadow-sm">
+                                <input type="hidden" name="running_number" id="leave_running_number" value="{{ old('running_number') }}">
+                                <input type="text" name="leave_number" id="leave_number" value="{{ old('leave_number') }}"
+                                       class="form-control bg-white fw-bold text-primary" placeholder="คลิกปุ่มรันเลข..." readonly required>
+                                <button type="button" onclick="autoLeaveNo()" class="btn btn-primary fw-bold px-4">
+                                    <i class="fas fa-magic me-1"></i> รันเลข
+                                </button>
+                            </div>
+                            @error('leave_number')<div class="text-danger small mt-2 fw-bold">{{ $message }}</div>@enderror
+                            @error('running_number')<div class="text-danger small mt-2 fw-bold">{{ $message }}</div>@enderror
+                            <small class="text-muted mt-2 d-block">
+                                <i class="fas fa-book-open me-1"></i> ดึงเลขถัดไปจากสมุดคุมเลขสารบรรณ หมวดทะเบียนใบลา
+                            </small>
+                        </div>
+                    @endif
 
                     <div class="row g-3">
                         <div class="col-md-9">
@@ -261,9 +329,11 @@
                     </div>
 
                     <div class="text-end mt-4 d-flex justify-content-end flex-wrap gap-3">
-                        <button type="submit" name="is_approved" value="0" class="btn btn-outline-danger btn-lg rounded-pill px-5 fw-bold" onclick="return checkReason()">
-                            <i class="fas fa-times me-1"></i> {{ $rejectText }}
-                        </button>
+                        @if($leave->workflow_status !== 'pending_numbering')
+                            <button type="submit" name="is_approved" value="0" class="btn btn-outline-danger btn-lg rounded-pill px-5 fw-bold" onclick="return checkReason()">
+                                <i class="fas fa-times me-1"></i> {{ $rejectText }}
+                            </button>
+                        @endif
                         <button type="submit" name="is_approved" value="1" class="btn btn-dark btn-lg rounded-pill px-5 fw-bold shadow-sm" style="background-color: #164f51; border-color: #164f51;">
                             <i class="fas fa-check me-1"></i> {{ $approveText }}
                         </button>
@@ -377,5 +447,23 @@
         document.getElementById('reason_asterisk').style.display = 'none';
     });
 </script>
+
+@if($leave->workflow_status === 'pending_numbering' && auth()->user()->hasRole('saraban'))
+<script>
+async function autoLeaveNo() {
+    try {
+        const response = await fetch("{{ route('documents.api_next_number') }}?type=leave", {
+            headers: { 'Accept': 'application/json' }
+        });
+        if (!response.ok) throw new Error('request failed');
+        const data = await response.json();
+        document.getElementById('leave_number').value = data.formatted;
+        document.getElementById('leave_running_number').value = data.next_number;
+    } catch (error) {
+        alert('ไม่สามารถเชื่อมต่อสมุดคุมเลขได้ กรุณาลองใหม่อีกครั้ง');
+    }
+}
+</script>
+@endif
 
 @endsection

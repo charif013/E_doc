@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use App\Models\User;
+use App\Services\LineMessagingService;
+use App\Services\NotificationDispatcher;
 
 class ProfileController extends Controller
 {
@@ -125,6 +127,12 @@ class ProfileController extends Controller
         $user->pin_reset_requested = true; // เปลี่ยนสถานะเป็น: ส่งคำขอแล้ว
         $user->save();
 
+        $message = "🔐 มีคำขอล้างรหัส PIN\nผู้ขอ: {$user->name}\nหน่วยงาน: " . ($user->department ?: '-') . "\n\nเปิดระบบเพื่อดำเนินการ:\n" . route('users.index');
+        app(NotificationDispatcher::class)->toUsers(
+            app(LineMessagingService::class)->usersWithRoles('super-admin'),
+            $message
+        );
+
         return back()->with('success', 'ส่งคำขอล้างรหัส PIN ไปยังผู้ดูแลระบบแล้ว กรุณารอการอนุมัติ');
     }
 
@@ -134,26 +142,30 @@ class ProfileController extends Controller
 
     public function redirectToLine()
     {
-        $clientId = env('LINE_LOGIN_CHANNEL_ID');
-        $redirectUri = urlencode(url('/line/callback'));
+        $clientId = config('services.line.login_channel_id');
+        $redirectUri = urlencode((string) config('services.line.redirect_uri'));
         $state = csrf_token(); // สร้างรหัสกันการแฮก
         
-        $url = "https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={$clientId}&redirect_uri={$redirectUri}&state={$state}&scope=profile";
+        $url = "https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={$clientId}&redirect_uri={$redirectUri}&state={$state}&scope=profile&bot_prompt=aggressive";
         
         return redirect($url);
     }
 
     public function handleLineCallback(Request $request)
     {
+        if (!$request->filled('state') || !hash_equals((string) session()->token(), (string) $request->state)) {
+            return redirect()->route('profile.index')->with('error', 'ไม่สามารถยืนยันคำขอเชื่อมต่อ LINE ได้ กรุณาลองใหม่');
+        }
+
         // ถ้าผู้ใช้กดยกเลิกในหน้า LINE
         if ($request->has('error')) {
             return redirect()->route('profile.index')->with('error', 'คุณยกเลิกการเชื่อมต่อ LINE');
         }
 
         $code = $request->code;
-        $clientId = env('LINE_LOGIN_CHANNEL_ID');
-        $clientSecret = env('LINE_LOGIN_SECRET');
-        $redirectUri = url('/line/callback');
+        $clientId = config('services.line.login_channel_id');
+        $clientSecret = config('services.line.login_secret');
+        $redirectUri = (string) config('services.line.redirect_uri');
 
         // 1. นำ Code ไปแลกเป็น Access Token จาก LINE
         $response = Http::asForm()->post('https://api.line.me/oauth2/v2.1/token', [
@@ -179,6 +191,11 @@ class ProfileController extends Controller
                 $user = Auth::user();
                 $user->line_id = $lineId;
                 $user->save();
+
+                app(NotificationDispatcher::class)->toUser(
+                    $user,
+                    "✅ เชื่อมต่อระบบ e-Doc กับ LINE สำเร็จ\nนับจากนี้คุณจะได้รับแจ้งเตือนเอกสาร การประชุม และใบลาที่เกี่ยวข้องกับคุณ"
+                );
 
                 return redirect()->route('profile.index')->with('success', 'เชื่อมต่อบัญชี LINE สำเร็จ! ระบบจะส่งแจ้งเตือนให้คุณทาง LINE นับจากนี้');
             }

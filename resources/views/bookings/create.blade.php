@@ -50,10 +50,32 @@
                                 <input type="text" name="end_time" class="form-control datetime-picker" placeholder="คลิกเพื่อเลือกวันและเวลา" required>
                             </div>
 
+                            <div class="col-12 mb-2">
+                                <small class="text-muted"><span class="holiday-dot me-1"></span> วันที่พื้นสีส้มคือวันหยุด — เลื่อนเมาส์เหนือวันที่เพื่อดูชื่อวันหยุด</small>
+                            </div>
+
                             {{-- รายละเอียดเพิ่มเติม --}}
                             <div class="col-md-12 mb-3">
                                 <label class="form-label fw-bold">รายละเอียด (ถ้ามี)</label>
                                 <textarea name="description" class="form-control" rows="2"></textarea>
+                            </div>
+
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label fw-bold"><i class="fas fa-paperclip text-primary me-1"></i>แนบเอกสารของฉันหรือเอกสารที่ได้รับมอบหมาย (ถ้ามี)</label>
+                                <select name="document_id" class="form-select">
+                                    <option value="">-- ไม่แนบเอกสาร --</option>
+                                    @foreach($assignedDocuments as $assignedDocument)
+                                        <option value="{{ $assignedDocument->id }}" @selected(old('document_id') == $assignedDocument->id)>
+                                            {{ $assignedDocument->title }}{{ $assignedDocument->doc_number ? ' — '.$assignedDocument->doc_number : '' }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                                @if($assignedDocuments->isEmpty())
+                                    <small class="text-muted">ขณะนี้คุณยังไม่มีเอกสารที่ได้รับมอบหมาย</small>
+                                @else
+                                    <small class="text-muted">แสดงเอกสารที่คุณเป็นผู้ลงทะเบียน และเอกสารที่มอบหมายถึงคุณโดยตรง</small>
+                                @endif
+                                @error('document_id')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
                             </div>
 
                             {{-- ส่วนเลือกผู้เข้าร่วม (จะโชว์เฉพาะตอนเลือก 'นัดประชุม') --}}
@@ -100,13 +122,36 @@
 
     // 🌟 ตั้งค่าปฏิทิน
     document.addEventListener('DOMContentLoaded', function() {
+        const holidays = @json($holidays->mapWithKeys(fn($holiday) => [$holiday->holiday_date => $holiday->name]));
+
         flatpickr('.datetime-picker', {
             enableTime: true,        
             time_24hr: true,         
             locale: "th",            
             dateFormat: "Y-m-d H:i", 
             altInput: true,          
-            altFormat: "d/m/Y เวลา H:i น."
+            altFormat: "d/m/Y เวลา H:i น.",
+            onDayCreate: function(dObj, dStr, fp, dayElem) {
+                const year = dayElem.dateObj.getFullYear();
+                const month = String(dayElem.dateObj.getMonth() + 1).padStart(2, '0');
+                const day = String(dayElem.dateObj.getDate()).padStart(2, '0');
+                const dateKey = `${year}-${month}-${day}`;
+
+                if (holidays[dateKey]) {
+                    dayElem.classList.add('booking-holiday');
+                    dayElem.title = 'วันหยุด: ' + holidays[dateKey];
+                    dayElem.setAttribute('aria-label', dayElem.getAttribute('aria-label') + ' — วันหยุด: ' + holidays[dateKey]);
+                }
+            },
+            onChange: function(selectedDates, dateStr, instance) {
+                if (!selectedDates.length) return;
+                const selected = instance.formatDate(selectedDates[0], 'Y-m-d');
+                if (holidays[selected]) {
+                    instance.altInput.title = 'วันหยุด: ' + holidays[selected];
+                } else {
+                    instance.altInput.removeAttribute('title');
+                }
+            }
             // (ลบ appendTo และ position ของเก่าทิ้งไปได้เลยครับ)
         });
 
@@ -124,5 +169,16 @@
         }
     });
 </script>
+
+<style>
+    .flatpickr-day.booking-holiday {
+        background: #fef3c7 !important;
+        border-color: #f59e0b !important;
+        color: #92400e !important;
+        font-weight: 700;
+    }
+    .flatpickr-day.booking-holiday:hover { background: #fde68a !important; }
+    .holiday-dot { display:inline-block;width:10px;height:10px;border-radius:50%;background:#f59e0b; }
+</style>
 
 @endsection

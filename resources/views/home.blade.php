@@ -47,7 +47,7 @@
                 <div class="card-body">
                     <p class="text-muted mb-1 small fw-bold">รอดำเนินการ</p>
                     <h2 class="fw-bold text-gold mb-1">{{ $stats['waiting'] }}</h2>
-                    <p class="text-muted small mb-0 opacity-75">รอพิจารณา</p>
+                    <p class="text-muted small mb-0 opacity-75">รอคุณดำเนินการ</p>
                 </div>
             </div>
         </div>
@@ -76,18 +76,40 @@
         
         {{-- 🌟 ฝั่งซ้าย: เอกสารเข้าล่าสุด (พื้นที่ 8 ส่วน) --}}
         <div class="col-lg-8">
-            <div class="card border-0 shadow-sm h-100" style="border-radius: 20px; background-color: #fff;">
-                <div class="card-body p-4">
-                    <div class="d-flex align-items-center mb-4">
+            <div class="card border-0 shadow-sm recent-documents-card" style="border-radius: 20px; background-color: #fff;">
+                <div class="card-body p-4 d-flex flex-column">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <div class="d-flex align-items-center">
                         <div class="accent-line"></div>
-                        <h5 class="mb-0 fw-bold text-dark" style="letter-spacing: 0.5px;">เอกสารเข้าล่าสุด</h5>
+                        <h5 class="mb-0 fw-bold text-dark" style="letter-spacing: 0.5px;">
+                            {{ $search !== '' ? 'ผลการค้นหาเอกสาร' : 'เอกสารเข้าล่าสุด' }}
+                        </h5>
+                        </div>
+                        @if($search !== '')
+                            <span class="badge bg-primary rounded-pill px-3 py-2">{{ $searchResults->count() }} รายการ</span>
+                        @endif
                     </div>
 
-                    <div class="d-flex flex-column gap-3">
-                        @forelse($recentDocs as $doc)
+                    <form action="{{ route('home') }}" method="GET" class="mb-4">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                            <input type="search" name="q" value="{{ $search }}" class="form-control border-start-0 home-document-search"
+                                   placeholder="ค้นหาเลขเอกสาร ชื่อเรื่อง หรือหน่วยงาน..." aria-label="ค้นหาเอกสาร">
+                            @if($search !== '')
+                                <a href="{{ route('home') }}" class="btn btn-outline-secondary d-flex align-items-center" title="ล้างการค้นหา">
+                                    <i class="fas fa-times"></i>
+                                </a>
+                            @endif
+                            <button type="submit" class="btn btn-search px-3 fw-bold">ค้นหา</button>
+                        </div>
+                        <div class="small text-muted mt-2"><i class="fas fa-shield-alt me-1"></i>แสดงเฉพาะเอกสารที่คุณมีสิทธิ์เข้าถึง</div>
+                    </form>
+
+                    <div class="d-flex flex-column gap-3 recent-documents-scroll">
+                        @forelse($search !== '' ? $searchResults : $recentDocs as $doc)
                             <div class="doc-item p-3">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <span class="fw-bold text-dark">{{ $doc->doc_number ?? 'ไม่มีเลขที่' }}</span>
+                                    <span class="fw-bold text-dark">{{ $doc->formatted_doc_number ?? 'ไม่มีเลขที่' }}</span>
                                     @php
                                         $badges = [
                                             'WAITING_SUPERVISOR' => ['bg-warning-subtle text-warning-emphasis', 'รอหัวหน้า'],
@@ -112,7 +134,7 @@
                         @empty
                             <div class="text-center py-5 text-muted">
                                 <i class="fas fa-folder-open fa-2x mb-2 opacity-25"></i>
-                                <p class="mb-0">ยังไม่มีเอกสารในระบบ</p>
+                                <p class="mb-0">{{ $search !== '' ? 'ไม่พบเอกสารที่ตรงกับคำค้นหา' : 'ยังไม่มีเอกสารในระบบ' }}</p>
                             </div>
                         @endforelse
                     </div>
@@ -234,6 +256,51 @@
     .stat-card {
         border-radius: 20px;
         border: none;
+    }
+    .home-document-search:focus {
+        border-color: #164f51;
+        box-shadow: none;
+    }
+    .btn-search {
+        background: #164f51;
+        border-color: #164f51;
+        color: #fff;
+    }
+    .btn-search:hover { background: #0f3d3f; color: #fff; }
+    .recent-documents-card {
+        height: 650px;
+        overflow: hidden;
+    }
+    .recent-documents-card .card-body {
+        min-height: 0;
+    }
+    .recent-documents-scroll {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-right: 8px;
+        scrollbar-gutter: stable;
+        overscroll-behavior: contain;
+    }
+    .recent-documents-scroll::-webkit-scrollbar {
+        width: 8px;
+    }
+    .recent-documents-scroll::-webkit-scrollbar-track {
+        background: #f1f5f9;
+        border-radius: 10px;
+    }
+    .recent-documents-scroll::-webkit-scrollbar-thumb {
+        background: #b8c8d1;
+        border-radius: 10px;
+    }
+    .recent-documents-scroll::-webkit-scrollbar-thumb:hover {
+        background: #8fa6b2;
+    }
+    @media (max-width: 767.98px) {
+        .recent-documents-card {
+            height: 560px;
+        }
     }
     .text-teal { color: #164f51; }
     .text-gold { color: #d18b49; }

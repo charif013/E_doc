@@ -42,7 +42,7 @@
                                     @endif
                                 </td>
                                 <td class="text-muted small">{{ \Carbon\Carbon::parse($doc->created_at)->addYears(543)->locale('th')->translatedFormat('j M y') }}</td>
-                                <td><span class="fw-bold text-dark">{{ $doc->doc_number ?? 'รอออกเลข' }}</span></td>
+                                <td><span class="fw-bold text-dark">{{ $doc->formatted_doc_number ?? 'รอออกเลข' }}</span></td>
                                 <td>
                                     <div class="fw-bold text-dark text-wrap" style="max-width: 300px;">{{ $doc->title }}</div>
                                 </td>

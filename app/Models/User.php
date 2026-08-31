@@ -22,6 +22,7 @@ use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
      */
     protected $fillable = [
         'name',
+        'name_prefix',
         'email',
         'password',
         'department', 

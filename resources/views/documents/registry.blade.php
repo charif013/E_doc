@@ -205,7 +205,7 @@
                                                         <div class="mb-2">
                                                             <label class="form-label fw-bold text-dark">ระบุเลขที่หนังสือ <span class="text-danger">*</span></label>
                                                             <input type="text" name="doc_number" class="form-control form-control-lg text-primary fw-bold" 
-                                                                   placeholder="เช่น {{ $doc->doc_type === 'internal' ? '๐๐๒๓.๑/' : 'ยล ๕๔๒๐๑/' }}" required autofocus>
+                                                                   placeholder="เช่น ยล 77301/1" required autofocus>
                                                             <small class="text-muted mt-1 d-block">ระบบจะนำเลขทะเบียนนี้ไปประทับบนหัวเอกสารของแฟ้มระบบทันที</small>
                                                         </div>
                                                     </div>
@@ -250,7 +250,7 @@
                             <tbody>
                                 @forelse($incomingDocuments ?? [] as $doc)
                                     <tr>
-                                        <td class="ps-4"><span class="badge bg-success-subtle text-success-emphasis border rounded-pill px-3 py-2 fw-bold" style="font-size: 13px;">{{ $doc->receive_number ?? '-' }}</span></td>
+                                        <td class="ps-4"><span class="badge bg-success-subtle text-success-emphasis border rounded-pill px-3 py-2 fw-bold" style="font-size: 13px;">{{ $doc->formatted_receive_number ?? '-' }}</span></td>
                                         <td class="text-muted small">{{ \Carbon\Carbon::parse($doc->receive_date ?? $doc->created_at)->addYears(543)->locale('th')->translatedFormat('j M y') }}</td>
                                         <td><span class="text-dark small">{{ $doc->doc_number ?? '-' }}</span></td>
                                         <td><div class="text-dark small text-wrap" style="max-width: 150px;">{{ $doc->doc_from ?? '-' }}</div></td>
@@ -303,7 +303,7 @@
                                     @if($doc->doc_type === 'outgoing')
                                         @php $hasOutgoing = true; @endphp
                                         <tr>
-                                            <td class="ps-4"><span class="badge bg-info-subtle text-info-emphasis border rounded-pill px-3 py-2 fw-bold" style="font-size: 13px;">{{ $doc->doc_number }}</span></td>
+                                            <td class="ps-4"><span class="badge bg-info-subtle text-info-emphasis border rounded-pill px-3 py-2 fw-bold" style="font-size: 13px;">{{ $doc->formatted_doc_number }}</span></td>
                                             <td class="text-muted small">{{ \Carbon\Carbon::parse($doc->updated_at)->addYears(543)->locale('th')->translatedFormat('j M y') }}</td>
                                             <td><div class="text-dark smallfw-bold">{{ $doc->creator->department ?? '-' }}</div></td>
                                             <td><div class="fw-bold text-dark text-wrap" style="max-width: 250px;">{{ $doc->title }}</div></td>
@@ -353,7 +353,7 @@
                                     @if($doc->doc_type === 'internal')
                                         @php $hasInternal = true; @endphp
                                         <tr>
-                                            <td class="ps-4"><span class="badge bg-purple-subtle text-purple-emphasis border rounded-pill px-3 py-2 fw-bold" style="font-size: 13px;">{{ $doc->doc_number }}</span></td>
+                                            <td class="ps-4"><span class="badge bg-purple-subtle text-purple-emphasis border rounded-pill px-3 py-2 fw-bold" style="font-size: 13px;">{{ $doc->formatted_doc_number }}</span></td>
                                             <td class="text-muted small">{{ \Carbon\Carbon::parse($doc->updated_at)->addYears(543)->locale('th')->translatedFormat('j M y') }}</td>
                                             <td><div class="text-dark small fw-bold">{{ $doc->creator->department ?? '-' }}</div></td>
                                             <td><div class="fw-bold text-dark text-wrap" style="max-width: 250px;">{{ $doc->title }}</div></td>

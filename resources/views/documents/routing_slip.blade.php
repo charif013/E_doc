@@ -87,7 +87,7 @@
         <table class="header-table">
             <tr>
                 <td width="15%"><strong>เลขรับ:</strong></td>
-                <td width="35%">{{ $document->receive_number ?? '-' }}</td>
+                <td width="35%">{{ $document->formatted_receive_number ?? '-' }}</td>
                 <td width="20%"><strong>วันที่รับ:</strong></td>
                 <td width="30%">{{ $document->receive_date ? \Carbon\Carbon::parse($document->receive_date)->addYears(543)->format('d/m/Y') : '-' }}</td>
             </tr>

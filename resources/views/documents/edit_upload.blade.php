@@ -58,7 +58,7 @@
                         <div class="col-md-6 mb-4">
                             <label class="form-label fw-bold small text-dark">ที่ (เลขที่เอกสาร)</label>
                             <input type="text" class="form-control form-control-lg bg-light text-muted" 
-                                   value="{{ $document->doc_number ?? 'รอธุรการออกเลขให้เมื่ออนุมัติ' }}" readonly style="border-radius: 10px;">
+                                   value="{{ $document->formatted_doc_number ?? 'รอธุรการออกเลขให้เมื่ออนุมัติ' }}" readonly style="border-radius: 10px;">
                         </div>
                     </div>
 

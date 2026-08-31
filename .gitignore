@@ -17,3 +17,8 @@ yarn-error.log
 /.fleet
 /.idea
 /.vscode
+/.venv
+__pycache__/
+*.py[cod]
+/tmp/
+/storage/framework/testing/phpunit/

@@ -73,8 +73,8 @@
             $sigSteps[] = [
                 'label' => 'ผู้เสนอเรื่อง / ธุรการ',
                 'sig'   => $document->creator_signature,
-                'name'  => $document->creator->name     ?? '-',
-                'pos'   => $document->creator->position ?? '-',
+                'name'  => $document->creator?->name     ?? '-',
+                'pos'   => $document->creator?->position ?? '-',
                 'at'    => toThaiDate($document->created_at, true),
                 'icon'  => 'fa-user',
             ];
@@ -105,32 +105,32 @@
                 [
                     'label' => 'ผู้เสนอเรื่อง',
                     'sig'   => $document->creator_signature,
-                    'name'  => $document->creator->name     ?? '-',
-                    'pos'   => $document->creator->position ?? '-',
+                    'name'  => $document->creator?->name     ?? '-',
+                    'pos'   => $document->creator?->position ?? '-',
                     'at'    => toThaiDate($document->created_at, true),
                     'icon'  => 'fa-user',
                 ],
                 [
                     'label' => 'หัวหน้าส่วนราชการ',
                     'sig'   => $document->supervisor_signature,
-                    'name'  => $document->supervisor->name     ?? '-',
-                    'pos'   => $document->supervisor->position ?? 'หัวหน้าส่วนฯ',
+                    'name'  => $document->supervisor?->name     ?? '-',
+                    'pos'   => $document->supervisor?->position ?? 'หัวหน้าส่วนฯ',
                     'at'    => toThaiDate($document->supervisor_approved_at, true),
                     'icon'  => 'fa-user-tie',
                 ],
                 [
                     'label' => 'ปลัด อบต.',
                     'sig'   => $document->palad_signature,
-                    'name'  => $document->palad->name     ?? '-',
-                    'pos'   => $document->palad->position ?? 'ปลัด อบต.',
+                    'name'  => $document->palad?->name     ?? '-',
+                    'pos'   => $document->palad?->position ?? 'ปลัด อบต.',
                     'at'    => toThaiDate($document->palad_approved_at, true),
                     'icon'  => 'fa-user-shield',
                 ],
                 [
                     'label' => 'นายก อบต.',
                     'sig'   => $document->nayok_signature,
-                    'name'  => $document->nayok->name     ?? '-',
-                    'pos'   => $document->nayok->position ?? 'นายก อบต.',
+                    'name'  => $document->nayok?->name     ?? '-',
+                    'pos'   => $document->nayok?->position ?? 'นายก อบต.',
                     'at'    => toThaiDate($document->nayok_approved_at, true),
                     'icon'  => 'fa-star',
                 ],
@@ -157,7 +157,7 @@
             <button onclick="window.print()" class="btn btn-dark rounded-pill px-4 shadow-sm fw-bold">
                 <i class="fas fa-print me-2"></i>พิมพ์เอกสาร
             </button>
-            <a href="{{ route('documents.approve_list') }}" class="btn btn-outline-dark rounded-pill px-4 shadow-sm fw-bold bg-white">
+            <a href="{{ $user->hasAnyRole(['super-admin','executive','palad','deputy-palad','head','saraban','officer']) ? route('documents.approve_list') : route('documents.assigned') }}" class="btn btn-outline-dark rounded-pill px-4 shadow-sm fw-bold bg-white">
                 <i class="fas fa-arrow-left me-1"></i> กลับหน้ารายการ
             </a>
         </div>
@@ -179,29 +179,8 @@
                     </p>
                     <p class="small text-danger fw-bold mb-0">
                         <i class="fas fa-exclamation-triangle me-1"></i>
-                        ห้ามนำเลขที่ {{ $document->doc_number }} ไปเวียนใช้กับเอกสารอื่นเด็ดขาด
+                        ห้ามนำเลขที่ {{ $document->formatted_doc_number }} ไปเวียนใช้กับเอกสารอื่นเด็ดขาด
                     </p>
-                </div>
-            </div>
-        @endif
-
-        {{-- ============================================================
-             3. กล่องพิจารณา / อนุมัติ (เฉพาะผู้มีสิทธิ์)
-        ============================================================ --}}
-        @if($isReviewer)
-            <div class="card border-0 shadow-sm overflow-hidden mb-4 no-print"
-                 style="border-radius: 16px; border-left: 5px solid var(--primary) !important;">
-                <div class="card-header bg-white py-3 border-bottom-0">
-                    <h6 class="fw-bold mb-0 text-dark">
-                        <i class="fas fa-signature text-primary me-2"></i>ส่วนการพิจารณาและจัดการหนังสือ
-                    </h6>
-                </div>
-                <div class="card-body pt-0">
-                    @if($document->doc_type === 'outgoing')
-                        @include('documents.partials.review_box_outgoing')
-                    @else
-                        @include('documents.partials.review_box_internal')
-                    @endif
                 </div>
             </div>
         @endif
@@ -256,7 +235,7 @@
                         {{-- เลขที่ + วันที่ --}}
                         <div class="col-md-6">
                             <p class="text-label">เลขที่หนังสือ</p>
-                            <p class="text-value text-primary">{{ $document->doc_number ?? 'รอออกเลขและจัดคุมสมุด' }}</p>
+                            <p class="text-value text-primary">{{ $document->formatted_doc_number ?? 'รอออกเลขและจัดคุมสมุด' }}</p>
                         </div>
                         <div class="col-md-6">
                             <p class="text-label">วันที่ลงเอกสาร</p>
@@ -384,59 +363,27 @@
             </div>
         @endif
 
-         {{-- ============================================================
-             6. เส้นทางลงนามเอกสาร (Signature Track)
-        ============================================================ --}}
-        <div class="mb-4 page-break-inside-avoid no-print">
-            <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom">
-                <span style="width:4px;height:18px;background:var(--accent-green);border-radius:4px;display:inline-block;"></span>
-                <span style="font-size:14px;font-weight:700;color:var(--primary-dark);">เส้นทางลงนามเอกสาร</span>
+        @include('documents.partials.dynamic_route_track')
+
+        @if(isset($canApprove) && $canApprove)
+            <div class="card border-0 shadow-sm overflow-hidden mb-4 no-print" style="border-radius:16px;border-left:5px solid var(--success) !important;">
+                <div class="card-header py-3 border-bottom-0" style="background-color:#f0fdf4;">
+                    <h6 class="fw-bold mb-0 text-success"><i class="fas fa-edit me-2"></i>ถึงคิวของคุณ: ส่วนการพิจารณาและอนุมัติ</h6>
+                </div>
+                <div class="card-body pt-3">
+                    @if($document->doc_type === 'outgoing')
+                        @include('documents.partials.review_box_outgoing')
+                    @else
+                        @include('documents.partials.review_box_internal')
+                    @endif
+                </div>
             </div>
-            <div class="row g-3 justify-content-center">
-                @foreach($sigSteps as $i => $s)
-                    <div class="{{ count($sigSteps) == 2 ? 'col-md-6' : 'col-12 col-md-6 col-lg-3' }}">
-                        <div class="rounded-3 p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center shadow-sm print-sig-box"
-                             style="
-                                border:     1px solid {{ $s['sig'] ? '#bbf7d0' : '#e2e8f0' }};
-                                border-top: 3px solid {{ $s['sig'] ? 'var(--accent-green)' : '#cbd5e1' }};
-                                background: {{ $s['sig'] ? '#f0fdf4' : '#f8fafc' }};
-                                min-height: 180px;
-                                transition: 0.3s;">
-
-                            {{-- ลำดับขั้น --}}
-                            <div class="mb-2 rounded-circle d-flex align-items-center justify-content-center fw-bold no-print"
-                                 style="
-                                    width:      28px;
-                                    height:     28px;
-                                    background: {{ $s['sig'] ? 'var(--accent-green)' : '#e2e8f0' }};
-                                    color:      {{ $s['sig'] ? '#fff'                : '#64748b' }};
-                                    font-size:  13px;">
-                                {{ $i + 1 }}
-                            </div>
-
-                            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">
-                                {{ $s['label'] }}
-                            </div>
-
-                            @if($s['sig'])
-                                <img src="{{ getSigUrl($s['sig']) }}"
-                                     style="max-height:55px;mix-blend-mode:multiply;margin-bottom:6px;"
-                                     alt="ลายเซ็น {{ $s['name'] }}">
-                                <div style="font-size:13px;font-weight:700;color:var(--text-primary);">{{ $s['name'] }}</div>
-                                <div style="font-size:12px;color:var(--text-muted);">{{ $s['pos'] }}</div>
-                                <div class="mt-2 rounded-pill px-2 fw-bold shadow-sm no-print"
-                                     style="font-size:10px;background:#fff;border:1px solid #d1fae5;color:var(--accent-green);padding:3px 8px;">
-                                    <i class="far fa-clock me-1"></i>{{ $s['at'] }}
-                                </div>
-                            @else
-                                <i class="fas {{ $s['icon'] }} mb-2 mt-2 no-print" style="font-size:24px;color:#cbd5e1;"></i>
-                                <div class="no-print" style="font-size:13px;color:#94a3b8;font-weight:600;">รอการพิจารณา</div>
-                            @endif
-                        </div>
-                    </div>
-                @endforeach
+        @elseif(isset($currentRoute) && $currentRoute && !in_array($document->status, ['APPROVED', 'CANCELED', 'REJECTED']))
+            <div class="alert alert-warning shadow-sm border-0 mb-4 no-print d-flex align-items-center" style="background-color:#fef3c7;color:#92400e;border-radius:12px;border-left:5px solid #f59e0b !important;">
+                <i class="fas fa-hourglass-half fs-4 me-3 text-warning"></i>
+                <div><strong>กำลังรอการพิจารณาจาก {{ $currentRoute?->user?->name ?? 'ผู้พิจารณาท่านต่อไป' }}</strong></div>
             </div>
-        </div>
+        @endif
 
          {{-- ============================================================
              8. ดำเนินการสำหรับเจ้าของเรื่อง (DRAFT / REJECTED)
@@ -626,13 +573,7 @@ async function autoReserveNo() {
         const res  = await fetch(`{{ route('documents.api_next_number') }}?type=${docType}`);
         const data = await res.json();
 
-        let finalNumber = data.formatted;
-        if (docType === 'internal') {
-            const thaiDigits = ['๐','๑','๒','๓','๔','๕','๖','๗','๘','๙'];
-            finalNumber = String(data.next_number).split('').map(d => thaiDigits[d]).join('');
-        }
-
-        document.getElementById('reserve_doc_number').value  = finalNumber;
+        document.getElementById('reserve_doc_number').value  = data.formatted;
         document.getElementById('reserve_running_number').value = data.next_number;
 
         Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'ดึงเลขล่าสุดสำเร็จ', showConfirmButton: false, timer: 1500 });
