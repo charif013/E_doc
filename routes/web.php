@@ -13,6 +13,8 @@ use App\Http\Controllers\RoomBookingController;
 use App\Http\Controllers\DocumentAccessController;
 use App\Http\Controllers\DocumentNumberingController;
 use App\Http\Controllers\AuditLogController;
+use App\Http\Controllers\LineWebhookController;
+use App\Http\Controllers\V2\SystemHealthController as V2SystemHealthController;
 
 // =============================================================================
 // หน้าแรก redirect ไปหน้า login
@@ -21,12 +23,20 @@ Route::get('/', function () {
     return redirect('/login');
 });
 
-Auth::routes();
+// บัญชีผู้ใช้ต้องถูก provision โดยผู้ดูแลระบบเท่านั้น
+Auth::routes(['register' => false]);
+
+// LINE Platform เรียก endpoint นี้โดยไม่มี session; Controller จะตรวจ X-Line-Signature ทุกครั้ง
+Route::post('/line/webhook', LineWebhookController::class)->name('line.webhook');
 
 // =============================================================================
 // ทุก Route ด้านล่างต้องผ่าน auth middleware
 // =============================================================================
 Route::middleware(['auth'])->group(function () {
+
+    Route::get('/admin/v2/health', V2SystemHealthController::class)
+        ->middleware(['edoc.v2', 'role:super-admin|auditor'])
+        ->name('admin.v2.health');
 
     // =========================================================================
     // Dashboard
@@ -54,7 +64,8 @@ Route::middleware(['auth'])->group(function () {
     // =========================================================================
     // ระบบจองห้องประชุม — ทุก role ดู/จองได้ แก้/ลบเฉพาะเจ้าของ (จัดการใน Controller)
     // =========================================================================
-    Route::resource('bookings', RoomBookingController::class)->only(['index', 'create', 'store', 'destroy']);
+    Route::post('/bookings/{booking}/respond', [RoomBookingController::class, 'respond'])->name('bookings.respond');
+    Route::resource('bookings', RoomBookingController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
 
     Route::middleware(['role:super-admin'])->prefix('admin/rooms')->name('admin.rooms.')->group(function () {
         Route::get('/', [RoomBookingController::class, 'rooms'])->name('index');
@@ -97,17 +108,20 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/', [DocumentController::class, 'index'])->name('index');
         
         // 🌟 ย้าย Static Routes ของสมุดคุมเลขมาไว้ด้านบน เพื่อความปลอดภัย
-        Route::middleware('role:super-admin|palad|deputy-palad|saraban')->group(function () {
+        Route::middleware('role:super-admin|saraban')->group(function () {
             Route::get('/number-ledger', [DocumentNumberingController::class, 'ledger'])->name('number_ledger');
             Route::get('/api/next-number', [DocumentNumberingController::class, 'next'])->name('api_next_number');
         });
         Route::post('/reserve-number-slot', [DocumentNumberingController::class, 'reserveSlot'])
-            ->middleware('role:super-admin|palad|saraban')
+            ->middleware(['role:super-admin|saraban', 'edoc.legacy-document-write'])
             ->name('reserve_number_slot');
 
         Route::post('/auto-extract', [\App\Http\Controllers\DocumentController::class, 'autoExtract'])->name('auto_extract');
         Route::get('/auto-extract/{taskId}', [\App\Http\Controllers\DocumentController::class, 'autoExtractStatus'])
             ->name('auto_extract_status');
+
+        // ผู้ใช้ทุกบทบาทอาจได้รับมอบหมายให้ปฏิบัติงานแทนระหว่างการลา
+        Route::get('/assigned', [DocumentController::class, 'assignedList'])->name('assigned');
 
         // -------------------------------------------------------------------------
         // โซนสร้าง / แก้ไข / อัปโหลดเอกสาร
@@ -115,29 +129,27 @@ Route::middleware(['auth'])->group(function () {
         Route::middleware([
             'role:super-admin|executive|palad|deputy-palad|head|saraban|officer|finance|parcel|hr|analyst|engineer|education|health|disaster|auditor|teacher'
         ])->group(function () {
-            Route::get('/create',          [DocumentController::class, 'create'])->name('create');
-            Route::get('/create-incoming', [DocumentController::class, 'createIncoming'])->name('create_incoming');
-            Route::get('/create-upload',   [DocumentController::class, 'createUpload'])->name('create_upload');
-            Route::get('/create-outgoing', [DocumentController::class, 'createOutgoing'])->name('create_outgoing');
-            Route::get('/assigned',        [DocumentController::class, 'assignedList'])->name('assigned');
-
-            Route::post('/',               [DocumentController::class, 'store'])->name('store');
-            Route::post('/incoming',       [DocumentController::class, 'storeIncoming'])->name('store_incoming');
-            Route::post('/outgoing',       [DocumentController::class, 'storeOutgoing'])->name('store_outgoing');
-            Route::post('/store-upload',   [DocumentController::class, 'storeUpload'])->name('store_upload');
+            Route::get('/create',          [DocumentController::class, 'create'])->middleware('edoc.legacy-document-write')->name('create');
+            Route::get('/create-incoming', [DocumentController::class, 'createIncoming'])->middleware('edoc.legacy-document-write')->name('create_incoming');
+            Route::get('/create-upload',   [DocumentController::class, 'createUpload'])->middleware('edoc.legacy-document-write')->name('create_upload');
+            Route::get('/create-outgoing', [DocumentController::class, 'createOutgoing'])->middleware('edoc.legacy-document-write')->name('create_outgoing');
+            Route::post('/',               [DocumentController::class, 'store'])->middleware('edoc.legacy-document-write')->name('store');
+            Route::post('/incoming',       [DocumentController::class, 'storeIncoming'])->middleware('edoc.legacy-document-write')->name('store_incoming');
+            Route::post('/outgoing',       [DocumentController::class, 'storeOutgoing'])->middleware('edoc.legacy-document-write')->name('store_outgoing');
+            Route::post('/store-upload',   [DocumentController::class, 'storeUpload'])->middleware('edoc.legacy-document-write')->name('store_upload');
 
             // --- Dynamic {id} routes ---
-            Route::get('/{id}/edit',             [DocumentController::class, 'edit'])->name('edit');
-            Route::put('/{id}',                  [DocumentController::class, 'update'])->name('update');
-            Route::delete('/{id}',               [DocumentController::class, 'destroy'])->name('destroy');
-            Route::post('/{id}/sign',            [DocumentController::class, 'sign'])->name('sign');
+            Route::get('/{id}/edit',             [DocumentController::class, 'edit'])->middleware('edoc.legacy-document-write')->name('edit');
+            Route::put('/{id}',                  [DocumentController::class, 'update'])->middleware('edoc.legacy-document-write')->name('update');
+            Route::delete('/{id}',               [DocumentController::class, 'destroy'])->middleware('edoc.legacy-document-write')->name('destroy');
+            Route::post('/{id}/sign',            [DocumentController::class, 'sign'])->middleware('edoc.legacy-document-write')->name('sign');
             
             // 🌟 ระบบประทับลายเซ็น
-            Route::post('/{id}/stamp-signature', [DocumentController::class, 'stampSignatureToPdf'])->name('stamp_signature');
+            Route::post('/{id}/stamp-signature', [DocumentController::class, 'stampSignatureToPdf'])->middleware('edoc.legacy-document-write')->name('stamp_signature');
             
-            Route::post('/{id}/upload',          [DocumentController::class, 'uploadAttachment'])->name('upload');
+            Route::post('/{id}/upload',          [DocumentController::class, 'uploadAttachment'])->middleware('edoc.legacy-document-write')->name('upload');
             Route::get('/{id}/download-signed',  [DocumentController::class, 'downloadSignedPdf'])->name('download_signed');
-            Route::post('/{id}/reserve-number',  [DocumentNumberingController::class, 'reserve'])->name('reserve_number');
+            Route::post('/{id}/reserve-number',  [DocumentNumberingController::class, 'reserve'])->middleware('edoc.legacy-document-write')->name('reserve_number');
         });
 
         // -------------------------------------------------------------------------
@@ -146,32 +158,35 @@ Route::middleware(['auth'])->group(function () {
         // ผู้ใช้ทุกบทบาทอาจถูกเลือกเป็นผู้พิจารณาใน dynamic workflow ได้
         // Controller จะตรวจอีกชั้นว่าต้องเป็นคิวปัจจุบันของผู้ใช้นั้นจริง
         Route::get('/approve-list', [DocumentController::class, 'approveList'])->name('approve_list');
-        Route::post('/{id}/review', [DocumentController::class, 'reviewDocument'])->name('review');
+        Route::post('/{id}/review', [DocumentController::class, 'reviewDocument'])->middleware('edoc.legacy-document-write')->name('review');
 
         // 🌟 ระบบรับทราบคำสั่ง (สำหรับ ผอ.กอง)
-        Route::post('/{id}/acknowledge', [DocumentController::class, 'acknowledge'])->name('acknowledge');
-        Route::post('/{id}/assignment-action', [DocumentController::class, 'assignmentAction'])->name('assignment_action');
+        Route::post('/{id}/acknowledge', [DocumentController::class, 'acknowledge'])->middleware('edoc.legacy-document-write')->name('acknowledge');
+        Route::post('/{id}/assignment-action', [DocumentController::class, 'assignmentAction'])->middleware('edoc.legacy-document-write')->name('assignment_action');
 
         // -------------------------------------------------------------------------
         // สมุดทะเบียนเลข (ธุรการ)
         // -------------------------------------------------------------------------
         Route::middleware([
-            'role:super-admin|palad|saraban'
+            'role:super-admin|saraban'
         ])->group(function () {
             Route::get('/registry',                    [DocumentNumberingController::class, 'registry'])->name('registry');
-            Route::post('/registry/{id}/assign-number',[DocumentNumberingController::class, 'assign'])->name('assign_number');
+            Route::post('/registry/{id}/assign-number',[DocumentNumberingController::class, 'assign'])->middleware('edoc.legacy-document-write')->name('assign_number');
         });
 
         // -------------------------------------------------------------------------
         // 🌟 โซนดูเอกสาร + ระบบเอกสารลับ (Dynamic {id}) ต้องอยู่ด้านล่างสุด 🌟
         // -------------------------------------------------------------------------
         Route::get('/{id}/show',         [DocumentController::class, 'show'])->name('show');
+        Route::get('/{id}/file/{kind}',   [DocumentController::class, 'file'])
+            ->whereIn('kind', ['main', 'signed', 'external'])
+            ->name('file');
         Route::get('/{id}/routing-slip', [DocumentController::class, 'routingSlip'])->name('routing_slip');
         
         // 🌟 ฟังก์ชันจัดการเอกสารลับ (ตัด /documents และ name(documents.) ออกเพราะอยู่ใน Group แล้ว)
         Route::post('/{id}/unlock-secret', [DocumentAccessController::class, 'unlock'])->name('unlock_secret');
-        Route::post('/{id}/request-access', [DocumentAccessController::class, 'request'])->name('request_access');
-        Route::post('/access-requests/{requestId}/{status}', [DocumentAccessController::class, 'decide'])->name('approve_access');
+        Route::post('/{id}/request-access', [DocumentAccessController::class, 'request'])->middleware('edoc.legacy-document-write')->name('request_access');
+        Route::post('/access-requests/{requestId}/{status}', [DocumentAccessController::class, 'decide'])->middleware('edoc.legacy-document-write')->name('approve_access');
     });
 
     // =========================================================================
@@ -208,6 +223,7 @@ Route::middleware(['auth'])->group(function () {
     //---
     Route::get('/line/login', [App\Http\Controllers\ProfileController::class, 'redirectToLine'])->name('line.login');
     Route::get('/line/callback', [App\Http\Controllers\ProfileController::class, 'handleLineCallback'])->name('line.callback');
+    Route::post('/line/refresh-status', [App\Http\Controllers\ProfileController::class, 'refreshLineStatus'])->name('line.refresh_status');
     Route::post('/line/unlink', [App\Http\Controllers\ProfileController::class, 'unlinkLine'])->name('line.unlink');
     
 });

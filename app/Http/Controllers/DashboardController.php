@@ -6,6 +6,7 @@ use App\Models\Document;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\V2\Document as V2Document;
 
 class DashboardController extends Controller
 {
@@ -19,6 +20,24 @@ class DashboardController extends Controller
         // 1. กำหนดเดือนที่เลือก (default เป็นเดือนปัจจุบัน)
         $month = $request->input('month', Carbon::now()->format('m'));
         $year = $request->input('year', Carbon::now()->format('Y'));
+
+        if (config('edoc.v2.document_reads')) {
+            $base = V2Document::whereMonth('created_at', $month)->whereYear('created_at', $year);
+            $stats = [
+                'total' => (clone $base)->count(),
+                'waiting' => (clone $base)->where('status', 'IN_REVIEW')->count(),
+                'approved' => (clone $base)->whereIn('status', ['APPROVED', 'COMPLETED'])->count(),
+                'urgent' => (clone $base)->whereHas('priority', fn ($priorities) => $priorities->where('level_no', '>', 1))
+                    ->whereNotIn('status', ['COMPLETED', 'ARCHIVED'])->count(),
+            ];
+            $byDept = DB::connection('mysql_v2')->table('document_assignments as a')
+                ->leftJoin('organization_units as u', 'u.id', '=', 'a.assigned_unit_id')
+                ->selectRaw('u.name as assigned_to, count(distinct a.document_id) as total')->groupBy('u.name')->get();
+            $urgentDocs = V2Document::with(['priority', 'type', 'numberAllocation'])
+                ->whereHas('priority', fn ($priorities) => $priorities->where('level_no', '>', 2))
+                ->whereNotIn('status', ['COMPLETED', 'ARCHIVED'])->latest()->limit(5)->get();
+            return view('dashboard.executive', compact('stats', 'byDept', 'urgentDocs', 'month', 'year'));
+        }
 
         // 2. ดึงข้อมูลสรุปตามช่วงเวลาที่เลือก
         $stats = [

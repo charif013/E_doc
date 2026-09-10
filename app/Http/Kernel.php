@@ -68,5 +68,7 @@ class Kernel extends HttpKernel
         'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
         'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
         'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
+        'edoc.v2' => \App\Http\Middleware\EnsureV2Enabled::class,
+        'edoc.legacy-document-write' => \App\Http\Middleware\PreventLegacyDocumentWritesDuringV2Reads::class,
     ];
 }

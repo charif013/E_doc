@@ -48,8 +48,10 @@
                     <div class="mb-2">
                         <small class="text-muted d-block fw-bold mb-1">รับการแจ้งเตือน (LINE)</small>
                         <div class="fw-bold">
-                            @if($user->line_id)
+                            @if($user->line_id && $user->line_friend_status)
                                 <span class="text-success"><i class="fab fa-line me-2"></i>เปิดใช้งานแล้ว</span>
+                            @elseif($user->line_id)
+                                <span class="text-warning"><i class="fab fa-line me-2"></i>รอเพิ่มเพื่อน OA</span>
                             @else
                                 <span class="text-secondary"><i class="fab fa-line me-2"></i>ยังไม่ได้ตั้งค่า</span>
                             @endif
@@ -69,7 +71,7 @@
                 </div>
                 <div class="card-body p-4 text-center">
                     
-                    @if($user->line_id)
+                    @if($user->line_id && $user->line_friend_status)
                         <div class="mb-3">
                             <div class="d-inline-flex align-items-center justify-content-center bg-success text-white rounded-circle mb-3 shadow-sm" style="width: 60px; height: 60px; font-size: 30px;">
                                 <i class="fab fa-line"></i>
@@ -83,6 +85,31 @@
                                 <i class="fas fa-unlink me-1"></i> ยกเลิกการเชื่อมต่อ LINE
                             </button>
                         </form>
+                    @elseif($user->line_id)
+                        <div class="mb-3">
+                            <div class="d-inline-flex align-items-center justify-content-center bg-warning text-dark rounded-circle mb-3 shadow-sm" style="width: 60px; height: 60px; font-size: 30px;">
+                                <i class="fab fa-line"></i>
+                            </div>
+                            <h5 class="text-warning fw-bold">เชื่อมบัญชีแล้ว แต่ยังรับแจ้งเตือนไม่ได้</h5>
+                            <p class="text-muted small mb-3">กรุณาเพิ่ม LINE Official Account ของระบบเป็นเพื่อน แล้วกลับมาที่หน้านี้อีกครั้ง</p>
+                        </div>
+                        <div class="d-flex flex-wrap justify-content-center gap-2">
+                            @if(config('services.line.official_account_id'))
+                                <a href="https://line.me/R/ti/p/{{ rawurlencode(config('services.line.official_account_id')) }}" class="btn text-white rounded-pill px-4 fw-bold shadow-sm" style="background-color: #06C755;">
+                                    <i class="fab fa-line me-1"></i> เพิ่มเพื่อน LINE OA
+                                </a>
+                            @endif
+                            <form action="{{ route('line.refresh_status') }}" method="POST">
+                                @csrf
+                                <button type="submit" class="btn btn-outline-success rounded-pill px-4 fw-bold">
+                                    <i class="fas fa-sync-alt me-1"></i> ตรวจสอบอีกครั้ง
+                                </button>
+                            </form>
+                            <form action="{{ route('line.unlink') }}" method="POST">
+                                @csrf
+                                <button type="submit" class="btn btn-outline-danger rounded-pill px-4 fw-bold">ยกเลิกการเชื่อมต่อ</button>
+                            </form>
+                        </div>
                     @else
                         <div class="mb-3">
                             <img src="https://upload.wikimedia.org/wikipedia/commons/4/41/LINE_logo.svg" alt="LINE" style="width: 60px;" class="mb-3">
@@ -322,6 +349,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     @if(session('error'))
         Swal.fire({ icon: 'error', title: 'ผิดพลาด!', text: '{{ session("error") }}', confirmButtonColor: '#dc2626' });
+    @endif
+
+    @if(session('warning'))
+        Swal.fire({ icon: 'warning', title: 'ต้องเพิ่มเพื่อน LINE OA', text: @json(session('warning')), confirmButtonColor: '#f59e0b' });
     @endif
 
     @if($errors->any())

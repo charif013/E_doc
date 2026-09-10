@@ -20,8 +20,10 @@ class DocumentPolicy
             return true;
         }
 
-        $hasAssignment = $document->assigned_user_id === $user->id
-            || ($user->hasRole('head') && $document->assigned_to === $user->department);
+        $assignmentIsActive = in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+            && in_array($document->assignment_status, ['pending', 'accepted', 'delegated', 'in_progress', 'completed'], true);
+        $hasAssignment = $assignmentIsActive && ($document->assigned_user_id === $user->id
+            || ($user->hasRole('head') && $document->assigned_to === $user->department));
         $hasBooking = RoomBooking::where('document_id', $document->id)
             ->where(function ($query) use ($user) {
                 $query->where('created_by', $user->id)

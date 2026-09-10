@@ -63,6 +63,46 @@ return [
             ]) : [],
         ],
 
+        // Isolated target used while eDOC V2 is built and validated. Keeping a
+        // separate connection prevents migration work from mutating edoc_db.
+        'mysql_v2' => [
+            'driver' => 'mysql',
+            'url' => env('V2_DATABASE_URL'),
+            'host' => env('V2_DB_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('V2_DB_PORT', env('DB_PORT', '3306')),
+            'database' => env('V2_DB_DATABASE', 'e_docv2'),
+            'username' => env('V2_DB_USERNAME', env('DB_USERNAME', 'forge')),
+            'password' => env('V2_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'unix_socket' => env('V2_DB_SOCKET', env('DB_SOCKET', '')),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => 'InnoDB',
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('V2_MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
+        // Optional verification connection after cutover. Its database user
+        // must receive SELECT only; application code must never write through it.
+        'mysql_legacy_readonly' => [
+            'driver' => 'mysql',
+            'host' => env('LEGACY_RO_DB_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('LEGACY_RO_DB_PORT', env('DB_PORT', '3306')),
+            'database' => env('LEGACY_RO_DB_DATABASE', 'edoc_db'),
+            'username' => env('LEGACY_RO_DB_USERNAME', env('DB_USERNAME', 'root')),
+            'password' => env('LEGACY_RO_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'unix_socket' => env('LEGACY_RO_DB_SOCKET', env('DB_SOCKET', '')),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => 'InnoDB',
+        ],
+
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DATABASE_URL'),

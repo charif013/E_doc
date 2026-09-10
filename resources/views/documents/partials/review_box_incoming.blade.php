@@ -2,7 +2,11 @@
 @php
     $user = auth()->user();
     $isNayok = $user->hasRole('executive');
-    $isPalad = $user->hasAnyRole(['palad', 'deputy-palad']);
+    $noAssignmentValue = '__NO_ASSIGNMENT__';
+    $selectedAssignment = old('assignment_choice');
+    if ($selectedAssignment === null) {
+        $selectedAssignment = $document->assigned_to ?: ($isNayok ? $noAssignmentValue : '');
+    }
 @endphp
 
 <form action="{{ route('documents.review', $document->uuid ?? $document->id) }}" method="POST" id="reviewFormIncoming">    @csrf
@@ -14,29 +18,30 @@
             {{-- 🌟 ซ่อน/แสดง ช่องมอบหมาย: เฉพาะ ปลัด, รองปลัด และ นายกฯ ถึงจะเห็น --}}
             @hasanyrole('palad|deputy-palad|executive')
             <div class="col-md-12 mb-2">
-                <label class="form-label fw-bold text-dark"><i class="fas fa-share-nodes me-1 text-primary"></i> มอบหมายส่วนราชการ</label>
+                <label class="form-label fw-bold text-dark" for="assignment_choice">
+                    <i class="fas fa-share-nodes me-1 text-primary"></i> การมอบหมายงาน <span class="text-danger">*</span>
+                </label>
                 
                 {{-- 💡 ถ้านายกฯ เปิดดู และปลัดเคยเลือกไว้แล้ว ให้โชว์แจ้งเตือนให้รู้ --}}
-                @if($isNayok && $document->assigned_to)
+                @if($isNayok)
                     <div class="alert alert-info py-2 px-3 mb-2 small border-0" style="background-color: #e0f2fe; color: #0369a1;">
-                        <i class="fas fa-info-circle me-1"></i> ปลัด อบต. เสนอให้มอบหมาย: <strong>{{ $document->assigned_to }}</strong><br>
-                        <span class="text-muted" style="font-size: 12px;">(ท่านนายกฯ สามารถเปลี่ยนการมอบหมาย หรือยึดตามที่ปลัดเสนอได้เลยครับ)</span>
+                        <i class="fas fa-info-circle me-1"></i> ปลัด อบต. เสนอ: <strong>{{ $document->assigned_to ?: 'ไม่มอบหมาย' }}</strong><br>
+                        <span class="text-muted" style="font-size: 12px;">หากไม่เปลี่ยน ระบบจะยืนยันตามค่าที่ปลัดเสนอไว้</span>
                     </div>
                 @endif
 
-                {{-- 💡 Dropdown เลือกกอง: นายกต้องเลือก (required) แต่ปลัดไม่ต้องเลือกก็ได้ --}}
-               <select name="assigned_to" class="form-select form-select-lg border-primary-subtle rounded-3">
-                    <option value="" {{ empty($document->assigned_to) ? 'selected' : '' }}>
-                        -- {{ $isPalad ? 'ไม่ระบุ (ให้นายกฯ เป็นผู้สั่งการ)' : 'หากมีกอง/สำนัก ที่รับผิดชอบ (ระบุ)' }} --
-                    </option>
-                    <option value="สำนักงานปลัด"                      {{ $document->assigned_to == 'สำนักงานปลัด'                      ? 'selected' : '' }}>สำนักงานปลัด</option>
-                    <option value="กองคลัง"                            {{ $document->assigned_to == 'กองคลัง'                            ? 'selected' : '' }}>กองคลัง</option>
-                    <option value="กองช่าง"                            {{ $document->assigned_to == 'กองช่าง'                            ? 'selected' : '' }}>กองช่าง</option>
-                    <option value="กองการศึกษา ศาสนา และวัฒนธรรม"     {{ $document->assigned_to == 'กองการศึกษา ศาสนา และวัฒนธรรม'     ? 'selected' : '' }}>กองการศึกษา ศาสนา และวัฒนธรรม</option>
-                    <option value="กองสาธารณสุขและสิ่งแวดล้อม"        {{ $document->assigned_to == 'กองสาธารณสุขและสิ่งแวดล้อม'        ? 'selected' : '' }}>กองสาธารณสุขและสิ่งแวดล้อม</option>
-                    <option value="กองสวัสดิการสังคม"                 {{ $document->assigned_to == 'กองสวัสดิการสังคม'                 ? 'selected' : '' }}>กองสวัสดิการสังคม</option>
+                <select name="assignment_choice" id="assignment_choice" class="form-select form-select-lg border-primary-subtle rounded-3" required>
+                    <option value="" disabled {{ $selectedAssignment === '' ? 'selected' : '' }}>-- กรุณาเลือกการมอบหมาย --</option>
+                    <option value="{{ $noAssignmentValue }}" {{ $selectedAssignment === $noAssignmentValue ? 'selected' : '' }}>ไม่มอบหมายให้ส่วนราชการใด</option>
+                    <option value="สำนักงานปลัด"                      {{ $selectedAssignment === 'สำนักงานปลัด'                      ? 'selected' : '' }}>สำนักงานปลัด</option>
+                    <option value="กองคลัง"                            {{ $selectedAssignment === 'กองคลัง'                            ? 'selected' : '' }}>กองคลัง</option>
+                    <option value="กองช่าง"                            {{ $selectedAssignment === 'กองช่าง'                            ? 'selected' : '' }}>กองช่าง</option>
+                    <option value="กองการศึกษา ศาสนา และวัฒนธรรม"     {{ $selectedAssignment === 'กองการศึกษา ศาสนา และวัฒนธรรม'     ? 'selected' : '' }}>กองการศึกษา ศาสนา และวัฒนธรรม</option>
+                    <option value="กองสาธารณสุขและสิ่งแวดล้อม"        {{ $selectedAssignment === 'กองสาธารณสุขและสิ่งแวดล้อม'        ? 'selected' : '' }}>กองสาธารณสุขและสิ่งแวดล้อม</option>
+                    <option value="กองสวัสดิการสังคม"                 {{ $selectedAssignment === 'กองสวัสดิการสังคม'                 ? 'selected' : '' }}>กองสวัสดิการสังคม</option>
                 </select>
-                
+                <div class="form-text"><i class="fas fa-lock me-1"></i>งานจะถูกส่งให้ส่วนราชการหลังผู้ลงนามคนสุดท้ายอนุมัติแล้วเท่านั้น</div>
+                @error('assignment_choice')<div class="text-danger small fw-bold mt-1">{{ $message }}</div>@enderror
             </div>
             @endhasanyrole
 
@@ -54,7 +59,7 @@
             </div>
             <div class="col-md-7 mb-2">
                 <div class="d-flex gap-2">
-                    <button type="submit" onclick="document.getElementById('is_approved_incoming').value='1'" class="btn btn-primary flex-grow-1 py-2 fw-bold rounded-pill shadow-sm">
+                    <button type="submit" onclick="prepareIncomingReview(true)" class="btn btn-primary flex-grow-1 py-2 fw-bold rounded-pill shadow-sm">
                         <i class="fas fa-signature me-1"></i> 
                         @if($isNayok)
                             ลงนามสั่งการ
@@ -63,7 +68,7 @@
                         @endif
                     </button>
                     {{-- 🌟 เพิ่มปุ่มตีกลับเผื่อใช้ --}}
-                    <button type="submit" onclick="document.getElementById('is_approved_incoming').value='0'" class="btn btn-outline-danger py-2 fw-bold rounded-pill shadow-sm">
+                    <button type="submit" onclick="prepareIncomingReview(false)" class="btn btn-outline-danger py-2 fw-bold rounded-pill shadow-sm">
                         <i class="fas fa-times-circle me-1"></i> ตีกลับ
                     </button>
                 </div>
@@ -71,3 +76,11 @@
         </div>
     </div>
 </form>
+
+<script>
+    function prepareIncomingReview(isApproved) {
+        document.getElementById('is_approved_incoming').value = isApproved ? '1' : '0';
+        const assignment = document.getElementById('assignment_choice');
+        if (assignment) assignment.required = isApproved;
+    }
+</script>

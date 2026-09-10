@@ -44,6 +44,15 @@ return [
             'throw' => false,
         ],
 
+        // เอกสารราชการทุกชนิดต้องอยู่นอก public web root และดาวน์โหลดผ่าน
+        // controller ที่ตรวจ Policy เท่านั้น
+        'documents' => [
+            'driver' => 'local',
+            'root' => storage_path('app/documents'),
+            'visibility' => 'private',
+            'throw' => true,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

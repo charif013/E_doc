@@ -9,9 +9,33 @@ use Illuminate\Support\Facades\Log;
 
 class LineMessagingService
 {
+    public function canAccessUserProfile(string $lineId): bool
+    {
+        $token = config('services.line.messaging_token');
+        if (empty($token) || !preg_match('/^U[0-9a-f]{32}$/i', $lineId)) {
+            return false;
+        }
+
+        try {
+            return Http::withToken($token)
+                ->acceptJson()
+                ->timeout(10)
+                ->retry(2, 250)
+                ->get('https://api.line.me/v2/bot/profile/'.$lineId)
+                ->successful();
+        } catch (\Throwable $e) {
+            Log::warning('LINE profile verification failed.', [
+                'line_id_suffix' => substr($lineId, -6),
+                'message' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
     public function sendToUser(?User $user, string $message): bool
     {
-        if (!$user || empty($user->line_id)) {
+        if (!$user || empty($user->line_id) || $user->line_friend_status !== true) {
             return false;
         }
 
@@ -58,7 +82,9 @@ class LineMessagingService
         $collection = $users instanceof Collection ? $users : collect($users);
 
         return $collection
-            ->filter(fn ($user) => $user instanceof User && !empty($user->line_id))
+            ->filter(fn ($user) => $user instanceof User
+                && !empty($user->line_id)
+                && $user->line_friend_status === true)
             ->unique('id')
             ->sum(fn (User $user) => $this->sendToUser($user, $message) ? 1 : 0);
     }
@@ -69,6 +95,7 @@ class LineMessagingService
             ->when($department, fn ($query) => $query->where('department', $department))
             ->whereNotNull('line_id')
             ->where('line_id', '!=', '')
+            ->where('line_friend_status', true)
             ->get();
     }
 }

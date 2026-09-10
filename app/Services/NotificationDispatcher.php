@@ -15,7 +15,9 @@ class NotificationDispatcher
     public function toUsers(iterable $users, string $message): void
     {
         $ids = collect($users)
-            ->filter(fn ($user) => $user instanceof User && ! empty($user->line_id))
+            ->filter(fn ($user) => $user instanceof User
+                && ! empty($user->line_id)
+                && $user->line_friend_status === true)
             ->pluck('id')->unique()->values()->all();
 
         if ($ids !== []) {

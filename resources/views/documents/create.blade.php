@@ -18,8 +18,8 @@
         </div>
         <div class="d-flex align-items-center gap-3">
             <span class="text-muted fw-bold d-none d-md-inline">{{ now()->locale('th')->translatedFormat('d M Y') }}</span>
-            <a href="{{ route('home') }}" class="btn btn-light btn-sm rounded-pill px-3 shadow-sm border">
-                <i class="fas fa-arrow-left me-1"></i> กลับหน้าหลัก
+            <a href="{{ route('home') }}" class="ds-back-link">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก
             </a>
         </div>
     </div>
@@ -38,9 +38,18 @@
 
     {{-- 🌟 พื้นที่กระดาษ A4 (Editor) --}}
     <div class="mx-auto" style="max-width: 900px;">
+        <nav class="draft-stepper mb-4" aria-label="ขั้นตอนการสร้างเอกสาร">
+            <ol>
+                <li class="is-active" data-step-indicator="1" aria-current="step"><span>1</span><strong>รายละเอียดเอกสาร</strong></li>
+                <li data-step-indicator="2"><span>2</span><strong>เส้นทางพิจารณา</strong></li>
+                <li data-step-indicator="3"><span>3</span><strong>ตรวจสอบและบันทึก</strong></li>
+            </ol>
+        </nav>
         <form action="{{ route('documents.store') }}" method="POST" id="docForm" enctype="multipart/form-data">
             @csrf
             
+            <section class="wizard-step" data-step="1" aria-labelledby="step-one-title">
+            <h2 id="step-one-title" class="visually-hidden">รายละเอียดเอกสาร</h2>
             <div class="card border-0 shadow-sm doc-paper-container" style="border-radius: 12px; overflow: hidden;">
                 
                 {{-- แถบสถานะด้านบนกระดาษ --}}
@@ -85,7 +94,7 @@
                         <input type="text" name="title" class="dfv-input flex-grow-1 text-dark" placeholder="ระบุหัวข้อเรื่อง..." required>
                     </div>
 
-                    <div class="mb-3 d-flex align-items-baseline">
+                    <div class="mb-3 d-flex align-items-baseline document-recipient-row">
                         <span style="font-size: 20pt; font-weight: bold; margin-right: 12px; white-space: nowrap; flex-shrink: 0; color: #000;">เรียน</span>
                         <div class="flex-grow-1">
                             {{-- 🌟 ระบบ Dropdown (Select2) สไตล์กระดาษ 🌟 --}}
@@ -176,15 +185,28 @@
 
                 </div>
             </div>
+            <div class="wizard-actions">
+                <button type="button" class="btn btn-primary rounded-pill px-4 fw-bold" data-next-step>ถัดไป: เส้นทางพิจารณา <i class="fas fa-arrow-right ms-2" aria-hidden="true"></i></button>
+            </div>
+            </section>
 
             {{-- เลือกเส้นทางหลังกรอกเนื้อหา เพื่อจัดลำดับผู้รับได้สะดวก --}}
-            <div class="mt-4">
+            <section class="wizard-step mt-4" data-step="2" aria-labelledby="step-two-title" hidden>
+                <h2 id="step-two-title" class="h5 fw-bold mb-1">กำหนดเส้นทางพิจารณา</h2>
+                <p class="text-secondary mb-3">เลือกผู้พิจารณาตามลำดับที่เอกสารต้องส่งถึง</p>
                 @include('documents.partials.route_selector')
-            </div>
+                <div class="wizard-actions justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary rounded-pill px-4" data-prev-step><i class="fas fa-arrow-left me-2" aria-hidden="true"></i>ย้อนกลับ</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4 fw-bold" data-next-step>ถัดไป: ตรวจสอบ <i class="fas fa-arrow-right ms-2" aria-hidden="true"></i></button>
+                </div>
+            </section>
 
             {{-- ตั้งค่าการส่งและปุ่มดำเนินการ อยู่ท้ายฟอร์มตามลำดับการใช้งาน --}}
+            <section class="wizard-step" data-step="3" aria-labelledby="step-three-title" hidden>
             <div class="card border-0 shadow-sm mb-4 submission-settings" style="border-radius: 14px;">
                 <div class="card-body p-4">
+                    <h2 id="step-three-title" class="h5 fw-bold">ตรวจสอบก่อนบันทึก</h2>
+                    <div id="draftSummary" class="draft-summary mb-4" aria-live="polite"></div>
                     <div class="d-flex align-items-center mb-3">
                         <div class="rounded-circle bg-primary-subtle text-primary d-flex align-items-center justify-content-center me-2" style="width: 34px; height: 34px;">
                             <i class="fas fa-sliders-h"></i>
@@ -216,13 +238,15 @@
                         </div>
                     </div>
 
-                    <div class="d-flex justify-content-end mt-4 pt-3 border-top">
+                    <div class="d-flex justify-content-between mt-4 pt-3 border-top gap-2">
+                        <button type="button" class="btn btn-outline-secondary rounded-pill px-4" data-prev-step><i class="fas fa-arrow-left me-2" aria-hidden="true"></i>ย้อนกลับ</button>
                         <button type="submit" class="btn btn-primary rounded-pill px-5 py-2 fw-bold shadow-sm" style="background-color: var(--primary);">
                             <i class="fas fa-save me-2"></i>บันทึกร่างและดำเนินการต่อ
                         </button>
                     </div>
                 </div>
             </div>
+            </section>
         </form>
     </div>
 </div>
@@ -260,6 +284,11 @@
     }
     .dfv-input:focus:not([readonly]) {
         border-bottom: 1.5px solid var(--primary);
+    }
+
+    .document-recipient-row {
+        border-top: 1.5px solid #000 !important;
+        padding-top: 5px;
     }
     
     /* 🌟 แต่ง Select2 ให้กลืนไปกับกระดาษ A4 🌟 */
@@ -305,6 +334,30 @@
     }
 
     input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
+
+    .draft-stepper { background: #fff; border: 1px solid var(--border-color); border-radius: 14px; padding: 1rem 1.25rem; box-shadow: var(--shadow-sm); }
+    .draft-stepper ol { display: grid; grid-template-columns: repeat(3, 1fr); list-style: none; padding: 0; margin: 0; }
+    .draft-stepper li { position: relative; display: flex; flex-direction: column; align-items: center; gap: .4rem; color: #64748b; min-width: 0; text-align: center; }
+    .draft-stepper li:not(:last-child)::after { content: ''; position: absolute; height: 2px; left: calc(50% + 22px); right: calc(-50% + 22px); top: 15px; background: #e2e8f0; }
+    .draft-stepper li span { width: 32px; height: 32px; display: grid; place-items: center; border: 2px solid #cbd5e1; background: #fff; border-radius: 50%; font-weight: 700; z-index: 1; flex: 0 0 auto; }
+    .draft-stepper li.is-active { color: var(--primary-dark); }
+    .draft-stepper li.is-active span, .draft-stepper li.is-complete span { color: #fff; border-color: var(--primary); background: var(--primary); }
+    .draft-stepper li.is-complete:not(:last-child)::after { background: var(--primary); }
+    .wizard-actions { display: flex; justify-content: flex-end; gap: .75rem; padding: 1rem 0; }
+    .draft-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; }
+    .draft-summary div { min-width: 0; }
+    .draft-summary small { display: block; color: #64748b; }
+    .draft-summary strong { display: block; overflow-wrap: anywhere; }
+    @media (max-width: 767.98px) {
+        .draft-stepper { padding-inline: .75rem; }
+        .draft-stepper ol { gap: .25rem; }
+        .draft-stepper li { align-items: center; gap: .25rem; font-size: .82rem; }
+        .draft-stepper li:not(:last-child)::after { left: calc(50% + 20px); right: calc(-50% + 20px); }
+        .draft-stepper li strong { width: 100%; padding-right: .2rem; font-size: .75rem; line-height: 1.25; overflow-wrap: anywhere; }
+        .draft-summary { grid-template-columns: 1fr; }
+        .wizard-actions { flex-direction: column-reverse; }
+        .wizard-actions .btn { width: 100%; min-height: 48px; }
+    }
 </style>
 
 <script>
@@ -351,6 +404,103 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('docForm');
+    const steps = Array.from(form.querySelectorAll('.wizard-step'));
+    const indicators = Array.from(document.querySelectorAll('[data-step-indicator]'));
+    const storageKey = 'edoc-internal-draft-{{ auth()->id() }}';
+    let currentStep = 1;
+    let saveTimer;
+
+    function showStep(stepNumber) {
+        currentStep = stepNumber;
+        steps.forEach(step => { step.hidden = Number(step.dataset.step) !== stepNumber; });
+        indicators.forEach((indicator, index) => {
+            const number = index + 1;
+            indicator.classList.toggle('is-active', number === stepNumber);
+            indicator.classList.toggle('is-complete', number < stepNumber);
+            if (number === stepNumber) indicator.setAttribute('aria-current', 'step');
+            else indicator.removeAttribute('aria-current');
+        });
+        if (stepNumber === 3) updateSummary();
+        document.querySelector('.draft-stepper').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function validateCurrentStep() {
+        const current = steps.find(step => Number(step.dataset.step) === currentStep);
+        const requiredFields = Array.from(current.querySelectorAll('[required]'));
+        const invalid = requiredFields.find(field => !field.checkValidity());
+        if (invalid) {
+            invalid.reportValidity();
+            invalid.focus();
+            return false;
+        }
+        return true;
+    }
+
+    function draftData() {
+        const data = {};
+        form.querySelectorAll('input:not([type="file"]):not([type="hidden"]), textarea, select').forEach(field => {
+            if (!field.name) return;
+            if (field.type === 'checkbox' || field.type === 'radio') data[field.name] = field.checked;
+            else data[field.name] = field.value;
+        });
+        return data;
+    }
+
+    function saveDraft() {
+        try {
+            localStorage.setItem(storageKey, JSON.stringify({ savedAt: Date.now(), values: draftData() }));
+        } catch (_) {
+            // localStorage อาจถูกปิดใช้งาน แต่ผู้ใช้ยังกรอกและบันทึกแบบปกติได้
+        }
+    }
+
+    function restoreDraft() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+            if (!saved?.values) return;
+            Object.entries(saved.values).forEach(([name, value]) => {
+                const fields = form.querySelectorAll(`[name="${CSS.escape(name)}"]`);
+                fields.forEach(field => {
+                    if (field.type === 'checkbox' || field.type === 'radio') field.checked = Boolean(value);
+                    else if (!field.value || field.name !== 'doc_date') field.value = value;
+                    if (window.jQuery && jQuery(field).hasClass('select2-hidden-accessible')) jQuery(field).trigger('change');
+                });
+            });
+        } catch (_) { /* ข้ามข้อมูลร่างที่อ่านไม่ได้ */ }
+    }
+
+    function updateSummary() {
+        const get = name => form.elements[name]?.value?.trim() || '—';
+        const reviewerCount = form.querySelectorAll('[name^="reviewer_ids"]').length;
+        document.getElementById('draftSummary').innerHTML = `
+            <div><small>เรื่อง</small><strong>${escapeHtml(get('title'))}</strong></div>
+            <div><small>เรียน</small><strong>${escapeHtml(get('doc_to'))}</strong></div>
+            <div><small>ผู้พิจารณา</small><strong>${reviewerCount ? reviewerCount + ' คน' : 'ยังไม่ได้เลือก'}</strong></div>
+            <div><small>การจัดชั้น</small><strong>${escapeHtml(get('doc_speed'))} · ${escapeHtml(get('doc_secret'))}</strong></div>`;
+    }
+
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value;
+        return div.innerHTML;
+    }
+
+    form.addEventListener('input', () => {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveDraft, 700);
+    });
+    form.addEventListener('change', () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 300); });
+    form.querySelectorAll('[data-next-step]').forEach(button => button.addEventListener('click', () => {
+        if (validateCurrentStep()) showStep(Math.min(3, currentStep + 1));
+    }));
+    form.querySelectorAll('[data-prev-step]').forEach(button => button.addEventListener('click', () => showStep(Math.max(1, currentStep - 1))));
+    form.addEventListener('submit', () => localStorage.removeItem(storageKey));
+    restoreDraft();
+    showStep(1);
 });
 
 function loadTemplate(type, event) {

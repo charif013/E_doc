@@ -19,7 +19,10 @@ class QueuedWorkflowTest extends TestCase
     {
         Queue::fake();
         $creator = User::factory()->create();
-        $invitee = User::factory()->create(['line_id' => 'U-line-test']);
+        $invitee = User::factory()->create([
+            'line_id' => 'U-line-test',
+            'line_friend_status' => true,
+        ]);
         $room = Room::create(['name' => 'ห้องคิว', 'status' => 'active']);
 
         $this->actingAs($creator)->post(route('bookings.store'), [

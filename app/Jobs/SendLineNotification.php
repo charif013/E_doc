@@ -31,7 +31,10 @@ class SendLineNotification implements ShouldQueue
             return;
         }
 
-        $users = User::whereKey($this->userIds)->whereNotNull('line_id')->get();
+        $users = User::whereKey($this->userIds)
+            ->whereNotNull('line_id')
+            ->where('line_friend_status', true)
+            ->get();
         $sent = $line->sendToUsers($users, $this->message);
         if ($sent < $users->count()) {
             throw new \RuntimeException('ส่ง LINE notification ไม่ครบทุกผู้รับ');

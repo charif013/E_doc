@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Document;
 use App\Models\DocumentRoute;
+use App\Models\LeaveRequest;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\RateLimiter; 
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Http;
@@ -18,11 +20,18 @@ use Symfony\Component\Process\Process;
 use Symfony\Component\Process\Exception\ProcessFailedException;
 use App\Services\LineMessagingService;
 use App\Jobs\ArchiveExternalDocument;
+use App\Jobs\ArchiveV2ExternalDocument;
 use App\Services\AuditLogger;
 use App\Services\NotificationDispatcher;
+use App\Services\AssignmentNotificationService;
+use App\Services\DocumentFileStorage;
 use App\Jobs\ProcessDocumentExtraction;
 use App\Models\DocumentExtractionTask;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use App\Services\V2\DocumentReadService as V2DocumentReadService;
+use App\Services\V2\DocumentWriteService as V2DocumentWriteService;
+use App\Models\V2\User as V2User;
 
 
 class DocumentController extends Controller
@@ -36,8 +45,12 @@ class DocumentController extends Controller
         return redirect()->route('home'); 
     }
 
-    public function show($id)
+    public function show($id, V2DocumentReadService $v2Documents)
     {
+       if (config('edoc.v2.document_reads')) {
+           return $this->showV2($id, $v2Documents);
+       }
+
        $document = Document::with(['creator', 'supervisor', 'palad', 'nayok', 'routes.user'])
             ->whereIdentifier($id)->firstOrFail();
             
@@ -59,8 +72,10 @@ class DocumentController extends Controller
                             $inviteeQuery->where('users.id', $user->id);
                         });
                 })->exists();
-            $hasAssignmentAccess = $document->assigned_user_id === $user->id
-                || ($user->hasRole('head') && $document->assigned_to === $user->department);
+            $assignmentIsActive = in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+                && in_array($document->assignment_status, ['pending', 'accepted', 'delegated', 'in_progress', 'completed'], true);
+            $hasAssignmentAccess = $assignmentIsActive && ($document->assigned_user_id === $user->id
+                || ($user->hasRole('head') && $document->assigned_to === $user->department));
             $hasReachedUser = $routeForUser
                 && $document->current_step !== null
                 && $routeForUser->step_order <= $document->current_step;
@@ -155,13 +170,52 @@ class DocumentController extends Controller
         return view('documents.show', compact('document', 'currentRoute', 'canApprove'));
     }
 
+    private function showV2(string|int $id, V2DocumentReadService $documents)
+    {
+        $document = $documents->find($id);
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $this->authorize('view', $document);
+
+        if ($document->confidentiality?->level_no > 1) {
+            $this->authorize('accessConfidential', $document);
+            $unlockedAt = session('secret_unlocked_'.$document->id);
+            if (! $unlockedAt || (now()->timestamp - $unlockedAt) > 180) {
+                session()->forget('secret_unlocked_'.$document->id);
+                return view('documents.unlock_secret', compact('document'));
+            }
+            session(['secret_unlocked_'.$document->id => now()->timestamp]);
+        }
+
+        $currentRoute = $document->routes->firstWhere('step_order', $document->current_step);
+        $routeStatus = $currentRoute?->status instanceof \BackedEnum
+            ? $currentRoute->status->value
+            : $currentRoute?->status;
+        $canApprove = config('edoc.v2.write_enabled') && $currentRoute
+            && $currentRoute->assigned_user_id === $user->id
+            && strtoupper((string) $routeStatus) === 'PENDING'
+            && $document->current_step > 1;
+
+        $view = match ($document->doc_type) {
+            'outgoing' => 'documents.show_outgoing',
+            'internal' => 'documents.show_internal',
+            'incoming' => 'documents.show_incoming',
+            default => 'documents.show',
+        };
+
+        return view($view, compact('document', 'currentRoute', 'canApprove'));
+    }
+
     public function createUpload()
     {
         return view('documents.create_upload', ['users' => $this->routeUsers()]);
     }
 
-    public function storeUpload(Request $request)
+    public function storeUpload(Request $request, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            return $this->storeV2Document($request, $v2Writes, 'internal', true);
+        }
         // 🌟 ตัด doc_number และ running_number ออกจากการบังคับกรอก (รอธุรการออกให้ทีหลัง)
         $request->validate([
             'doc_from'       => 'required|string|max:255',
@@ -204,7 +258,7 @@ class DocumentController extends Controller
         $document->doc_speed      = $request->doc_speed ?? 'ปกติ';
 
         if ($request->hasFile('file')) {
-            $path = $request->file('file')->store('attachments', 'public');
+            $path = app(DocumentFileStorage::class)->store($request->file('file'), 'attachments');
             $document->attachment_path = $path;
         }
 
@@ -225,8 +279,11 @@ class DocumentController extends Controller
         return view('documents.create', compact('users'));
     }
 
-    public function store(Request $request)
+    public function store(Request $request, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            return $this->storeV2Document($request, $v2Writes, 'internal', false);
+        }
         $request->validate([
             'title'    => 'required|string|max:255',
             'content'  => 'required|string',
@@ -262,8 +319,27 @@ class DocumentController extends Controller
             ->with('success', 'บันทึกร่างเอกสารและกำหนดเส้นทางสำเร็จ กรุณาตรวจสอบและลงนาม');
     }
 
-    public function sign(Request $request, $id)
+    public function sign(Request $request, $id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            $request->validate(['pin' => 'required|digits:6']);
+            $document = $v2Documents->find($id);
+            $this->authorize('update', $document);
+            if ($document->doc_type === 'incoming'
+                && $document->external_url
+                && ! $document->attachment_path
+                && ! $document->external_attachment_path) {
+                return redirect()->route('documents.show', $document->uuid)->with(
+                    'error',
+                    'ไม่สามารถส่งเรื่องได้ กรุณาเปิดลิงก์ต้นฉบับ ดาวน์โหลดเอกสาร แล้วแนบไฟล์ที่ดาวน์โหลดมาก่อนส่งเรื่อง'
+                );
+            }
+            $actor = $this->validatedV2Signer($request, 'pin-sign-attempts:');
+            $submittedDocument = $v2Writes->submit($document, $actor);
+            $this->notifySarabanForV2Numbering($submittedDocument);
+            $this->notifyCurrentV2Reviewer($submittedDocument);
+            return redirect()->route('documents.show', $document->uuid)->with('success', 'ลงนามและส่งเรื่องเข้าสู่คิวพิจารณาเรียบร้อยแล้ว');
+        }
         $request->validate(['pin' => 'required|digits:6']);
 
         return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $id) {
@@ -287,6 +363,16 @@ class DocumentController extends Controller
         if ($document->created_by !== $user->id) {
             return redirect()->route('documents.show', $targetDocId)
                 ->with('error', 'คุณไม่มีสิทธิ์ลงนามในเอกสารฉบับนี้');
+        }
+
+        if ($document->doc_type === 'incoming'
+            && $document->external_url
+            && ! $document->attachment_path
+            && ! $document->external_attachment_path) {
+            return redirect()->route('documents.show', $targetDocId)->with(
+                'error',
+                'ไม่สามารถส่งเรื่องได้ กรุณาเปิดลิงก์ต้นฉบับ ดาวน์โหลดเอกสาร แล้วแนบไฟล์ที่ดาวน์โหลดมาก่อนส่งเรื่อง'
+            );
         }
 
         $throttleKey = 'pin-sign-attempts:' . $user->id;
@@ -331,7 +417,9 @@ class DocumentController extends Controller
 
             if ($nextRoute) {
                 // หากมีการตั้งคิวไว้ ให้เปลี่ยนสถานะและเลื่อนคิวไปขั้น 2
-                $document->status = 'PROCESSING';
+                $hasRouteAfterNext = $document->routes
+                    ->contains(fn ($route) => (int) $route->step_order > (int) $nextRoute->step_order);
+                $document->status = $hasRouteAfterNext ? 'PROCESSING' : 'WAITING_APPROVER';
                 $document->current_step = 2; // 🌟 เลื่อนไปคิว 2
                 $success_msg = 'ลงนามและส่งเรื่องให้ ' . ($nextRoute->user?->name ?? 'ผู้พิจารณาท่านต่อไป') . ' พิจารณาเรียบร้อยแล้ว';            } else {
                 // ==========================================
@@ -387,8 +475,8 @@ class DocumentController extends Controller
                 } else {
                     // ถ้าไม่ปั๊ม ให้ลบไฟล์ที่เคยปั๊มไปแล้ว (ถ้ามี) ทิ้งไป เพื่อป้องกันความสับสน
                     $stampedPath = 'documents/stamped/stamped_' . $document->id . '.pdf';
-                    if ( Storage::disk('public')->exists($stampedPath)) {
-                         Storage::disk('public')->delete($stampedPath);
+                    if (app(DocumentFileStorage::class)->exists($stampedPath)) {
+                         app(DocumentFileStorage::class)->delete($stampedPath);
                     }
                 }
 
@@ -421,8 +509,20 @@ class DocumentController extends Controller
         }, 3);
     }
 
-    public function edit($id)
+    public function edit($id, V2DocumentReadService $v2Documents)
     {
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            $this->authorize('update', $document);
+            if ($document->doc_type === 'incoming') { return view('documents.edit_incoming', compact('document')); }
+            if ($document->doc_type === 'outgoing') {
+                $incomingDocs = \App\Models\V2\Document::with('type')->whereHas('type', fn ($types) => $types->where('code', 'INCOMING'))->latest()->limit(20)->get();
+                $signers = \App\Models\User::role(['executive', 'palad', 'deputy-palad'])->get();
+                return view('documents.edit_outgoing', compact('document', 'incomingDocs', 'signers'));
+            }
+            return str_contains(strip_tags((string) $document->content), 'อ้างอิงจากไฟล์แนบในระบบ')
+                ? view('documents.edit_upload', compact('document')) : view('documents.edit', compact('document'));
+        }
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
             ->whereIdentifier($id)->firstOrFail();
@@ -449,8 +549,15 @@ class DocumentController extends Controller
         return view('documents.edit', compact('document'));
     }
 
-    public function update(Request $request, $id)
+    public function update(Request $request, $id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            $this->authorize('update', $document);
+            $data = $this->validateV2Update($request, $document->doc_type, $document->content);
+            $v2Writes->update($document, $data, Auth::id(), $request->file('file'));
+            return redirect()->route('documents.show', $document->uuid)->with('success', 'แก้ไขเอกสาร V2 เรียบร้อยแล้ว กรุณาลงนามส่งเรื่องใหม่');
+        }
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
             ->whereIdentifier($id)->firstOrFail();
@@ -458,11 +565,11 @@ class DocumentController extends Controller
 
         // 🌟 1. ลบไฟล์ที่ประทับลายเซ็นหรือต่อใบแนบท้ายเก่าทิ้งไป (เพราะเอกสารถูกแก้ไขเนื้อหาแล้ว)
         if ($document->signed_path) {
-            Storage::disk('public')->delete($document->signed_path);
+            app(DocumentFileStorage::class)->delete($document->signed_path);
         }
         $stampedPath = 'documents/stamped/stamped_' . $document->id . '.pdf';
-        if (Storage::disk('public')->exists($stampedPath)) {
-            Storage::disk('public')->delete($stampedPath);
+        if (app(DocumentFileStorage::class)->exists($stampedPath)) {
+            app(DocumentFileStorage::class)->delete($stampedPath);
         }
 
         // 🌟 2. เพิ่มการเคลียร์ signed_path และ creator_signature ให้กลับเป็นค่าว่าง
@@ -511,8 +618,8 @@ class DocumentController extends Controller
             ], $resetApprovals);
 
             if ($request->hasFile('file')) {
-                if ($document->attachment_path) Storage::disk('public')->delete($document->attachment_path);
-                $updateData['attachment_path'] = $request->file('file')->store('incoming_docs', 'public');
+                app(DocumentFileStorage::class)->delete($document->attachment_path);
+                $updateData['attachment_path'] = app(DocumentFileStorage::class)->store($request->file('file'), 'incoming_docs');
                 $updateData['content'] = 'อ้างอิงจากไฟล์แนบในระบบ';
             }
 
@@ -544,8 +651,8 @@ class DocumentController extends Controller
             ], $resetApprovals);
 
             if ($request->hasFile('file')) {
-                if ($document->attachment_path) Storage::disk('public')->delete($document->attachment_path);
-                $updateData['attachment_path'] = $request->file('file')->store('outgoing_docs', 'public');
+                app(DocumentFileStorage::class)->delete($document->attachment_path);
+                $updateData['attachment_path'] = app(DocumentFileStorage::class)->store($request->file('file'), 'outgoing_docs');
             }
             
             $updateData['content'] = $request->filled('attachment') 
@@ -579,8 +686,8 @@ class DocumentController extends Controller
             ], $resetApprovals);
 
             if ($request->hasFile('file')) {
-                if ($document->attachment_path) Storage::disk('public')->delete($document->attachment_path);
-                $updateData['attachment_path'] = $request->file('file')->store('attachments', 'public');
+                app(DocumentFileStorage::class)->delete($document->attachment_path);
+                $updateData['attachment_path'] = app(DocumentFileStorage::class)->store($request->file('file'), 'attachments');
             }
 
             $document->update($updateData);
@@ -605,8 +712,11 @@ class DocumentController extends Controller
         return view('documents.create_incoming', ['users' => $this->routeUsers()]);
     }
 
-    public function storeIncoming(Request $request)
+    public function storeIncoming(Request $request, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            return $this->storeV2Document($request, $v2Writes, 'incoming', false);
+        }
         $request->validate([
             'receive_number'    => 'required|string|max:255',
             'running_number'    => 'required|integer|min:1',
@@ -657,7 +767,7 @@ class DocumentController extends Controller
             : null;
 
         if ($request->hasFile('file')) {
-            $path = $request->file('file')->store('incoming_docs', 'public');
+            $path = app(DocumentFileStorage::class)->store($request->file('file'), 'incoming_docs');
             $document->attachment_path = $path;
             $document->content = 'อ้างอิงจากไฟล์แนบในระบบ';
         } else {
@@ -681,11 +791,10 @@ class DocumentController extends Controller
     // ========================================================================
 
    public function createOutgoing()
-    {
-        $incomingDocs = Document::where('doc_type', 'incoming')
-            ->orderBy('created_at', 'desc')
-            ->limit(20)
-            ->get();
+   {
+        $incomingDocs = config('edoc.v2.document_reads')
+            ? \App\Models\V2\Document::with('type')->whereHas('type', fn ($types) => $types->where('code', 'INCOMING'))->latest()->limit(20)->get()
+            : Document::where('doc_type', 'incoming')->orderBy('created_at', 'desc')->limit(20)->get();
 
         $signers = \App\Models\User::role(['executive', 'palad', 'deputy-palad'])
             ->orWhere(function($query) {
@@ -698,8 +807,11 @@ class DocumentController extends Controller
         return view('documents.create_outgoing', compact('incomingDocs', 'signers', 'users'));
     }
 
-    public function storeOutgoing(Request $request)
+    public function storeOutgoing(Request $request, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            return $this->storeV2Document($request, $v2Writes, 'outgoing', false);
+        }
         $request->validate([
             'doc_number'        => 'required|string|max:255',
             'doc_date'          => 'required|date',
@@ -738,7 +850,7 @@ class DocumentController extends Controller
         $document->current_step      = 1;
 
         if ($request->hasFile('file')) {
-            $path = $request->file('file')->store('outgoing_docs', 'public');
+            $path = app(DocumentFileStorage::class)->store($request->file('file'), 'outgoing_docs');
             $document->attachment_path = $path;
             
             $document->content = $request->filled('attachment') 
@@ -758,18 +870,23 @@ class DocumentController extends Controller
     // --- โซนที่ 4: พิจารณาและอนุมัติ (รวมถึงประทับลายเซ็นอัตโนมัติ) ---
     // ========================================================================
 
-    public function approveList()
+    public function approveList(V2DocumentReadService $v2Documents)
     {
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
+        if (config('edoc.v2.document_reads')) {
+            $documents = $v2Documents->approvalQueue($user);
+            return view('documents.approve_list', compact('documents'));
+        }
+
         if ($user->hasRole('super-admin')) {
-            $documents = Document::whereNotIn('status', ['DRAFT', 'APPROVED', 'REJECTED', 'CANCELED'])
+            $documents = Document::with(['creator', 'routes'])->whereNotIn('status', ['DRAFT', 'APPROVED', 'REJECTED', 'CANCELED'])
                 ->orderBy('created_at', 'desc')->get();
             return view('documents.approve_list', compact('documents'));
         }
 
-        $query = Document::query();
+        $query = Document::with(['creator', 'routes']);
 
         if ($user->hasRole('saraban')) {
             $query->orWhereIn('status', ['WAITING_ADMIN', 'WAITING_NUMBERING']);
@@ -809,6 +926,7 @@ class DocumentController extends Controller
         // เอกสารรอพิจารณา เพื่อไม่ให้ผู้รับต้องตามหาจากคนละเมนู
         $query->orWhere(function ($assignmentQuery) use ($user) {
             $assignmentQuery->where('assigned_user_id', $user->id)
+                ->whereIn('status', ['APPROVED', 'COMPLETED', 'ARCHIVED'])
                 ->whereIn('assignment_status', ['pending', 'delegated']);
         });
 
@@ -816,10 +934,8 @@ class DocumentController extends Controller
             $query->orWhere(function ($headAssignmentQuery) use ($user) {
                 $headAssignmentQuery->where('assigned_to', $user->department)
                     ->whereNull('assigned_user_id')
-                    ->where(function ($statusQuery) {
-                        $statusQuery->whereNull('assignment_status')
-                            ->orWhere('assignment_status', 'pending');
-                    });
+                    ->whereIn('status', ['APPROVED', 'COMPLETED', 'ARCHIVED'])
+                    ->where('assignment_status', 'pending');
             });
         }
 
@@ -828,8 +944,35 @@ class DocumentController extends Controller
         return view('documents.approve_list', compact('documents'));
     }
 
-    public function reviewDocument(Request $request, $id)
+    public function reviewDocument(Request $request, $id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            $request->validate(['pin' => 'required|digits:6']);
+            $document = $v2Documents->find($id);
+            $this->authorize('review', $document);
+            $approved = (string) $request->input('is_approved') === '1';
+            /** @var User $legacyActor */
+            $legacyActor = Auth::user();
+            $assignmentChoice = $this->validatedAssignmentChoice($request, $document, $legacyActor, $approved);
+            $actor = $this->validatedV2Signer($request, 'pin-review-attempts:');
+            if (! $approved) {
+                $request->validate(['comment' => 'required|string|max:1000']);
+            }
+            if (! $legacyActor instanceof User) {
+                abort(401);
+            }
+            $evidenceAction = $legacyActor->hasRole('executive') ? 'EXECUTIVE_APPROVED'
+                : ($legacyActor->hasAnyRole(['palad', 'deputy-palad']) ? 'PALAD_APPROVED'
+                    : ($legacyActor->hasRole('head') ? 'SUPERVISOR_APPROVED' : ($approved ? 'APPROVED' : 'REJECTED')));
+            $reviewedDocument = $v2Writes->review($document, $actor, $approved, $request->input('comment'), $assignmentChoice, $evidenceAction);
+            if ($approved) {
+                $this->notifySarabanForV2Numbering($reviewedDocument);
+                $this->notifyCurrentV2Reviewer($reviewedDocument);
+                $this->notifyActivatedV2Assignment($reviewedDocument, $legacyActor);
+            }
+            return redirect()->route('documents.show', $document->uuid)
+                ->with('success', $approved ? 'บันทึกผลอนุมัติใน V2 เรียบร้อยแล้ว' : 'ตีกลับเอกสารใน V2 เรียบร้อยแล้ว');
+        }
         return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $id) {
         // 🌟 1. ดึงข้อมูลเอกสาร (เพิ่ม 'routes.user' เข้ามาด้วย)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok', 'routes.user'])
@@ -840,6 +983,8 @@ class DocumentController extends Controller
         
         /** @var \App\Models\User $user */
         $user = Auth::user();
+        $approved = (string) $request->input('is_approved') === '1';
+        $assignmentChoice = $this->validatedAssignmentChoice($request, $document, $user, $approved);
 
         if ($document->routes->isNotEmpty()) {
             $this->authorize('review', $document);
@@ -921,16 +1066,33 @@ class DocumentController extends Controller
                     ->exists();
 
                 if ($hasNextRoute) {
-                    $document->update(['current_step' => $nextStep, 'status' => 'PROCESSING']);
+                    $hasRouteAfterNext = \App\Models\DocumentRoute::where('document_id', $document->id)
+                        ->where('step_order', '>', $nextStep)
+                        ->exists();
+                    $nextStepData = [
+                        'current_step' => $nextStep,
+                        'status' => $hasRouteAfterNext ? 'PROCESSING' : 'WAITING_APPROVER',
+                    ];
+                    if ($document->doc_type === 'incoming' && $assignmentChoice !== null) {
+                        $nextStepData['assigned_to'] = $this->assignedUnitFromChoice($assignmentChoice);
+                        $nextStepData['assignment_status'] = null;
+                        $nextStepData['assigned_at'] = null;
+                        $nextStepData['assigned_user_id'] = null;
+                        $nextStepData['delegated_by'] = null;
+                    }
+                    $document->update($nextStepData);
                     $msg = 'อนุมัติสำเร็จ ระบบได้ส่งเรื่องให้ผู้พิจารณาลำดับถัดไปเรียบร้อยแล้ว';
                 } else {
                     $finalData = [
                         'status' => $document->doc_type === 'internal' ? 'WAITING_NUMBERING' : 'APPROVED',
                     ];
-                    if ($document->doc_type === 'incoming' && $request->filled('assigned_to')) {
-                        $finalData['assigned_to'] = $request->assigned_to;
-                        $finalData['assignment_status'] = 'pending';
-                        $finalData['assigned_at'] = now();
+                    if ($document->doc_type === 'incoming') {
+                        $assignedTo = $assignmentChoice !== null
+                            ? $this->assignedUnitFromChoice($assignmentChoice)
+                            : $document->assigned_to;
+                        $finalData['assigned_to'] = $assignedTo;
+                        $finalData['assignment_status'] = $assignedTo ? 'pending' : null;
+                        $finalData['assigned_at'] = $assignedTo ? now() : null;
                         $finalData['assigned_user_id'] = null;
                         $finalData['delegated_by'] = null;
                     }
@@ -966,18 +1128,27 @@ class DocumentController extends Controller
                     $msg = $isFinalSigner ? 'ลงนามหนังสือส่งออกและประทับลายเซ็นเรียบร้อยแล้ว (เอกสารสมบูรณ์)' : 'หัวหน้าส่วนราชการพิจารณาเห็นชอบและส่งเรื่องต่อให้ ปลัด อบต. แล้ว';
 
                 } elseif (($user->hasRole('palad') || $user->hasRole('deputy-palad')) && $document->status === 'WAITING_PALAD') {
-                    $assignedTo = $request->filled('assigned_to') ? $request->assigned_to : $document->assigned_to;
+                    $assignedTo = $assignmentChoice !== null
+                        ? $this->assignedUnitFromChoice($assignmentChoice)
+                        : $document->assigned_to;
                     $isFinalSigner = ($document->doc_type === 'outgoing' && str_contains($document->signer_name ?? '', 'ปลัด'));
                     $nextStatus = $isFinalSigner ? 'APPROVED' : 'WAITING_NAYOK';
 
-                    $document->update([
+                    $paladData = [
                         'status'           => $nextStatus,
                         'palad_id'         => $user->id,
                         'palad_signature'  => $signature,
                         'palad_approved_at'=> now(),
                         'palad_comment'    => $comment, 
                         'assigned_to'      => $assignedTo, 
-                    ]);
+                    ];
+                    if ($document->doc_type === 'incoming') {
+                        $paladData['assignment_status'] = null;
+                        $paladData['assigned_at'] = null;
+                        $paladData['assigned_user_id'] = null;
+                        $paladData['delegated_by'] = null;
+                    }
+                    $document->update($paladData);
                     
                     if ($isFinalSigner) $this->autoStampPdf($document, $user);
                     if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) $this->autoAppendSignaturePage($document);
@@ -993,16 +1164,25 @@ class DocumentController extends Controller
                         $newStatus = 'WAITING_NUMBERING'; $successMsg = 'ลงนามอนุมัติและส่งให้ธุรการลงทะเบียนเลขเรียบร้อยแล้ว';
                     }
 
-                    $assignedTo = $request->filled('assigned_to') ? $request->assigned_to : $document->assigned_to;
+                    $assignedTo = $assignmentChoice !== null
+                        ? $this->assignedUnitFromChoice($assignmentChoice)
+                        : $document->assigned_to;
 
-                    $document->update([
+                    $executiveData = [
                         'status'           => $newStatus,
                         'nayok_id'         => $user->id,
                         'nayok_signature'  => $signature,
                         'nayok_approved_at'=> now(),
                         'nayok_comment'    => $comment, 
                         'assigned_to'      => $assignedTo, 
-                    ]);
+                    ];
+                    if ($document->doc_type === 'incoming') {
+                        $executiveData['assignment_status'] = $assignedTo ? 'pending' : null;
+                        $executiveData['assigned_at'] = $assignedTo ? now() : null;
+                        $executiveData['assigned_user_id'] = null;
+                        $executiveData['delegated_by'] = null;
+                    }
+                    $document->update($executiveData);
                     
                     if ($document->doc_type === 'outgoing') $this->autoStampPdf($document, $user);
                     if ($document->doc_type === 'internal' && str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ')) $this->autoAppendSignaturePage($document);
@@ -1056,11 +1236,12 @@ class DocumentController extends Controller
                 );
 
                 if (!empty($document->assigned_to)) {
-                    $assignedUsers = app(LineMessagingService::class)
-                        ->usersWithRoles('head', $document->assigned_to);
-                    app(NotificationDispatcher::class)->toUsers(
-                        $assignedUsers,
-                        "📨 มีเอกสารมอบหมายถึงหน่วยงานของคุณ\nเรื่อง: {$document->title}\nเลขที่: " . ($document->doc_number ?: '-') . "\n\nเปิดดูเอกสาร:\n{$docUrl}"
+                    app(AssignmentNotificationService::class)->toUnitHeads(
+                        $document->assigned_to,
+                        $document->title,
+                        $user->name,
+                        $document->doc_number,
+                        $this->documentNotificationUrl($targetDocId)
                     );
                 }
             }
@@ -1118,13 +1299,13 @@ class DocumentController extends Controller
 
     private function autoStampPdf($doc, $user)
     {
-        if (!$doc->attachment_path || !Storage::disk('public')->exists($doc->attachment_path)) return false;
+        if (!$doc->attachment_path || !app(DocumentFileStorage::class)->exists($doc->attachment_path)) return false;
         if (!$user->signature) return false;
 
-        $originalPdf = storage_path('app/public/' . $doc->attachment_path);
+        $originalPdf = app(DocumentFileStorage::class)->path($doc->attachment_path);
         $newFileName = 'signed_' . time() . '_' . basename($doc->attachment_path);
         $signedStoragePath = 'documents/signed/' . $newFileName;
-        $outputPdf = storage_path('app/public/' . $signedStoragePath);
+        $outputPdf = Storage::disk('documents')->path($signedStoragePath);
         $tempSigPath = storage_path('app/temp/sig_' . $user->id . '_' . time() . '.jpg');
 
         if (!File::exists(dirname($tempSigPath))) File::makeDirectory(dirname($tempSigPath), 0755, true);
@@ -1172,13 +1353,13 @@ class DocumentController extends Controller
 
     private function autoStampCreator($doc, $user)
     {
-        if (!$doc->attachment_path || !Storage::disk('public')->exists($doc->attachment_path)) return false;
+        if (!$doc->attachment_path || !app(DocumentFileStorage::class)->exists($doc->attachment_path)) return false;
         if (!$user->signature) return false;
 
-        $originalPdf = storage_path('app/public/' . $doc->attachment_path);
+        $originalPdf = app(DocumentFileStorage::class)->path($doc->attachment_path);
         
         $stampedStoragePath = 'documents/stamped/stamped_' . $doc->id . '.pdf';
-        $outputPdf = storage_path('app/public/' . $stampedStoragePath);
+        $outputPdf = Storage::disk('documents')->path($stampedStoragePath);
         $tempSigPath = storage_path('app/temp/sig_creator_' . $user->id . '_' . time() . '.jpg');
 
         if (!File::exists(dirname($tempSigPath))) File::makeDirectory(dirname($tempSigPath), 0755, true);
@@ -1220,18 +1401,18 @@ class DocumentController extends Controller
 
     private function autoAppendSignaturePage($doc)
     {
-        if (!$doc->attachment_path || !Storage::disk('public')->exists($doc->attachment_path)) return false;
+        if (!$doc->attachment_path || !app(DocumentFileStorage::class)->exists($doc->attachment_path)) return false;
 
         $stampedPath = 'documents/stamped/stamped_' . $doc->id . '.pdf';
-        if (Storage::disk('public')->exists($stampedPath)) {
-            $originalPdf = storage_path('app/public/' . $stampedPath);
+        if (app(DocumentFileStorage::class)->exists($stampedPath)) {
+            $originalPdf = app(DocumentFileStorage::class)->path($stampedPath);
         } else {
-            $originalPdf = storage_path('app/public/' . $doc->attachment_path);
+            $originalPdf = app(DocumentFileStorage::class)->path($doc->attachment_path);
         }
 
         $newFileName = 'appended_' . time() . '_' . basename($doc->attachment_path);
         $signedStoragePath = 'documents/signed/' . $newFileName;
-        $outputPdf = storage_path('app/public/' . $signedStoragePath);
+        $outputPdf = Storage::disk('documents')->path($signedStoragePath);
 
         if (!File::exists(dirname($outputPdf))) File::makeDirectory(dirname($outputPdf), 0755, true);
 
@@ -1263,7 +1444,7 @@ class DocumentController extends Controller
             File::delete($tempApprovalPath);
 
             if ($doc->signed_path && $doc->signed_path !== $signedStoragePath) {
-                Storage::disk('public')->delete($doc->signed_path);
+                app(DocumentFileStorage::class)->delete($doc->signed_path);
             }
 
             $doc->signed_path = $signedStoragePath;
@@ -1279,15 +1460,26 @@ class DocumentController extends Controller
     // --- โซนที่ 5: จัดการข้อมูล (อัปโหลดไฟล์ ลบ และสร้าง PDF) ---
     // ========================================================================
 
-    public function uploadAttachment(Request $request, $id)
+    public function uploadAttachment(Request $request, $id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
     {
         $request->validate([
             'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            'attachment_context' => 'nullable|in:external_qr',
         ], [
             'file.required' => 'กรุณาเลือกไฟล์ที่ต้องการอัปโหลด',
             'file.mimes' => 'รองรับเฉพาะไฟล์ PDF, JPG, PNG เท่านั้น',
             'file.max' => 'ขนาดไฟล์ต้องไม่เกิน 5MB',
         ]);
+
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            if ($request->input('attachment_context') === 'external_qr') {
+                $v2Writes->attachExternalQrCopy($document, $request->file('file'), Auth::id());
+                return back()->with('success', 'แนบสำเนาเอกสารจาก QR เรียบร้อยแล้ว ขณะนี้สามารถตรวจสอบและส่งเรื่องต่อได้');
+            }
+            $v2Writes->replaceAttachment($document, $request->file('file'), Auth::id());
+            return back()->with('success', 'อัปโหลดไฟล์แนบเข้า V2 เรียบร้อยแล้ว');
+        }
 
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
@@ -1297,29 +1489,67 @@ class DocumentController extends Controller
             return back()->with('error', 'คุณไม่มีสิทธิ์แนบไฟล์ในขั้นตอนนี้');
         }
 
-        if ($document->attachment_path) {
-            Storage::disk('public')->delete($document->attachment_path);
+        if ($request->input('attachment_context') === 'external_qr') {
+            if ($document->external_attachment_path) {
+                app(DocumentFileStorage::class)->delete($document->external_attachment_path);
+            }
+            $file = $request->file('file');
+            $path = app(DocumentFileStorage::class)->store($file, 'incoming_qr_docs');
+            $document->external_attachment_path = $path;
+            $document->external_original_name = $file->getClientOriginalName();
+            $document->external_mime_type = $file->getMimeType();
+            $document->external_file_size = $file->getSize();
+            $document->external_sha256 = hash_file('sha256', $file->getRealPath());
+            $document->external_downloaded_at = now();
+            $document->external_download_error = null;
+            $document->save();
+            return back()->with('success', 'แนบสำเนาเอกสารจาก QR เรียบร้อยแล้ว ขณะนี้สามารถตรวจสอบและส่งเรื่องต่อได้');
         }
 
-        $path = $request->file('file')->store('attachments', 'public');
+        if ($document->attachment_path) {
+            app(DocumentFileStorage::class)->delete($document->attachment_path);
+        }
+
+        $path = app(DocumentFileStorage::class)->store($request->file('file'), 'attachments');
         $document->attachment_path = $path;
         $document->save();
 
         return back()->with('success', 'อัปโหลดไฟล์แนบเรียบร้อยแล้ว');
     }
 
-    public function destroy($id)
+    public function stampSignatureToPdf(Request $request, $id, V2DocumentReadService $v2Documents)
     {
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            $this->authorize('view', $document);
+            return back()->with('success', 'V2 เก็บลายเซ็นเป็นหลักฐาน workflow แบบตรวจสอบ hash ได้แล้ว');
+        }
+
+        $document = Document::whereIdentifier($id)->firstOrFail();
+        $this->authorize('update', $document);
+        return $this->autoStampCreator($document, Auth::user())
+            ? back()->with('success', 'ประทับลายเซ็นใน PDF เรียบร้อยแล้ว')
+            : back()->with('error', 'ไม่สามารถประทับลายเซ็นใน PDF ได้');
+    }
+
+    public function destroy($id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
+    {
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            $this->authorize('delete', $document);
+            $v2Writes->delete($document, Auth::id());
+            return redirect()->route('documents.approve_list')->with('success', 'ลบเอกสาร V2 เรียบร้อยแล้ว');
+        }
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
             ->whereIdentifier($id)->firstOrFail();
         $this->authorize('delete', $document);
 
         if ($document->attachment_path) {
-            Storage::disk('public')->delete($document->attachment_path);
+            app(DocumentFileStorage::class)->delete($document->attachment_path);
         }
         if ($document->external_attachment_path) {
-            Storage::disk('public')->delete($document->external_attachment_path);
+            app(DocumentFileStorage::class)->delete($document->external_attachment_path);
         }
         $document->delete();
 
@@ -1328,8 +1558,20 @@ class DocumentController extends Controller
             ->with('success', 'ลบเอกสารเรียบร้อยแล้ว');
     }
 
-    public function downloadSignedPdf($id)
+    public function downloadSignedPdf($id, V2DocumentReadService $v2Documents)
     {
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            $this->authorize('accessConfidential', $document);
+            if (in_array($document->status, ['DRAFT', 'REJECTED', 'CANCELED'], true) || ! $document->attachment_path) {
+                return back()->with('error', 'เอกสารยังไม่พร้อมดาวน์โหลด');
+            }
+            return app(DocumentFileStorage::class)->response(
+                (string) ($document->signed_path ?: $document->attachment_path),
+                null,
+                ['Content-Disposition' => 'attachment']
+            );
+        }
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
             ->whereIdentifier($id)->firstOrFail();
@@ -1349,12 +1591,13 @@ class DocumentController extends Controller
         $pdf = Pdf::loadView('documents.pdf_approval', compact('document'));
         $pdf->setOption(['isRemoteEnabled' => true]); 
         
-        $tempApprovalPath = storage_path('app/public/temp_approval_' . $document->id . '.pdf');
+        $tempApprovalPath = storage_path('app/temp/temp_approval_' . $document->id . '.pdf');
+        File::ensureDirectoryExists(dirname($tempApprovalPath));
         $pdf->save($tempApprovalPath);
 
         $fpdi = new Fpdi();
 
-        $originalPath = storage_path('app/public/' . $document->attachment_path);
+        $originalPath = app(DocumentFileStorage::class)->path($document->attachment_path);
         $pageCount = $fpdi->setSourceFile($originalPath);
         for ($i = 1; $i <= $pageCount; $i++) {
             $tpl = $fpdi->importPage($i);
@@ -1375,8 +1618,45 @@ class DocumentController extends Controller
         $fpdi->Output('I', $fileName); 
     }
 
-    public function routingSlip($id)
+    public function file(string|int $id, string $kind, V2DocumentReadService $v2Documents)
     {
+        $document = config('edoc.v2.document_reads')
+            ? $v2Documents->find($id)
+            : Document::whereIdentifier($id)->firstOrFail();
+        $this->authorize('accessConfidential', $document);
+
+        $isConfidential = $document instanceof \App\Models\V2\Document
+            ? ($document->confidentiality?->level_no ?? 0) > 1
+            : in_array($document->doc_secret, ['ลับ', 'ลับเฉพาะ', 'ลับที่สุด'], true);
+        if ($isConfidential) {
+            $unlockedAt = session('secret_unlocked_'.$document->id);
+            abort_unless($unlockedAt && (now()->timestamp - $unlockedAt) <= 180, 403, 'กรุณายืนยัน PIN เพื่อเปิดเอกสารลับ');
+        }
+
+        $path = match ($kind) {
+            'main' => $document->attachment_path,
+            'signed' => $document->signed_path,
+            'external' => $document->external_attachment_path,
+        };
+        abort_unless($path, 404);
+
+        app(AuditLogger::class)->log('document.file_viewed', $document, [], ['kind' => $kind]);
+
+        return app(DocumentFileStorage::class)->response(
+            (string) $path,
+            basename((string) $path),
+            ['Content-Disposition' => 'inline']
+        );
+    }
+
+    public function routingSlip($id, V2DocumentReadService $v2Documents)
+    {
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            $this->authorize('view', $document);
+            abort_unless($document->doc_type === 'incoming', 422);
+            return view('documents.routing_slip', compact('document'));
+        }
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
             ->whereIdentifier($id)->firstOrFail();
@@ -1393,10 +1673,21 @@ class DocumentController extends Controller
     // --- โซนที่ 6: สมุดคุมเลข และ API รันเลขอัตโนมัติ ---
     // ========================================================================
 
-    public function assignedList()
+    public function assignedList(V2DocumentReadService $v2Documents)
     {
         /** @var User $user */
         $user = Auth::user();
+        $leaveDelegations = LeaveRequest::with('user')
+            ->assignedToDelegate($user->id)
+            ->atWorkflowStage('pending_delegate')
+            ->oldest('created_at')
+            ->get();
+
+        if (config('edoc.v2.document_reads')) {
+            $documents = $v2Documents->assignedDocuments($user);
+            $subordinates = $v2Documents->subordinates($user);
+            return view('documents.assigned_list', compact('documents', 'subordinates', 'leaveDelegations'));
+        }
         $userDepartment = $user->department;
 
         $departmentAliases = [
@@ -1410,6 +1701,8 @@ class DocumentController extends Controller
         $aliases = $departmentAliases[$userDepartment] ?? [$userDepartment];
 
         $documents = Document::with(['assignee', 'delegator'])
+            ->whereIn('status', ['APPROVED', 'COMPLETED', 'ARCHIVED'])
+            ->whereIn('assignment_status', ['pending', 'accepted', 'delegated', 'in_progress', 'completed'])
             ->where(function ($query) use ($aliases, $user) {
                 $query->where('assigned_user_id', $user->id);
 
@@ -1428,7 +1721,7 @@ class DocumentController extends Controller
             ->orderBy('name')
             ->get(['id', 'name', 'position']);
 
-        return view('documents.assigned_list', compact('documents', 'subordinates'));
+        return view('documents.assigned_list', compact('documents', 'subordinates', 'leaveDelegations'));
     }
 
     public function changePassword(Request $request)
@@ -1460,13 +1753,23 @@ class DocumentController extends Controller
         return back()->with('success', 'อัปเดตรหัสผ่านเข้าสู่ระบบเรียบร้อยแล้ว');
     }
 
-    public function acknowledge($id)
+    public function acknowledge($id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
     {
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            $v2Writes->assign($document, Auth::user(), 'accept');
+            return back()->with('success', 'บันทึกการรับทราบใน V2 เรียบร้อยแล้ว');
+        }
         // 🌟 เปลี่ยนมาค้นหาจาก uuid (พร้อมรองรับ id เก่าเผื่อตกหล่น)
         $document = Document::with(['creator', 'supervisor', 'palad', 'nayok'])
             ->whereIdentifier($id)->firstOrFail();
         /** @var \App\Models\User $user */
         $user = Auth::user();
+
+        if (! in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+            || ! in_array($document->assignment_status, ['pending', 'accepted', 'delegated', 'in_progress', 'completed'], true)) {
+            return back()->with('error', 'เอกสารยังไม่ผ่านการอนุมัติขั้นสุดท้าย');
+        }
 
         if ($user->hasRole('head') && $document->assigned_to === $user->department) {
             $document->update([
@@ -1479,16 +1782,39 @@ class DocumentController extends Controller
         return back()->with('error', 'คุณไม่มีสิทธิ์ดำเนินการในขั้นตอนนี้');
     }
 
-    public function assignmentAction(Request $request, $id)
+    public function assignmentAction(Request $request, $id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
     {
         $request->validate([
             'action' => 'required|in:accept,delegate',
             'delegate_user_id' => 'nullable|required_if:action,delegate|integer|exists:users,id',
         ]);
 
+        if (config('edoc.v2.document_reads')) {
+            $document = $v2Documents->find($id);
+            /** @var User $actor */
+            $actor = Auth::user();
+            $delegateId = $request->integer('delegate_user_id') ?: null;
+            $assignedDocument = $v2Writes->assign($document, $actor, $request->input('action'), $delegateId);
+            if ($request->input('action') === 'delegate' && $delegateId) {
+                app(AssignmentNotificationService::class)->toUser(
+                    User::find($delegateId),
+                    $assignedDocument->title,
+                    $actor->name,
+                    $assignedDocument->doc_number,
+                    $this->documentNotificationUrl($assignedDocument->uuid)
+                );
+            }
+            return back()->with('success', $request->input('action') === 'accept' ? 'รับเรื่องใน V2 เรียบร้อยแล้ว' : 'ส่งต่องานใน V2 เรียบร้อยแล้ว');
+        }
+
         $document = Document::whereIdentifier($id)->firstOrFail();
         /** @var User $user */
         $user = Auth::user();
+
+        if (! in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+            || ! in_array($document->assignment_status, ['pending', 'accepted', 'delegated', 'in_progress', 'completed'], true)) {
+            return back()->with('error', 'เอกสารยังไม่ผ่านการอนุมัติขั้นสุดท้าย');
+        }
 
         $isDepartmentHead = $user->hasRole('head')
             && $document->assigned_to === $user->department
@@ -1529,9 +1855,12 @@ class DocumentController extends Controller
             'acknowledged_by' => null,
         ]);
 
-        app(NotificationDispatcher::class)->toUser(
+        app(AssignmentNotificationService::class)->toUser(
             $delegate,
-            "📨 มีเอกสารมอบหมายถึงคุณ\nเรื่อง: {$document->title}\nผู้มอบหมาย: {$user->name}\n\nเปิดดูเอกสาร:\n" . route('documents.show', $document->uuid ?? $document->id)
+            $document->title,
+            $user->name,
+            $document->doc_number,
+            $this->documentNotificationUrl($document->uuid ?? $document->id)
         );
 
         return back()->with('success', 'ส่งต่อเรื่องให้ ' . $delegate->name . ' เรียบร้อยแล้ว');
@@ -1612,6 +1941,92 @@ class DocumentController extends Controller
         };
 
         app(NotificationDispatcher::class)->toUsers($recipients, $messageText);
+    }
+
+    private function notifySarabanForV2Numbering(\App\Models\V2\Document $document): void
+    {
+        $document->loadMissing('type');
+        if ($document->doc_type !== 'internal' || $document->status !== 'APPROVED') {
+            return;
+        }
+
+        $recipients = app(LineMessagingService::class)->usersWithRoles('saraban');
+        $documentUrl = route('documents.show', $document->uuid);
+        app(NotificationDispatcher::class)->toUsers(
+            $recipients,
+            "🔔 มีหนังสือบันทึกข้อความกำลังรอออกเลข\nเรื่อง: {$document->title}\n\nเปิดดูเอกสาร:\n{$documentUrl}"
+        );
+    }
+
+    private function notifyCurrentV2Reviewer(\App\Models\V2\Document $document): void
+    {
+        $document->loadMissing(['workflow.steps', 'type']);
+        if ($document->status !== 'IN_REVIEW' || ! $document->workflow?->current_step) {
+            return;
+        }
+
+        $currentStep = $document->workflow->steps
+            ->first(fn ($step) => $step->step_order === $document->workflow->current_step
+                && strtoupper((string) ($step->status instanceof \BackedEnum ? $step->status->value : $step->status)) === 'PENDING');
+        if (! $currentStep?->assigned_user_id) {
+            return;
+        }
+
+        // V2 และระบบผู้ใช้เดิมใช้รหัสผู้ใช้ชุดเดียวกัน ส่งเฉพาะผู้รับคิวปัจจุบันเท่านั้น
+        $recipient = User::find($currentStep->assigned_user_id);
+        if (! $recipient) {
+            return;
+        }
+
+        app(NotificationDispatcher::class)->toUser(
+            $recipient,
+            "🔔 เอกสารมาถึงคิวพิจารณาของคุณแล้ว\nเรื่อง: {$document->title}\n\nเปิดดูเอกสาร:\n" . route('documents.show', $document->uuid)
+        );
+    }
+
+    private function notifyActivatedV2Assignment(\App\Models\V2\Document $document, User $actor): void
+    {
+        if ($document->status !== 'APPROVED') {
+            return;
+        }
+
+        $assignment = $document->assignments()
+            ->with('unit')
+            ->where('status', 'PENDING')
+            ->whereNotNull('assigned_at')
+            ->latest('id')
+            ->first();
+        if (!$assignment) {
+            return;
+        }
+
+        $notifications = app(AssignmentNotificationService::class);
+        $url = $this->documentNotificationUrl($document->uuid);
+        if ($assignment->assigned_user_id) {
+            $notifications->toUser(
+                User::find($assignment->assigned_user_id),
+                $document->title,
+                $actor->name,
+                $document->doc_number,
+                $url
+            );
+            return;
+        }
+
+        if ($assignment->unit?->name) {
+            $notifications->toUnitHeads(
+                $assignment->unit->name,
+                $document->title,
+                $actor->name,
+                $document->doc_number,
+                $url
+            );
+        }
+    }
+
+    private function documentNotificationUrl(string|int $identifier): string
+    {
+        return rtrim((string) config('app.url'), '/').route('documents.show', $identifier, false);
     }
 
     // =========================================================================
@@ -1859,6 +2274,136 @@ class DocumentController extends Controller
             ->orderBy('department')
             ->orderBy('name')
             ->get(['id', 'name', 'position', 'department']);
+    }
+
+    private function storeV2Document(Request $request, V2DocumentWriteService $writes, string $type, bool $uploadOnly)
+    {
+        $common = [
+            'title' => 'required|string|max:255', 'doc_date' => 'required|date',
+            'routing_users' => 'required|array|min:1',
+            'routing_users.*' => 'required|integer|distinct|exists:users,id|not_in:'.Auth::id(),
+            'doc_speed' => 'nullable|string|max:50', 'doc_secret' => 'nullable|string|max:50',
+        ];
+        $rules = match ($type) {
+            'incoming' => $common + [
+                'receive_number' => 'required|string|max:255', 'running_number' => 'required|integer|min:1',
+                'receive_date' => 'required|date', 'doc_number' => 'required|string|max:255',
+                'doc_from' => 'required|string|max:255', 'doc_type_category' => 'required|string|max:255',
+                'file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240', 'external_url' => 'nullable|url',
+            ],
+            'outgoing' => $common + [
+                'doc_number' => 'required|string|max:255', 'doc_type_category' => 'required|string|max:255',
+                'doc_to' => 'required|string|max:255', 'signer_name' => 'required|string|max:255',
+                'file' => 'required|file|mimes:pdf|max:20480', 'running_number' => 'nullable|integer|min:1',
+            ],
+            default => $common + ($uploadOnly ? [
+                'doc_from' => 'required|string|max:255', 'doc_to' => 'required|string|max:255',
+                'file' => 'required|file|mimes:pdf|max:5120',
+            ] : ['content' => 'required|string']),
+        };
+        $data = $request->validate($rules);
+        if ($type === 'incoming' && ! $request->hasFile('file') && ! $request->filled('external_url')) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['file' => 'กรุณาแนบไฟล์หรือระบุลิงก์เอกสาร']);
+        }
+        $data['doc_type'] = $type;
+        if ($uploadOnly) { $data['content'] = 'อ้างอิงจากไฟล์แนบในระบบ'; }
+        if ($type === 'incoming') {
+            $data['content'] = $request->hasFile('file') ? 'อ้างอิงจากไฟล์แนบในระบบ' : 'อ้างอิงจากเอกสารใน QR Code';
+        }
+        if ($type === 'outgoing') {
+            $data['content'] = $request->filled('attachment') ? 'สิ่งที่ส่งมาด้วย: '.$request->input('attachment') : 'อ้างอิงจากไฟล์แนบในระบบ';
+        }
+        if (isset($data['content'])) { $data['content'] = trim(preg_replace('/\n{3,}/', "\n\n", $data['content'])); }
+
+        $document = $writes->create($data, $request->input('routing_users', []), Auth::id(), $request->file('file'));
+        if ($type === 'incoming' && $request->filled('external_url')) {
+            $externalFileId = $document->files()->where('file_type', 'EXTERNAL')->latest('version_no')->value('id');
+            if ($externalFileId) {
+                ArchiveV2ExternalDocument::dispatch($externalFileId)->afterCommit();
+            }
+        }
+        return redirect()->route('documents.show', $document->uuid)->with('success', 'บันทึกร่างเอกสาร V2 และกำหนดเส้นทางเรียบร้อยแล้ว');
+    }
+
+    private function validateV2Update(Request $request, string $type, ?string $existingContent): array
+    {
+        $rules = [
+            'title' => 'required|string|max:255', 'doc_date' => 'required|date',
+            'file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:20480',
+            'doc_speed' => 'nullable|string|max:50', 'doc_secret' => 'nullable|string|max:50',
+        ];
+        if ($type === 'incoming') {
+            $rules += ['receive_number' => 'required|string|max:255', 'receive_date' => 'required|date',
+                'doc_number' => 'required|string|max:255', 'doc_from' => 'required|string|max:255',
+                'doc_type_category' => 'required|string|max:255'];
+        } elseif ($type === 'outgoing') {
+            $rules += ['doc_number' => 'required|string|max:255', 'doc_type_category' => 'required|string|max:255',
+                'doc_to' => 'required|string|max:255', 'signer_name' => 'required|string|max:255'];
+        } else {
+            $rules += ['doc_from' => 'required|string|max:255', 'doc_to' => 'required|string|max:255', 'content' => 'nullable|string'];
+        }
+        $data = $request->validate($rules);
+        if ($type === 'internal' && ! $request->filled('content')) { $data['content'] = $existingContent; }
+        return $data;
+    }
+
+    private function validatedAssignmentChoice(Request $request, $document, User $user, bool $approved): ?string
+    {
+        $canDirectIncoming = $document->doc_type === 'incoming'
+            && $user->hasAnyRole(['palad', 'deputy-palad', 'executive']);
+
+        if (! $canDirectIncoming) {
+            return null;
+        }
+
+        $allowedChoices = [
+            '__NO_ASSIGNMENT__',
+            'สำนักงานปลัด',
+            'กองคลัง',
+            'กองช่าง',
+            'กองการศึกษา ศาสนา และวัฒนธรรม',
+            'กองสาธารณสุขและสิ่งแวดล้อม',
+            'กองสวัสดิการสังคม',
+        ];
+        $request->validate([
+            'assignment_choice' => [
+                Rule::requiredIf($approved),
+                'nullable',
+                'string',
+                Rule::in($allowedChoices),
+            ],
+        ], [
+            'assignment_choice.required' => 'กรุณาเลือกส่วนราชการที่ต้องการมอบหมาย หรือเลือกไม่มอบหมาย',
+            'assignment_choice.in' => 'ตัวเลือกการมอบหมายไม่ถูกต้อง กรุณาเลือกใหม่อีกครั้ง',
+        ]);
+
+        return $approved ? $request->input('assignment_choice') : null;
+    }
+
+    private function assignedUnitFromChoice(?string $choice): ?string
+    {
+        return $choice === '__NO_ASSIGNMENT__' ? null : $choice;
+    }
+
+    private function validatedV2Signer(Request $request, string $keyPrefix): V2User
+    {
+        $request->validate(['pin' => 'required|digits:6']);
+        /** @var User $legacy */
+        $legacy = Auth::user();
+        $key = $keyPrefix.$legacy->id;
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['pin' => 'กรอก PIN ผิดเกินกำหนด กรุณารอ '.RateLimiter::availableIn($key).' วินาที']);
+        }
+        $actor = V2User::with('signatures')->findOrFail($legacy->id);
+        if (! $legacy->pin || ! Hash::check($request->input('pin'), $legacy->pin)) {
+            RateLimiter::hit($key, 60);
+            throw \Illuminate\Validation\ValidationException::withMessages(['pin' => 'รหัส PIN ไม่ถูกต้อง']);
+        }
+        if (! $actor->signatures->where('is_active', true)->whereNull('revoked_at')->count()) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['pin' => 'กรุณาอัปโหลดลายเซ็นก่อนดำเนินการ']);
+        }
+        RateLimiter::clear($key);
+        return $actor;
     }
 
     private function saveDocumentRoute(Document $document, array $userIds): void

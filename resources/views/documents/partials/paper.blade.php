@@ -59,7 +59,7 @@
     </div>
 
     {{-- 4. เรื่อง --}}
-    <div style="margin-bottom: 15px; display: block;">
+    <div style="margin-bottom: 8px; display: block;">
         <span style="font-size: 20pt; font-weight: bold; margin-right: 12px;">เรื่อง</span> 
         <span style="font-size: 16pt; border-bottom: 1px dotted #000; display: inline-block; width: calc(100% - 70px); padding-left: 5px;">
             {{ toThaiNum($document->title) }}
@@ -67,7 +67,7 @@
     </div>
 
     {{-- 5. เรียน --}}
-    <div style="margin-bottom: 15px; display: block;">
+    <div style="margin-bottom: 15px; padding-top: 5px; display: block; border-top: 1.5px solid #000 !important;">
         <span style="font-size: 20pt; font-weight: bold; margin-right: 12px;">เรียน</span> 
         <span style="font-size: 16pt;">นายกองค์การบริหารส่วนตำบลพร่อน</span>
     </div>
@@ -102,25 +102,30 @@
             $dynamicReviewRoutes = $document->relationLoaded('routes')
                 ? $document->routes->where('step_order', '>', 1)->sortBy('step_order')
                 : collect();
-            $approvedDynamicRoutes = $dynamicReviewRoutes->where('status', 'approved');
         @endphp
 
         @if($dynamicReviewRoutes->isNotEmpty())
             {{-- ลายเซ็นผู้พิจารณาจากเส้นทางที่ผู้สร้างเลือกจริง --}}
-            @foreach($approvedDynamicRoutes as $routeIndex => $approvalRoute)
+            @foreach($dynamicReviewRoutes as $routeIndex => $approvalRoute)
+                @php
+                    $routeStatus = strtolower($approvalRoute->status instanceof \BackedEnum
+                        ? $approvalRoute->status->value
+                        : (string) $approvalRoute->status);
+                    $routeApproved = $routeStatus === 'approved';
+                @endphp
                 <div class="document-signature-block" style="page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; padding-top: 10px;">
                     <div style="font-size: 16pt; font-weight: bold; margin-bottom: 10px;">
                         ความเห็นผู้พิจารณาลำดับที่ {{ $loop->iteration }}
                     </div>
                     <div style="border-bottom: 1px dotted #555; min-height: 28px; width: 85%; color: #000; font-size: 16pt; margin-bottom: 15px; padding-left: 10px;">
-                        {{ toThaiNum($approvalRoute->comment ?: 'พิจารณาเห็นชอบ') }}
+                        {{ $routeApproved ? toThaiNum($approvalRoute->comment ?: 'พิจารณาเห็นชอบ') : '' }}
                     </div>
 
                     <div style="display: block; width: 50%; margin-left: 50%; text-align: center;">
                         <div style="margin-bottom: 5px; white-space: nowrap;">
                             <span style="font-size: 16pt; display: inline-block; vertical-align: bottom; margin-right: 8px;">(ลงชื่อ)</span>
                             <div style="display: inline-block; border-bottom: 1px dotted #000; width: 180px; position: relative; height: 30px; vertical-align: bottom;">
-                                @if(!empty($approvalRoute->user?->signature))
+                                @if($routeApproved && !empty($approvalRoute->user?->signature))
                                     <img src="{{ getSigUrl($approvalRoute->user->signature) }}" style="max-height: 50px; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); mix-blend-mode: multiply; page-break-inside: avoid;">
                                 @endif
                             </div>

@@ -1,8 +1,9 @@
 @extends('layouts.app')
-@section('title', 'รายละเอียดบันทึกข้อความภายใน')
+@section('title', 'รายละเอียดหนังสือส่งออก')
 
 @section('content')
 <div class="container-fluid px-4 py-4" style="background-color: var(--bg-page); min-height: 100vh;">
+    @include('documents.partials.status_timeline')
     @php
         $user = auth()->user();
         $isReviewer = (isset($canApprove) && $canApprove) || (
@@ -15,16 +16,25 @@
         // 🌟 อัปเดตสีป้ายสถานะให้เป็นสีทึบ (Solid) ป้องกันปัญหาตัวหนังสือกลืนกับพื้นหลัง 🌟
         $badges = [
             'DRAFT'              => ['bg-secondary', 'text-white', 'ฉบับร่าง'],
+            'REGISTERED'         => ['bg-info', 'text-dark', 'รับเรื่องแล้ว'],
+            'IN_REVIEW'          => ['bg-warning', 'text-dark', 'อยู่ระหว่างพิจารณา'],
+            'WAITING_REVIEWER'   => ['bg-warning', 'text-dark', 'รอผู้ตรวจสอบ'],
+            'WAITING_APPROVER'   => ['bg-primary', 'text-white', 'รออนุมัติ'],
             'WAITING_ADMIN'      => ['bg-secondary', 'text-white', 'รอธุรการรับเรื่อง'],
             'WAITING_SUPERVISOR' => ['bg-warning', 'text-dark', 'รอหัวหน้าสำนักปลัด'],
             'WAITING_PALAD'      => ['bg-primary', 'text-white', 'รอปลัด อบต.'],
             'WAITING_NAYOK'      => ['bg-info', 'text-dark', 'รอนายกฯ อนุมัติ'], // ใช้สีฟ้าสว่าง ตัวหนังสือดำ
             'WAITING_NUMBERING'  => ['bg-dark', 'text-white', 'รอธุรการลงทะเบียนเลข'],
-            'APPROVED'           => ['bg-success', 'text-white', 'สั่งการ/ลงเลขเรียบร้อย'],
+            'APPROVED'           => ['bg-success', 'text-white', 'อนุมัติแล้ว / เสร็จสิ้น'],
+            'COMPLETED'          => ['bg-success', 'text-white', 'อนุมัติแล้ว / เสร็จสิ้น'],
+            'ARCHIVED'           => ['bg-dark', 'text-white', 'จัดเก็บแล้ว'],
             'REJECTED'           => ['bg-danger', 'text-white', 'ถูกตีกลับ / แก้ไข'],
             'CANCELED'           => ['bg-dark', 'text-white', 'ยกเลิก / เลขเสีย']
         ];
         $b = $badges[$document->status] ?? ['bg-light', 'text-dark', $document->status];
+        if ($document->isAtFinalApprovalStep()) {
+            $b = ['bg-primary', 'text-white', 'รออนุมัติ'];
+        }
 
         $sigSteps = [
             ['label'=>'ผู้เสนอเรื่อง',       'sig'=>$document->creator_signature,    'name'=>$document->creator->name ?? '-',    'pos'=>$document->creator->position ?? '-',     'at'=>$document->created_at?->format('d/m/Y H:i'), 'icon'=>'fa-user'],
@@ -46,7 +56,7 @@
 
     <div class="d-flex justify-content-between align-items-center mb-4 mx-auto no-print" style="max-width: 950px;">
         <div>
-            <h4 class="fw-bold mb-1" style="color: var(--primary-dark);"><i class="fas fa-file-alt text-primary me-2"></i>บันทึกข้อความภายใน</h4>
+            <h4 class="fw-bold mb-1" style="color: var(--primary-dark);"><i class="fas fa-file-export text-primary me-2"></i>หนังสือส่งออก</h4>
             <div class="d-flex align-items-center gap-2 mt-2">
                 <span class="badge bg-primary-subtle text-primary border rounded-pill px-3 py-2 shadow-sm">อ้างอิง: #{{ str_pad($document->id, 5, '0', STR_PAD_LEFT) }}</span>
                 <span class="badge {{ $b[0] }} {{ $b[1] }} border rounded-pill px-3 py-2 shadow-sm">{{ $b[2] }}</span>
@@ -54,7 +64,7 @@
         </div>
         <div class="d-flex gap-2">
             <button onclick="window.print()" class="btn btn-dark rounded-pill px-4 shadow-sm fw-bold"><i class="fas fa-print me-2"></i>พิมพ์</button>
-            <a href="{{ route('documents.approve_list') }}" class="btn btn-outline-dark rounded-pill px-4 shadow-sm fw-bold bg-white"><i class="fas fa-arrow-left me-1"></i> กลับ</a>
+            <a href="{{ route('documents.approve_list') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ</a>
         </div>
     </div>
 
@@ -65,7 +75,7 @@
             <div class="alert alert-dark border-0 shadow-sm d-flex align-items-center mb-4 no-print" style="border-left: 5px solid #1e293b !important; border-radius: 12px;">
                 <i class="fas fa-ban fs-3 text-secondary me-3"></i>
                 <div>
-                    <h6 class="fw-bold mb-1 text-dark">บันทึกข้อความนี้ถูกยกเลิก</h6>
+                    <h6 class="fw-bold mb-1 text-dark">หนังสือส่งออกฉบับนี้ถูกยกเลิก</h6>
                     <span class="small text-muted"><strong>เหตุผล:</strong> {{ $document->reject_reason ?? 'ไม่อนุมัติ' }}</span>
                 </div>
             </div>
@@ -91,7 +101,7 @@
                                 <span class="badge bg-success-subtle text-success border border-success-subtle ms-2"><i class="fas fa-check-circle me-1"></i> มีใบแนบท้ายแล้ว</span>
                             @endif
                         </h6>
-                        <a href="{{ asset('storage/' . ($document->signed_path ?: $document->attachment_path)) }}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold shadow-sm">
+                        <a href="{{ route('documents.file', [$document->uuid ?? $document->id, $document->signed_path ? 'signed' : 'main']) }}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold shadow-sm">
                             <i class="fas fa-external-link-alt me-1"></i> เปิดดูฉบับเต็ม
                         </a>
                     </div>
@@ -114,7 +124,7 @@
                     @endif
 
                     <div class="rounded-3 overflow-hidden border shadow-sm">
-                        <iframe src="{{ asset('storage/' . ($document->signed_path ?: $document->attachment_path)) }}" width="100%" height="800px"></iframe>
+                        <iframe src="{{ route('documents.file', [$document->uuid ?? $document->id, $document->signed_path ? 'signed' : 'main']) }}" width="100%" height="800px"></iframe>
                     </div>
                 </div>
             </div>

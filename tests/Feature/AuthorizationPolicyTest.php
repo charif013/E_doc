@@ -76,16 +76,55 @@ class AuthorizationPolicyTest extends TestCase
     public function test_number_ledger_and_next_number_api_require_numbering_role(): void
     {
         Role::create(['name' => 'officer']);
+        Role::create(['name' => 'palad']);
         Role::create(['name' => 'saraban']);
         $officer = User::factory()->create()->assignRole('officer');
+        $palad = User::factory()->create()->assignRole('palad');
         $saraban = User::factory()->create()->assignRole('saraban');
 
         $this->actingAs($officer)->get(route('documents.number_ledger'))->assertForbidden();
         $this->actingAs($officer)->getJson(route('documents.api_next_number'))->assertForbidden();
+        $this->actingAs($palad)->get(route('documents.number_ledger'))->assertForbidden();
+        $this->actingAs($palad)->getJson(route('documents.api_next_number'))->assertForbidden();
+        $this->actingAs($palad)->get(route('documents.registry'))->assertForbidden();
+        $this->actingAs($palad)->post(route('documents.reserve_number_slot'))->assertForbidden();
 
         $this->actingAs($saraban)->get(route('documents.number_ledger'))->assertOk();
         $this->actingAs($saraban)->getJson(route('documents.api_next_number'))
             ->assertOk()->assertJsonStructure(['next_number', 'formatted']);
+    }
+
+    public function test_saraban_can_run_a_leave_number_from_the_leave_detail_page(): void
+    {
+        Role::create(['name' => 'officer']);
+        Role::create(['name' => 'saraban']);
+        $owner = User::factory()->create(['department' => 'สำนักงานปลัด'])->assignRole('officer');
+        $saraban = User::factory()->create()->assignRole('saraban');
+        $leave = LeaveRequest::create([
+            'user_id' => $owner->id,
+            'leave_type' => 'ลาป่วย',
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->toDateString(),
+            'total_days' => 1,
+            'reason' => 'ทดสอบการรันเลข',
+            'status' => 'PENDING',
+            'workflow_status' => 'pending_numbering',
+        ]);
+
+        $url = route('documents.api_next_number', ['type' => 'leave', 'leave_id' => $leave->id]);
+
+        $this->actingAs($saraban)->get(route('leaves.show', $leave))
+            ->assertOk()
+            ->assertSee((string) \Illuminate\Support\Js::from($url), false)
+            ->assertDontSee('amp;leave_id', false);
+
+        $this->actingAs($saraban)->getJson($url)
+            ->assertOk()
+            ->assertJson([
+                'next_number' => 1,
+                'formatted' => 'ลา/สำนักงานปลัด/1/'.(now()->year + 543),
+                'scope' => 'สำนักงานปลัด',
+            ]);
     }
 
     public function test_saraban_can_review_document_waiting_for_number_after_routes_are_completed(): void

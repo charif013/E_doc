@@ -2,18 +2,19 @@
 @section('title', 'รายละเอียดหนังสือรับเข้า')
 
 @section('content')
-<div class="container-fluid px-4 py-3">
+<div class="container-fluid px-3 px-lg-4 py-3 incoming-detail-page">
     <div class="mx-auto" style="max-width: 1200px;">
 
         {{-- 🌟 Header --}}
-        <div class="d-flex justify-content-between align-items-center mb-4 no-print">
+        <div class="incoming-page-heading d-flex justify-content-between align-items-center gap-3 mb-3 no-print">
             <div>
-                <h4 class="fw-bold mb-0" style="color: var(--primary-dark);">
+                <div class="incoming-page-heading__eyebrow mb-1">งานสารบรรณอิเล็กทรอนิกส์</div>
+                <h3 class="fw-bold mb-1" style="color: var(--primary-dark);">
                     <i class="fas fa-file-import text-primary me-2"></i>รายละเอียดหนังสือรับเข้า
-                </h4>
-                <small class="text-muted">ข้อมูลและสถานะการลงนามของเอกสารรับเข้าภายนอก</small>
+                </h3>
+                <small class="text-muted">ข้อมูล เอกสารแนบ และสถานะการดำเนินงานอยู่ในหน้าเดียว</small>
             </div>
-            <div class="d-flex align-items-center gap-3">
+            <div class="d-flex align-items-center justify-content-end flex-wrap gap-2">
                 <span class="text-muted fw-bold d-none d-md-inline">{{ now()->locale('th')->translatedFormat('d M Y') }}</span>
                 
                 {{-- 🌟 ปุ่มพิมพ์ใบเกษียน (โชว์เฉพาะตอนอนุมัติแล้ว) - อัปเดตให้ลิงก์ไปหน้า Routing Slip --}}
@@ -23,10 +24,14 @@
                 </a>
                 @endif
 
-                <a href="{{ route('documents.approve_list') }}" class="btn btn-outline-dark btn-sm rounded-pill px-3 shadow-sm bg-white fw-bold">
-                    <i class="fas fa-arrow-left me-1"></i> กลับหน้ารายการ
+                <a href="{{ route('documents.approve_list') }}" class="ds-back-link">
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ
                 </a>
             </div>
+        </div>
+
+        <div class="incoming-timeline-shell mb-3">
+            @include('documents.partials.status_timeline')
         </div>
 
         @php
@@ -42,16 +47,25 @@
             // 🌟 แก้ไขปัญหาสีป้ายสถานะกลืนกับพื้นหลัง โดยใช้สีทึบ (Solid) และบังคับสีข้อความให้ตัดกันชัดเจน
             $badges = [
                 'DRAFT'              => ['bg-secondary', 'text-white', 'ฉบับร่าง'],
+                'REGISTERED'         => ['bg-info', 'text-dark', 'รับเรื่องแล้ว'],
+                'IN_REVIEW'          => ['bg-warning', 'text-dark', 'อยู่ระหว่างพิจารณา'],
+                'WAITING_REVIEWER'   => ['bg-warning', 'text-dark', 'รอผู้ตรวจสอบ'],
+                'WAITING_APPROVER'   => ['bg-primary', 'text-white', 'รออนุมัติ'],
                 'WAITING_ADMIN'      => ['bg-secondary', 'text-white', 'รอธุรการรับเรื่อง'],
                 'WAITING_SUPERVISOR' => ['bg-warning', 'text-dark', 'รอหัวหน้าสำนักปลัด'],
                 'WAITING_PALAD'      => ['bg-primary', 'text-white', 'รอปลัด อบต.'],
                 'WAITING_NAYOK'      => ['bg-info', 'text-dark', 'รอนายกฯ อนุมัติ'], 
-                'WAITING_NUMBERING'  => ['bg-dark', 'text-white', 'รอธุรการลงทะเบียนเลข'],
-                'APPROVED'           => ['bg-success', 'text-white', 'สั่งการ/ลงเลขเรียบร้อย'],
+                'WAITING_NUMBERING'  => ['bg-success', 'text-white', 'ดำเนินการเสร็จสิ้น'],
+                'APPROVED'           => ['bg-success', 'text-white', 'อนุมัติแล้ว / เสร็จสิ้น'],
+                'COMPLETED'          => ['bg-success', 'text-white', 'ดำเนินการเสร็จสิ้น'],
+                'ARCHIVED'           => ['bg-dark', 'text-white', 'จัดเก็บแล้ว'],
                 'REJECTED'           => ['bg-danger', 'text-white', 'ถูกตีกลับ / แก้ไข'],
                 'CANCELED'           => ['bg-dark', 'text-white', 'ยกเลิกเอกสาร'], 
             ];
             $b = $badges[$document->status] ?? ['bg-light', 'text-dark', $document->status];
+            if ($document->isAtFinalApprovalStep()) {
+                $b = ['bg-primary', 'text-white', 'รออนุมัติ'];
+            }
             
             // ข้อมูลเส้นทางเดินเอกสาร
             $sigSteps = [
@@ -87,6 +101,15 @@
             }
         @endphp
 
+        <nav class="incoming-section-nav no-print mb-4" aria-label="เมนูภายในหน้ารายละเอียดเอกสาร">
+            <a href="#document-overview"><i class="fas fa-info-circle"></i>ข้อมูลเอกสาร</a>
+            <a href="#document-attachment"><i class="fas fa-paperclip"></i>เนื้อหาและไฟล์แนบ</a>
+            <a href="#document-routing"><i class="fas fa-route"></i>เส้นทางเอกสาร</a>
+            @if($isReviewer)
+                <a href="#document-action"><i class="fas fa-edit"></i>ดำเนินการ</a>
+            @endif
+        </nav>
+
         {{-- 🌟 กล่องแสดงข้อมูล: เลขเสีย (CANCELED) --}}
         @if($document->status === 'CANCELED')
             <div class="mb-4 no-print">
@@ -101,8 +124,13 @@
         @endif
 
         @php
-            $canHandleAssignment = $document->assigned_user_id === $user->id
-                || ($user->hasRole('head') && !$document->assigned_user_id && $document->assigned_to === $user->department);
+            $activeAssignmentStatuses = ['pending', 'accepted', 'delegated', 'in_progress', 'completed'];
+            $assignmentIsFinalized = in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+                && in_array($document->assignment_status, $activeAssignmentStatuses, true);
+            $canHandleAssignment = (!config('edoc.v2.document_reads') || config('edoc.v2.write_enabled'))
+                && $assignmentIsFinalized
+                && ($document->assigned_user_id === $user->id
+                || ($user->hasRole('head') && !$document->assigned_user_id && $document->assigned_to === $user->department));
             $departmentUsers = $canHandleAssignment
                 ? \App\Models\User::where('department', $user->department)->where('id', '!=', $user->id)->orderBy('name')->get()
                 : collect();
@@ -138,7 +166,9 @@
 
         {{-- 🌟 กล่องจัดการคำขอสิทธิ์ (เห็นเฉพาะธุรการและเจ้าของเรื่อง) 🌟 --}}
         @php
-            $pendingRequests = \App\Models\DocumentAccessRequest::where('document_id', $document->id)->where('status', 'pending')->get();
+            $pendingRequests = config('edoc.v2.document_reads')
+                ? $document->accessRequests->filter(fn ($accessRequest) => strtoupper((string) $accessRequest->status) === 'PENDING')
+                : \App\Models\DocumentAccessRequest::where('document_id', $document->id)->where('status', 'pending')->get();
             $canManageAccess = auth()->user()->id === $document->created_by || auth()->user()->hasRole('saraban');
         @endphp
 
@@ -177,13 +207,17 @@
         @endif
 
         {{-- 🌟 Main Card (ข้อมูลเอกสาร) --}}
-        <div class="card border-0 mb-4 shadow-sm print-container" style="border-radius:16px;overflow:hidden;border:1px solid #e4eaf0;">
+        <div class="card border-0 mb-4 shadow-sm print-container incoming-document-card" id="document-overview">
 
-            {{-- Hero Section สีน้ำเงิน --}}
-            <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 px-4 py-4" style="background:var(--primary-dark);">
-                <div>
-                    <div style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:4px;">เลขที่เอกสาร: <span class="text-white fw-bold">{{ $document->doc_number ?? '-' }}</span></div>
-                    <h4 class="mb-0 fw-bold text-white">{{ $document->title }}</h4>
+            {{-- Hero Section --}}
+            <div class="incoming-document-hero d-flex justify-content-between align-items-start flex-wrap gap-3 px-3 px-md-4 py-4">
+                <div class="d-flex align-items-start gap-3 incoming-document-hero__content">
+                    <div class="incoming-document-hero__icon" aria-hidden="true"><i class="fas fa-envelope-open-text"></i></div>
+                    <div>
+                        <div class="incoming-document-hero__meta">หนังสือรับเข้า · เลขที่เอกสาร <strong>{{ $document->doc_number ?? '-' }}</strong></div>
+                        <h4 class="mb-1 fw-bold incoming-document-hero__title">{{ $document->title }}</h4>
+                        <div class="small text-muted">รับเข้าระบบ {{ $document->created_at ? $document->created_at->locale('th')->translatedFormat('d M Y H:i') : '-' }}</div>
+                    </div>
                 </div>
                 <span class="badge {{ $b[0] }} {{ $b[1] }} border rounded-pill px-3 py-2 fw-bold shadow-sm" style="font-size:14px;">{{ $b[2] }}</span>
             </div>
@@ -205,43 +239,56 @@
 
                 {{-- ข้อมูลทั่วไป (หนังสือรับเข้า) --}}
                 @php
-                    $infoRows = [
-                        [['เลขที่รับ',$document->formatted_receive_number??'-',false], ['วันที่รับ',$document->receive_date?\Carbon\Carbon::parse($document->receive_date)->addYears(543)->format('d/m/Y'):'-',false], ['ลงวันที่บนเอกสาร',$document->doc_date?\Carbon\Carbon::parse($document->doc_date)->addYears(543)->format('d/m/Y'):'-',false], ['ประเภทหนังสือ',$document->doc_type_category??'-',true]],
-                        [['จาก (หน่วยงาน/บุคคล)',$document->doc_from??'-',false,'2'], ['ชั้นความเร็ว',$document->doc_speed??'ปกติ',false], ['ชั้นความลับ',$document->doc_secret??'ไม่มีชั้นความลับ',false]],
+                    $infoItems = [
+                        ['เลขที่รับ', $document->formatted_receive_number ?? '-', 'fa-hashtag'],
+                        ['วันที่รับ', $document->receive_date ? \Carbon\Carbon::parse($document->receive_date)->addYears(543)->format('d/m/Y') : '-', 'fa-calendar-check'],
+                        ['ลงวันที่บนเอกสาร', $document->doc_date ? \Carbon\Carbon::parse($document->doc_date)->addYears(543)->format('d/m/Y') : '-', 'fa-calendar-day'],
+                        ['ประเภทหนังสือ', $document->doc_type_category ?? '-', 'fa-file-alt'],
+                        ['จาก (หน่วยงาน/บุคคล)', $document->doc_from ?? '-', 'fa-building'],
+                        ['ชั้นความเร็ว', $document->doc_speed ?? 'ปกติ', 'fa-tachometer-alt'],
+                        ['ชั้นความลับ', $document->doc_secret ?? 'ไม่มีชั้นความลับ', 'fa-shield-alt'],
                     ];
                 @endphp
                 <div class="mb-4 no-print">
-                    <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom">
-                        <span style="width:4px;height:18px;background:var(--primary);border-radius:4px;display:inline-block;"></span>
-                        <span style="font-size:14px;font-weight:700;color:var(--primary-dark);">ข้อมูลทั่วไป (หนังสือรับเข้า)</span>
+                    <div class="incoming-section-heading mb-3">
+                        <div class="incoming-section-heading__icon"><i class="fas fa-info-circle"></i></div>
+                        <div>
+                            <h5 class="mb-0 fw-bold">ข้อมูลเอกสาร</h5>
+                            <div class="small text-muted">รายละเอียดการรับและข้อมูลจากหนังสือต้นทาง</div>
+                        </div>
                     </div>
-                    @foreach($infoRows as $row)
-                    <div class="row g-0 mb-px" style="background:#edf0f4;gap:1px;">
-                        @foreach($row as $cell)
-                        <div class="col p-3 bg-white {{ isset($cell[3]) ? 'col-md-'.(6*$cell[3]) : '' }}">
-                            <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">{{ $cell[0] }}</div>
-                            <div style="font-size:15px;font-weight:600;color:{{ $cell[2] ? 'var(--primary-dark)' : 'var(--text-primary)' }};">{{ $cell[1] }}</div>
+                    <div class="incoming-info-grid">
+                        @foreach($infoItems as $item)
+                        <div class="incoming-info-item">
+                            <div class="incoming-info-item__icon"><i class="fas {{ $item[2] }}"></i></div>
+                            <div class="min-w-0">
+                                <div class="incoming-info-item__label">{{ $item[0] }}</div>
+                                <div class="incoming-info-item__value">{{ $item[1] }}</div>
+                            </div>
                         </div>
                         @endforeach
                     </div>
-                    @endforeach
                     
                     {{-- 🌟 ส่วนแสดงการมอบหมายงาน --}}
                     @if($document->assigned_to)
-                    <div class="row g-0 mt-1" style="background:#edf0f4;gap:1px;">
-                        <div class="col p-3 bg-white">
-                            <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">มอบหมายให้ส่วนราชการ</div>
-                            <div style="font-size:16px;font-weight:bold;color:#b45309;"><i class="fas fa-share-square me-2"></i>{{ $document->assigned_to }}</div>
+                    <div class="incoming-assignment mt-3">
+                        <div class="incoming-assignment__icon"><i class="fas fa-share-square"></i></div>
+                        <div>
+                            <div class="small text-muted fw-semibold">{{ $assignmentIsFinalized ? 'มอบหมายให้ส่วนราชการ' : 'ข้อเสนอการมอบหมาย (รออนุมัติขั้นสุดท้าย)' }}</div>
+                            <div class="fw-bold">{{ $document->assigned_to }}</div>
                         </div>
                     </div>
                     @endif
                 </div>
 
                 {{-- โซนเนื้อหา และ ไฟล์แนบ --}}
-                <div class="mb-4 no-print">
-                    <div class="d-flex align-items-center gap-2 mb-3 pb-2 border-bottom">
-                        <span style="width:4px;height:18px;background:var(--primary);border-radius:4px;display:inline-block;"></span>
-                        <span style="font-size:14px;font-weight:700;color:var(--primary-dark);">เนื้อหา / ไฟล์แนบ</span>
+                <div class="mb-4 no-print incoming-scroll-target" id="document-attachment">
+                    <div class="incoming-section-heading mb-3">
+                        <div class="incoming-section-heading__icon"><i class="fas fa-paperclip"></i></div>
+                        <div>
+                            <h5 class="mb-0 fw-bold">เนื้อหาและไฟล์แนบ</h5>
+                            <div class="small text-muted">ตรวจสอบข้อความและเอกสารต้นฉบับที่แนบมากับเรื่อง</div>
+                        </div>
                     </div>
                     
                     <div class="rounded-3 p-4" style="background:var(--bg-page);border:1px solid #edf0f4;">
@@ -255,11 +302,25 @@
                             @if($document->content && $document->content !== 'อ้างอิงจากไฟล์แนบในระบบ')
                                 <hr class="my-4 no-print" style="border-color: #cbd5e1;">
                             @endif
-                            <div class="ratio ratio-16x9 rounded-3 overflow-hidden shadow-sm border no-print">
-                                <iframe src="{{ asset('storage/'.$document->attachment_path) }}" allow="autoplay"></iframe>
+                            @php
+                                $attachmentUrl = route('documents.file', [$document->uuid ?? $document->id, 'main']);
+                                $attachmentExtension = strtolower(pathinfo($document->attachment_path, PATHINFO_EXTENSION));
+                                $attachmentIsImage = in_array($attachmentExtension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'], true);
+                            @endphp
+                            <div class="document-attachment-preview no-print">
+                                @if($attachmentIsImage)
+                                    <img src="{{ $attachmentUrl }}"
+                                         alt="ตัวอย่างไฟล์แนบ {{ $document->title }}"
+                                         class="document-attachment-preview__image">
+                                @else
+                                    <iframe src="{{ $attachmentUrl }}#toolbar=1&navpanes=0&view=FitH"
+                                            title="ตัวอย่างไฟล์แนบ {{ $document->title }}"
+                                            class="document-attachment-preview__frame"
+                                            loading="lazy"></iframe>
+                                @endif
                             </div>
                             <div class="text-center mt-3 no-print">
-                                <a href="{{ asset('storage/'.$document->attachment_path) }}" target="_blank"
+                                <a href="{{ $attachmentUrl }}" target="_blank"
                                    class="btn rounded-pill px-4 fw-bold shadow-sm bg-white" style="color:var(--primary-dark);border:1px solid #cbd5e1;font-size:14px;">
                                     <i class="fas fa-external-link-alt me-2"></i>เปิดดูไฟล์ฉบับเต็ม
                                 </a>
@@ -284,7 +345,7 @@
 
                                 @if($document->external_attachment_path)
                                     @php
-                                        $qrArchiveUrl = asset('storage/' . $document->external_attachment_path);
+                                        $qrArchiveUrl = route('documents.file', [$document->uuid ?? $document->id, 'external']);
                                         $qrIsImage = str_starts_with((string) $document->external_mime_type, 'image/');
                                         $qrIsPdf = $document->external_mime_type === 'application/pdf';
                                     @endphp
@@ -315,10 +376,17 @@
                                         </a>
                                     </div>
                                 @else
-                                    <div class="alert alert-warning mb-0">
-                                        <div class="fw-bold"><i class="fas fa-triangle-exclamation me-1"></i>ยังเก็บสำเนาจากลิงก์ไม่ได้</div>
-                                        <div class="small mt-1">{{ $document->external_download_error ?: 'ลิงก์อาจต้องเข้าสู่ระบบหรือไม่ใช่ลิงก์ดาวน์โหลดไฟล์โดยตรง' }}</div>
-                                    </div>
+                                    @if($document->external_download_error)
+                                        <div class="alert alert-warning mb-0">
+                                            <div class="fw-bold"><i class="fas fa-triangle-exclamation me-1"></i>ยังเก็บสำเนาจากลิงก์ไม่ได้</div>
+                                            <div class="small mt-1">{{ $document->external_download_error }}</div>
+                                        </div>
+                                    @else
+                                        <div class="alert alert-info mb-0">
+                                            <div class="fw-bold"><i class="fas fa-circle-notch fa-spin me-1"></i>กำลังเก็บสำเนาเอกสาร</div>
+                                            <div class="small mt-1">ระบบรับลิงก์แล้วและกำลังดาวน์โหลดสำเนา กรุณารีเฟรชหน้านี้อีกครั้ง</div>
+                                        </div>
+                                    @endif
                                 @endif
                             </div>
                         @endif
@@ -326,11 +394,12 @@
                         @if(($document->status === 'DRAFT' || $document->status === 'REJECTED') && $document->created_by === auth()->id())
                             <hr class="my-4 no-print" style="border-color: #cbd5e1;">
                             <div class="bg-white p-3 rounded-3 border shadow-sm no-print">
-                                <form action="{{ route('documents.upload', $document->uuid ?? $document->id) }}" method="POST" enctype="multipart/form-data" class="d-flex flex-wrap align-items-end gap-3">
+                                <form id="manual_qr_attachment_form" action="{{ route('documents.upload', $document->uuid ?? $document->id) }}" method="POST" enctype="multipart/form-data" class="d-flex flex-wrap align-items-end gap-3">
                                     @csrf
+                                    <input type="hidden" name="attachment_context" value="external_qr">
                                     <div class="flex-grow-1">
                                         <label class="form-label small fw-bold text-muted mb-2">
-                                            <i class="fas fa-paperclip me-1"></i> แนบไฟล์เพิ่มเติม หรือ เปลี่ยนไฟล์ใหม่ (PDF, JPG, PNG)
+                                            <i class="fas fa-paperclip me-1"></i> แนบสำเนาเอกสารที่ดาวน์โหลดจากลิงก์ QR (PDF, JPG, PNG)
                                         </label>
                                         <input type="file" name="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png" required style="border-radius: 8px;">
                                     </div>
@@ -343,6 +412,7 @@
                     </div>
                 </div>
 
+                <div id="document-routing" class="incoming-scroll-target">
                 {{-- 🌟 โซนพรีวิวใบเกษียนหนังสือรับเข้า (ดึงมาจากหน้า Routing Slip โดยตรง) 🌟 --}}
                 @if($document->assigned_to)
                 <div class="card border-0 shadow-sm mb-5 no-print" style="border-radius: 16px; overflow: hidden;">
@@ -359,9 +429,10 @@
                 @endif
 
                 @include('documents.partials.dynamic_route_track')
+                </div>
 
                 @if($isReviewer)
-                    <div class="no-print mt-4 mb-4">
+                    <div class="no-print mt-4 mb-4 incoming-scroll-target" id="document-action">
                         @include('documents.partials.review_box_incoming')
                     </div>
                 @endif
@@ -371,12 +442,33 @@
 
         {{-- Draft Sign & Edit (สำหรับคนสร้าง) --}}
         @if(($document->status === 'DRAFT' || $document->status === 'REJECTED') && $document->created_by === auth()->id())
+        @php
+            $requiresQrManualAttachment = $document->doc_type === 'incoming'
+                && $document->external_url
+                && !$document->attachment_path
+                && !$document->external_attachment_path;
+        @endphp
         <div class="text-center mt-5 p-4 rounded-3 shadow-sm no-print" style="background:var(--primary-light);border:1px solid var(--primary-border);">
             <div class="mx-auto mb-3 rounded-circle d-flex align-items-center justify-content-center text-white shadow-sm" style="width:55px;height:55px;background:var(--primary);font-size:22px;">
                 <i class="fas fa-paper-plane"></i>
             </div>
             <h5 class="fw-bold mb-1" style="color:var(--primary-dark);">ขั้นตอนสุดท้าย: ยืนยันการส่งเรื่อง</h5>
-            <p class="mb-4" style="font-size:14px;color:var(--primary);">กรอกรหัส PIN 6 หลักเพื่อส่งเอกสารรับเข้าสู่ระบบ</p>
+            @if($requiresQrManualAttachment)
+                <div class="alert alert-warning text-start mx-auto mb-4" style="max-width:760px;">
+                    <div class="fw-bold"><i class="fas fa-download me-1"></i>ต้องแนบไฟล์ก่อนส่งเรื่อง</div>
+                    <div class="small mt-1">ระบบดาวน์โหลดเอกสารจากลิงก์นี้อัตโนมัติไม่ได้ กรุณาเปิดลิงก์ต้นฉบับ ดาวน์โหลดไฟล์ แล้วนำไฟล์มาแนบก่อน ระบบจึงจะส่งต่อตามลำดับได้</div>
+                    <div class="d-flex gap-2 flex-wrap mt-3">
+                        <a href="{{ $document->external_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-dark rounded-pill fw-bold">
+                            <i class="fas fa-up-right-from-square me-1"></i>เปิดลิงก์เพื่อดาวน์โหลด
+                        </a>
+                        <button type="button" class="btn btn-sm btn-warning rounded-pill fw-bold" onclick="document.getElementById('manual_qr_attachment_form')?.scrollIntoView({behavior:'smooth', block:'center'})">
+                            <i class="fas fa-paperclip me-1"></i>ไปยังช่องแนบไฟล์
+                        </button>
+                    </div>
+                </div>
+            @else
+                <p class="mb-4" style="font-size:14px;color:var(--primary);">กรอกรหัส PIN 6 หลักเพื่อส่งเอกสารรับเข้าสู่ระบบ</p>
+            @endif
             <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
                 <a href="{{ route('documents.edit', $document->uuid ?? $document->id) }}" class="btn rounded-pill fw-bold px-4 shadow-sm" style="background:#fef08a; border:2px solid #fde047; color:#854d0e; padding:10px 22px; font-size:14px;">
                     <i class="fas fa-edit me-2"></i>แก้ไขข้อมูล
@@ -388,6 +480,7 @@
                         <i class="fas fa-trash-alt me-2"></i>ลบทิ้ง
                     </button>
                 </form>
+                @if(!$requiresQrManualAttachment)
                 <form action="{{ route('documents.sign', $document->uuid ?? $document->id) }}" method="POST" class="d-flex align-items-center gap-2 flex-wrap ms-md-3">
                     @csrf
                     <input type="password" name="pin" maxlength="6" placeholder="• • • • • •" required autocomplete="off"
@@ -397,6 +490,7 @@
                         <i class="fas fa-paper-plane me-2"></i>ส่งเรื่องทันที
                     </button>
                 </form>
+                @endif
             </div>
         </div>
         @endif
@@ -405,6 +499,250 @@
 </div>
 
 <style>
+    .incoming-detail-page {
+        --incoming-blue: #087fb9;
+        --incoming-blue-dark: #075985;
+        --incoming-blue-soft: #ecf8fd;
+        --incoming-border: #dce8ee;
+    }
+    .incoming-page-heading {
+        padding: 8px 2px;
+    }
+    .incoming-page-heading__eyebrow {
+        color: var(--incoming-blue);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .04em;
+    }
+    .incoming-timeline-shell > * {
+        margin-bottom: 0 !important;
+    }
+    .incoming-section-nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        overflow-x: auto;
+        padding: 8px;
+        background: #fff;
+        border: 1px solid var(--incoming-border);
+        border-radius: 14px;
+        box-shadow: 0 5px 18px rgba(15, 23, 42, .05);
+        scrollbar-width: thin;
+    }
+    .incoming-section-nav a {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        flex: 0 0 auto;
+        padding: 9px 14px;
+        border-radius: 10px;
+        color: #475569;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        transition: background-color .18s ease, color .18s ease, transform .18s ease;
+    }
+    .incoming-section-nav a:hover,
+    .incoming-section-nav a:focus-visible {
+        color: var(--incoming-blue-dark);
+        background: var(--incoming-blue-soft);
+        transform: translateY(-1px);
+        outline: none;
+    }
+    .incoming-document-card {
+        overflow: hidden;
+        border: 1px solid var(--incoming-border) !important;
+        border-radius: 18px !important;
+    }
+    .incoming-document-hero {
+        background:
+            radial-gradient(circle at 95% 10%, rgba(14, 165, 233, .13), transparent 34%),
+            linear-gradient(135deg, #f8fcfe 0%, #eef8fc 100%);
+        border-bottom: 1px solid var(--incoming-border);
+    }
+    .incoming-document-hero__content {
+        min-width: 0;
+        flex: 1 1 620px;
+    }
+    .incoming-document-hero__icon {
+        width: 48px;
+        height: 48px;
+        flex: 0 0 48px;
+        display: grid;
+        place-items: center;
+        border-radius: 14px;
+        color: #fff;
+        background: linear-gradient(145deg, #0ea5e9, #0876ad);
+        box-shadow: 0 8px 20px rgba(2, 132, 199, .22);
+        font-size: 20px;
+    }
+    .incoming-document-hero__meta {
+        margin-bottom: 3px;
+        color: #64748b;
+        font-size: 12.5px;
+        font-weight: 600;
+    }
+    .incoming-document-hero__title {
+        color: #0f3044;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+    }
+    .incoming-section-heading {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #e8eef2;
+        color: #12384d;
+    }
+    .incoming-section-heading__icon {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 11px;
+        color: var(--incoming-blue);
+        background: var(--incoming-blue-soft);
+    }
+    .incoming-info-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+    }
+    .incoming-info-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 11px;
+        min-width: 0;
+        min-height: 92px;
+        padding: 16px;
+        border: 1px solid #e4edf2;
+        border-radius: 13px;
+        background: #fff;
+        box-shadow: 0 3px 12px rgba(15, 23, 42, .035);
+    }
+    .incoming-info-item:nth-child(5) {
+        grid-column: span 2;
+    }
+    .incoming-info-item__icon {
+        width: 34px;
+        height: 34px;
+        flex: 0 0 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        color: var(--incoming-blue);
+        background: #edf8fc;
+        font-size: 13px;
+    }
+    .incoming-info-item__label {
+        margin-bottom: 5px;
+        color: #738292;
+        font-size: 12px;
+        font-weight: 700;
+    }
+    .incoming-info-item__value {
+        color: #172b3a;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+    }
+    .incoming-assignment {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 15px 17px;
+        border: 1px solid #fde3ad;
+        border-radius: 13px;
+        color: #92400e;
+        background: #fffaf0;
+    }
+    .incoming-assignment__icon {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        color: #b45309;
+        background: #ffefc7;
+    }
+    .incoming-scroll-target {
+        scroll-margin-top: 90px;
+    }
+    .document-attachment-preview {
+        width: 100%;
+        height: clamp(520px, 72vh, 900px);
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        overflow: auto;
+        padding: 16px;
+        background: #eef2f5;
+        border: 1px solid #dbe4ea;
+        border-radius: 12px;
+        box-shadow: inset 0 1px 3px rgba(15, 23, 42, .06);
+    }
+    .document-attachment-preview__image {
+        display: block;
+        width: auto;
+        max-width: 100%;
+        height: auto;
+        max-height: none;
+        margin: 0 auto;
+        object-fit: contain;
+        background: #fff;
+        box-shadow: 0 3px 12px rgba(15, 23, 42, .12);
+    }
+    .document-attachment-preview__frame {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: #fff;
+        border: 0;
+        border-radius: 7px;
+    }
+    @media (max-width: 767.98px) {
+        .incoming-page-heading {
+            align-items: flex-start !important;
+            flex-direction: column;
+        }
+        .incoming-page-heading > div:last-child {
+            width: 100%;
+            justify-content: space-between !important;
+        }
+        .incoming-page-heading h3 {
+            font-size: 1.35rem;
+        }
+        .incoming-section-nav {
+            margin-left: -4px;
+            margin-right: -4px;
+        }
+        .incoming-info-grid {
+            grid-template-columns: 1fr;
+        }
+        .incoming-info-item:nth-child(5) {
+            grid-column: auto;
+        }
+        .incoming-document-hero__icon {
+            width: 42px;
+            height: 42px;
+            flex-basis: 42px;
+        }
+        .document-attachment-preview {
+            height: 58vh;
+            min-height: 420px;
+            padding: 8px;
+        }
+    }
+    @media (min-width: 768px) and (max-width: 1099.98px) {
+        .incoming-info-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
     @font-face {
         font-family: 'MySarabun';
         src: url('{{ asset("fonts/THSarabunIT๙.ttf") }}') format('truetype');

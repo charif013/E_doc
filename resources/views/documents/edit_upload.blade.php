@@ -17,8 +17,8 @@
             <p class="text-secondary small mb-0">แก้ไขข้อมูลหรือเปลี่ยนไฟล์เอกสาร PDF ใหม่</p>
         </div>
         {{-- 🌟 จุดที่ 1: เปลี่ยนลิงก์ปุ่มยกเลิกเป็น UUID --}}
-        <a href="{{ route('documents.show', $document->uuid ?? $document->id) }}" class="btn btn-outline-dark btn-sm rounded-pill px-4 shadow-sm fw-bold bg-white">
-            <i class="fas fa-arrow-left me-1"></i> ยกเลิก
+        <a href="{{ route('documents.show', $document->uuid ?? $document->id) }}" class="ds-back-link">
+            <i class="fas fa-arrow-left" aria-hidden="true"></i>ยกเลิกและกลับ
         </a>
     </div>
 
@@ -110,7 +110,7 @@
                         @if($document->attachment_path)
                         <div class="d-inline-flex align-items-center mb-3 p-2 bg-white rounded border shadow-sm">
                             <span class="small text-primary fw-bold me-3"><i class="fas fa-check-circle text-success me-1"></i> ไฟล์เดิม: {{ basename($document->attachment_path) }}</span>
-                            <a href="{{ asset('storage/' . $document->attachment_path) }}" target="_blank" class="btn btn-sm btn-outline-secondary rounded-pill">ดูไฟล์เดิม</a>
+                            <a href="{{ route('documents.file', [$document->uuid ?? $document->id, 'main']) }}" target="_blank" class="btn btn-sm btn-outline-secondary rounded-pill">ดูไฟล์เดิม</a>
                         </div>
                         @endif
 

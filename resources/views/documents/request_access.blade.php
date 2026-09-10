@@ -21,14 +21,14 @@
                 <form action="{{ route('documents.request_access', $document->uuid ?? $document->id) }}" method="POST">
                     @csrf
                     <div class="d-flex gap-2 justify-content-center mt-4">
-                        <a href="{{ route('documents.approve_list') }}" class="btn btn-light rounded-pill fw-bold px-4 border shadow-sm"><i class="fas fa-arrow-left me-1"></i> กลับ</a>
+                        <a href="{{ route('documents.approve_list') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ</a>
                         <button type="submit" class="btn rounded-pill fw-bold text-white px-4 shadow-sm" style="background: #f59e0b; border: none;"><i class="fas fa-paper-plane me-2"></i> ส่งคำขอสิทธิ์</button>
                     </div>
                 </form>
 
             @elseif($accessRequest->status === 'pending')
                 <div class="alert alert-warning border-0 rounded-3 shadow-sm mb-4"><i class="fas fa-hourglass-half me-2"></i> คำขอของคุณอยู่ระหว่างรอการอนุมัติ</div>
-                <a href="{{ route('documents.approve_list') }}" class="btn btn-light rounded-pill fw-bold px-4 border shadow-sm"><i class="fas fa-arrow-left me-1"></i> กลับหน้ารายการ</a>
+                <a href="{{ route('documents.approve_list') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ</a>
 
             @elseif($accessRequest->status === 'rejected')
                 <div class="alert alert-danger border-0 rounded-3 shadow-sm mb-4"><i class="fas fa-times-circle me-2"></i> คำขอของคุณถูกปฏิเสธโดยเจ้าของเรื่อง</div>

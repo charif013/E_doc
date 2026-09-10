@@ -30,8 +30,8 @@
                 </div>
                 
                 <div class="d-flex gap-2 justify-content-center mt-4">
-                    <a href="{{ route('documents.approve_list') }}" class="btn btn-light rounded-pill fw-bold px-4 border shadow-sm">
-                        <i class="fas fa-arrow-left me-1"></i> ถอยกลับ
+                    <a href="{{ route('documents.approve_list') }}" class="ds-back-link">
+                        <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ
                     </a>
                     <button type="submit" class="btn rounded-pill fw-bold text-white px-4 shadow-sm" style="background: #ef4444; border: none;">
                         <i class="fas fa-key me-2"></i> ปลดล็อก

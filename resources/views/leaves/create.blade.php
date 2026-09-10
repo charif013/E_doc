@@ -13,8 +13,8 @@
         </div>
         <div class="d-flex align-items-center gap-3">
             <span class="text-muted fw-bold">{{ now()->locale('th')->translatedFormat('d M Y') }}</span>
-            <a href="{{ route('home') }}" class="btn btn-outline-dark btn-sm rounded-pill px-3 shadow-sm bg-white">
-                ← แดชบอร์ด
+            <a href="{{ route('home') }}" class="ds-back-link">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก
             </a>
         </div>
     </div>

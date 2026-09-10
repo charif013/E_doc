@@ -12,8 +12,8 @@
             </h4>
             <p class="text-secondary small mb-0">เพิ่มวันหยุดกรณีพิเศษตามประกาศ มติ ครม. หรือวันหยุดท้องถิ่น</p>
         </div>
-        <a href="{{ route('home') }}" class="btn btn-outline-dark btn-sm rounded-pill px-4 shadow-sm fw-bold bg-white">
-            ← กลับหน้าหลัก
+        <a href="{{ route('home') }}" class="ds-back-link">
+            <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก
         </a>
     </div>
 

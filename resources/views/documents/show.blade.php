@@ -3,6 +3,7 @@
 
 @section('content')
 <div class="container-fluid px-4 py-4" style="background-color: var(--bg-page); min-height: 100vh;">
+    @include('documents.partials.status_timeline')
 
     {{-- ============================================================
          🔧 HELPER: ตัวแปรกลางและฟังก์ชันช่วยเหลือ
@@ -21,16 +22,25 @@
         // ─── Badge แสดงสถานะ ──────────────────────────────────────────
         $badges = [
             'DRAFT'              => ['bg-secondary',  'text-white', 'ฉบับร่าง'],
+            'REGISTERED'         => ['bg-info',       'text-dark',  'รับเรื่องแล้ว'],
+            'IN_REVIEW'          => ['bg-warning',    'text-dark',  'อยู่ระหว่างพิจารณา'],
+            'WAITING_REVIEWER'   => ['bg-warning',    'text-dark',  'รอผู้ตรวจสอบ'],
+            'WAITING_APPROVER'   => ['bg-primary',    'text-white', 'รออนุมัติ'],
             'WAITING_ADMIN'      => ['bg-secondary',  'text-white', 'รอธุรการรับเรื่อง'],
             'WAITING_SUPERVISOR' => ['bg-warning',    'text-dark',  'รอหัวหน้าสำนักปลัด'],
             'WAITING_PALAD'      => ['bg-primary',    'text-white', 'รอปลัด อบต.'],
             'WAITING_NAYOK'      => ['bg-info',       'text-dark',  'รอนายกฯ อนุมัติ'],
             'WAITING_NUMBERING'  => ['bg-info',       'text-dark',  'รอธุรการลงทะเบียนเลข'],
-            'APPROVED'           => ['bg-success',    'text-white', 'อนุมัติเรียบร้อย'],
+            'APPROVED'           => ['bg-warning',    'text-dark',  'อนุมัติแล้ว / รอออกเลข'],
+            'COMPLETED'          => ['bg-success',    'text-white', 'ออกเลขและดำเนินการเสร็จสิ้น'],
+            'ARCHIVED'           => ['bg-dark',       'text-white', 'จัดเก็บแล้ว'],
             'REJECTED'           => ['bg-danger',     'text-white', 'ถูกตีกลับ / แก้ไข'],
             'CANCELED'           => ['bg-dark',       'text-white', 'ยกเลิก / เลขเสีย'],
         ];
         $b = $badges[$document->status] ?? ['bg-light', 'text-dark', $document->status];
+        if ($document->isAtFinalApprovalStep()) {
+            $b = ['bg-primary', 'text-white', 'รออนุมัติ'];
+        }
 
         // ─── ฟังก์ชัน: แปลง path ลายเซ็นให้ปลอดภัย ──────────────────
         if (!function_exists('getSigUrl')) {
@@ -157,8 +167,8 @@
             <button onclick="window.print()" class="btn btn-dark rounded-pill px-4 shadow-sm fw-bold">
                 <i class="fas fa-print me-2"></i>พิมพ์เอกสาร
             </button>
-            <a href="{{ $user->hasAnyRole(['super-admin','executive','palad','deputy-palad','head','saraban','officer']) ? route('documents.approve_list') : route('documents.assigned') }}" class="btn btn-outline-dark rounded-pill px-4 shadow-sm fw-bold bg-white">
-                <i class="fas fa-arrow-left me-1"></i> กลับหน้ารายการ
+            <a href="{{ $user->hasAnyRole(['super-admin','executive','palad','deputy-palad','head','saraban','officer']) ? route('documents.approve_list') : route('documents.assigned') }}" class="ds-back-link">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ
             </a>
         </div>
     </div>
@@ -325,7 +335,7 @@
                             <span class="badge bg-success-subtle text-success border border-success-subtle px-3 py-2 rounded-pill fw-bold me-2">
                                 <i class="fas fa-check-circle me-1"></i> ประทับลายเซ็นแล้ว
                             </span>
-                            <a href="{{ asset('storage/' . $document->signed_path) }}" target="_blank" class="btn btn-success fw-bold shadow-sm rounded-pill px-4">
+                            <a href="{{ route('documents.file', [$document->uuid ?? $document->id, 'signed']) }}" target="_blank" class="btn btn-success fw-bold shadow-sm rounded-pill px-4">
                                 <i class="fas fa-file-signature me-1"></i> ดูฉบับสมบูรณ์ (มีลายเซ็น)
                             </a>
                         @endif
@@ -357,7 +367,7 @@
                         <i class="fas fa-file-pdf me-2 text-primary"></i>ไฟล์เอกสารแนบในระบบ (ฉบับเต็ม)
                     </h6>
                     <div class="rounded-3 overflow-hidden border shadow-sm">
-                        <iframe src="{{ asset('storage/' . $document->attachment_path) }}" width="100%" height="600px"></iframe>
+                        <iframe src="{{ route('documents.file', [$document->uuid ?? $document->id, 'main']) }}" width="100%" height="600px"></iframe>
                     </div>
                 </div>
             </div>

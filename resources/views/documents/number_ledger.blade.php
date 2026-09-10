@@ -10,7 +10,7 @@
             </h4>
             <small class="text-muted">ตรวจสอบสถานะการออกเลข จองเลข และดูหมายเลขที่ยังว่าง</small>
         </div>
-        <a href="{{ route('home') }}" class="btn btn-outline-dark btn-sm rounded-pill px-3 shadow-sm bg-white fw-bold">← แดชบอร์ด</a>
+        <a href="{{ route('home') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก</a>
     </div>
 
     @if(session('success'))
@@ -27,8 +27,8 @@
                     <option value="leave" {{ $type == 'leave' ? 'selected' : '' }}>🏖️ ทะเบียนใบลา</option>
                 </select>
 
-                {{-- 🌟 ถ้าเป็นบันทึกข้อความ ให้โชว์ตัวเลือกกอง --}}
-                @if($type === 'internal')
+                {{-- บันทึกข้อความและทะเบียนใบลาแยกสมุดตามสำนัก/กอง --}}
+                @if(in_array($type, ['internal', 'leave']))
                 <select name="department" class="form-select form-select-sm shadow-sm text-primary fw-bold" onchange="this.form.submit()" style="width: 200px;">
                     @foreach($departments as $d)
                         <option value="{{ $d }}" {{ $dept == $d ? 'selected' : '' }}>{{ $d }}</option>

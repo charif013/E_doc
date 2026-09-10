@@ -16,6 +16,7 @@ class LeaveDelegateWorkflowTest extends TestCase
     {
         parent::setUp();
         Role::findOrCreate('hr');
+        Role::findOrCreate('head');
     }
 
     private function leave(User $owner, User $delegate, array $attributes = []): LeaveRequest
@@ -47,8 +48,24 @@ class LeaveDelegateWorkflowTest extends TestCase
             ->assertSessionHas('success');
 
         $this->assertDatabaseHas('leave_requests', [
-            'id' => $leave->id, 'delegate_status' => 'accepted', 'workflow_status' => 'pending_inspector',
+            'id' => $leave->id, 'delegate_status' => 'accepted', 'workflow_status' => 'pending_head',
         ]);
+    }
+
+    public function test_delegate_can_find_pending_leave_on_assigned_work_page(): void
+    {
+        Role::findOrCreate('worker');
+        $owner = User::factory()->create(['name' => 'ผู้ยื่นใบลา']);
+        $delegate = User::factory()->create()->assignRole('worker');
+        $this->leave($owner, $delegate);
+
+        $this->actingAs($delegate)->get(route('documents.assigned'))
+            ->assertOk()
+            ->assertSee('งานแทนระหว่างการลา')
+            ->assertSee('ผู้ยื่นใบลา')
+            ->assertSee('รับงานแทน')
+            ->assertSee('ปฏิเสธ')
+            ->assertSee('งานค้าง 1 รายการ');
     }
 
     public function test_delegate_can_decline_with_reason_and_owner_can_reassign(): void

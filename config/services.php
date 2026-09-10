@@ -35,6 +35,8 @@ return [
         'login_channel_id' => env('LINE_LOGIN_CHANNEL_ID'),
         'login_secret' => env('LINE_LOGIN_SECRET'),
         'messaging_token' => env('LINE_BOT_TOKEN'),
+        'messaging_secret' => env('LINE_BOT_CHANNEL_SECRET'),
+        'official_account_id' => env('LINE_OFFICIAL_ACCOUNT_ID'),
         'redirect_uri' => env('LINE_LOGIN_REDIRECT_URI', rtrim((string) env('APP_URL'), '/').'/line/callback'),
     ],
 
@@ -60,6 +62,10 @@ return [
     'leave_delegate' => [
         'remind_after_hours' => env('LEAVE_DELEGATE_REMIND_AFTER_HOURS', 24),
         'escalate_after_hours' => env('LEAVE_DELEGATE_ESCALATE_AFTER_HOURS', 48),
+    ],
+
+    'google_calendar' => [
+        'api_key' => env('GOOGLE_API_KEY'),
     ],
 
 ];

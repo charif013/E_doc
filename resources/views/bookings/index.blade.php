@@ -30,11 +30,14 @@
 
     <div class="row">
         {{-- ส่วนหัว --}}
-        <div class="col-12 mb-4 d-flex justify-content-between align-items-center border-bottom pb-3">
-            <h4 class="fw-bold text-dark mb-0"><i class="fas fa-calendar-alt text-primary me-2"></i> ปฏิทินการจองห้องประชุม</h4>
-            <a href="{{ route('bookings.create') }}" class="btn btn-primary fw-bold shadow-sm rounded-pill px-4">
-                <i class="fas fa-plus me-1"></i> จองห้อง / นัดประชุม
-            </a>
+        <div class="col-12 mb-4 d-flex justify-content-between align-items-center gap-3 flex-wrap border-bottom pb-3">
+            <h1 class="h4 fw-bold text-dark mb-0"><i class="fas fa-calendar-alt text-primary me-2" aria-hidden="true"></i> ปฏิทินการจองห้องประชุม</h1>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <a href="{{ route('home') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก</a>
+                <a href="{{ route('bookings.create') }}" class="btn btn-primary fw-bold shadow-sm rounded-pill px-4">
+                    <i class="fas fa-plus me-1"></i> จองห้อง / นัดประชุม
+                </a>
+            </div>
         </div>
 
         {{-- 🌟 ฝั่งซ้าย: กล่องแสดงปฏิทิน --}}
@@ -46,7 +49,7 @@
             </div>
             
             {{-- คำอธิบายสี --}}
-            <div class="d-flex justify-content-center gap-4 mt-3">
+            <div class="calendar-legend d-flex justify-content-center gap-4 mt-3" aria-label="คำอธิบายสีของปฏิทิน">
                 <span class="small fw-bold"><i class="fas fa-circle text-primary me-1"></i> นัดประชุม</span>
                 <span class="small fw-bold"><i class="fas fa-circle text-success me-1"></i> ใช้งานทั่วไป</span>
                 <span class="small fw-bold"><i class="fas fa-circle text-danger me-1"></i> ปิดปรับปรุง</span>
@@ -78,22 +81,43 @@
                                         }
                                     @endphp
 
+                                    @php
+                                        $bookingStatus = strtoupper($booking->status ?? 'APPROVED');
+                                        $lifecycleStatus = $booking->lifecycle_status;
+                                        $statusBadge = match($lifecycleStatus) {
+                                            'PENDING' => ['bg-warning-subtle text-warning-emphasis', 'รอดำเนินการ'],
+                                            'CANCELED' => ['bg-secondary-subtle text-secondary', 'ยกเลิกแล้ว'],
+                                            'IN_PROGRESS' => ['bg-primary-subtle text-primary-emphasis', 'กำลังดำเนินการ'],
+                                            'COMPLETED' => ['bg-success-subtle text-success-emphasis', 'เสร็จสิ้น'],
+                                            default => ['bg-info-subtle text-info-emphasis', 'ยืนยันแล้ว'],
+                                        };
+                                    @endphp
+
                                     @if($canSeeTitle)
-                                        <h6 class="mb-0 fw-bold text-dark text-truncate" style="max-width: 65%;">{{ $booking->title }}</h6>
+                                        <h6 class="mb-0 fw-bold text-dark text-truncate" style="max-width: 65%;">
+                                            @can('view', $booking)
+                                                <a href="{{ route('bookings.show', $booking) }}" class="text-dark text-decoration-none">{{ $booking->title }}</a>
+                                            @else
+                                                {{ $booking->title }}
+                                            @endcan
+                                        </h6>
                                     @else
                                         <h6 class="mb-0 fw-bold text-muted text-truncate fst-italic" style="max-width: 65%;">
                                             <i class="fas fa-lock fa-sm me-1 opacity-50"></i> --------
                                         </h6>
                                     @endif
                                     
-                                    {{-- ป้าย Tag สี --}}
-                                    @if($booking->booking_type == 'meeting')
-                                        <span class="badge bg-primary-subtle text-primary-emphasis rounded-pill px-2 py-1" style="font-size: 0.7rem;">นัดประชุม</span>
-                                    @elseif($booking->booking_type == 'general_use')
-                                        <span class="badge bg-success-subtle text-success-emphasis rounded-pill px-2 py-1" style="font-size: 0.7rem;">ทั่วไป</span>
-                                    @else
-                                        <span class="badge bg-danger-subtle text-danger-emphasis rounded-pill px-2 py-1" style="font-size: 0.7rem;">ปรับปรุง</span>
-                                    @endif
+                                    <div class="d-flex flex-column align-items-end gap-1">
+                                        {{-- ป้ายประเภทการจอง --}}
+                                        @if($booking->booking_type == 'meeting')
+                                            <span class="badge bg-primary-subtle text-primary-emphasis rounded-pill px-2 py-1" style="font-size: 0.7rem;">นัดประชุม</span>
+                                        @elseif($booking->booking_type == 'general_use')
+                                            <span class="badge bg-success-subtle text-success-emphasis rounded-pill px-2 py-1" style="font-size: 0.7rem;">ทั่วไป</span>
+                                        @else
+                                            <span class="badge bg-danger-subtle text-danger-emphasis rounded-pill px-2 py-1" style="font-size: 0.7rem;">ปรับปรุง</span>
+                                        @endif
+                                        <span class="badge {{ $statusBadge[0] }} rounded-pill px-2 py-1" style="font-size: 0.7rem;">{{ $statusBadge[1] }}</span>
+                                    </div>
                                 </div>
                                 
                                 <p class="mb-1 small text-secondary mt-2">
@@ -111,16 +135,32 @@
                                 {{-- ส่วนล่าง: ชื่อผู้จอง และปุ่มยกเลิก --}}
                                 <div class="d-flex justify-content-between align-items-center mt-2">
                                     <small class="text-muted" style="font-size: 0.75rem;">ผู้จอง: {{ $booking->creator->name ?? 'ไม่ทราบชื่อ' }}</small>
-                                    
-                                    {{-- 🌟 ปุ่มยกเลิกการจอง (โชว์เฉพาะเจ้าของ หรือ Admin) --}}
+
+                                    @can('view', $booking)
+                                        <a href="{{ route('bookings.show', $booking) }}" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1 ms-auto me-2" style="font-size: 0.7rem;">
+                                            <i class="fas fa-eye me-1"></i>{{ $booking->invitees->contains('id', Auth::id()) ? 'ดูและตอบรับ' : 'ดูรายละเอียด' }}
+                                        </a>
+                                    @endcan
+
+                                    {{-- ยกเลิกได้เฉพาะก่อนเริ่ม หลังจากนั้นแสดงสถานะตามเวลาแทน --}}
                                     @if($booking->created_by === Auth::id() || Auth::user()->hasRole('super-admin'))
-                                        <form action="{{ route('bookings.destroy', $booking->id) }}" method="POST" onsubmit="return confirm('⚠️ คุณแน่ใจหรือไม่ที่จะยกเลิกการจองนี้? \n(การคืนคิวห้องจะไม่สามารถกู้คืนได้)');">
-                                            @csrf
-                                            @method('DELETE')
-                                            <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill px-3 py-1" style="font-size: 0.7rem;">
-                                                <i class="fas fa-trash-alt me-1"></i> ยกเลิก
-                                            </button>
-                                        </form>
+                                        @if($booking->canBeCanceledNow())
+                                            <form action="{{ route('bookings.destroy', $booking->id) }}" method="POST" onsubmit="return confirm('⚠️ คุณแน่ใจหรือไม่ที่จะยกเลิกการจองนี้? \n(การคืนคิวห้องจะไม่สามารถกู้คืนได้)');">
+                                                @csrf
+                                                @method('DELETE')
+                                                <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill px-3 py-1" style="font-size: 0.7rem;">
+                                                    <i class="fas fa-trash-alt me-1"></i> ยกเลิก
+                                                </button>
+                                            </form>
+                                        @elseif($lifecycleStatus === 'IN_PROGRESS')
+                                            <span class="btn btn-sm btn-primary disabled rounded-pill px-3 py-1 booking-time-state" aria-disabled="true">
+                                                <i class="fas fa-circle-play me-1"></i>กำลังดำเนินการ
+                                            </span>
+                                        @elseif($lifecycleStatus === 'COMPLETED')
+                                            <span class="btn btn-sm btn-success disabled rounded-pill px-3 py-1 booking-time-state" aria-disabled="true">
+                                                <i class="fas fa-check me-1"></i>เสร็จสิ้น
+                                            </span>
+                                        @endif
                                     @endif
                                 </div>
                             </div>
@@ -159,11 +199,15 @@
             'id' => $booking->id,
             'title' => $displayTitle,
             'booking_type' => $booking->booking_type,
+            'status' => strtoupper($booking->status ?? 'APPROVED'),
             'start_time' => $booking->start_time,
             'end_time' => $booking->end_time,
             'room' => ['name' => $booking->room_display_name],
             'creator' => $booking->creator ? ['name' => $booking->creator->name] : ['name' => '-'],
-            'description' => $displayDesc
+            'description' => $displayDesc,
+            'detail_url' => $canSee && ($booking->created_by === $userId || $isAdmin || $booking->invitees->contains('id', $userId))
+                ? route('bookings.show', $booking)
+                : null
         ];
     });
 @endphp
@@ -179,16 +223,19 @@
         let eventColor = '#10b981'; 
         if(booking.booking_type === 'meeting') eventColor = '#3b82f6'; 
         if(booking.booking_type === 'maintenance') eventColor = '#ef4444'; 
+        if(booking.status === 'CANCELED') eventColor = '#94a3b8';
 
         return {
-            title: booking.title + ' (' + booking.room.name + ')',
+            title: (booking.status === 'CANCELED' ? '[ยกเลิก] ' : '') + booking.title + ' (' + booking.room.name + ')',
             start: booking.start_time,
             end: booking.end_time,
             color: eventColor,
             extendedProps: {
                 room: booking.room.name,
                 creator: booking.creator.name,
-                description: booking.description
+                description: booking.description,
+                status: booking.status,
+                detailUrl: booking.detail_url
             }
         };
     });
@@ -209,18 +256,24 @@
     });
 
     var calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'dayGridMonth', 
+      initialView: window.innerWidth < 768 ? 'listMonth' : 'dayGridMonth',
       locale: 'th', 
       height: 'auto',
-      headerToolbar: {
-        left: 'prev,next today',
-        center: 'title',
-        right: 'dayGridMonth,timeGridWeek,timeGridDay' 
-      },
+      buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', day: 'วัน', list: 'รายการ' },
+      headerToolbar: window.innerWidth < 768
+        ? { left: 'prev,next', center: 'title', right: 'today' }
+        : { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
+      footerToolbar: window.innerWidth < 768
+        ? { center: 'listMonth,dayGridMonth,timeGridDay' }
+        : false,
       events: events, 
       eventClick: function(info) {
           if (info.event.extendedProps.isHoliday) {
               alert('วันหยุด: ' + info.event.extendedProps.holidayName + '\nวันที่: ' + info.event.start.toLocaleDateString('th-TH'));
+              return;
+          }
+          if (info.event.extendedProps.detailUrl) {
+              window.location.href = info.event.extendedProps.detailUrl;
               return;
           }
           let msg = "หัวข้อ: " + info.event.title.replace(/ \(.+\)$/, '') + "\n";
@@ -244,5 +297,19 @@
     .fc-button-primary:hover { background-color: #e9ecef !important; }
     .fc-button-active { background-color: #e2e8f0 !important; font-weight: bold; }
     .fc-event { cursor: pointer; padding: 2px 4px; border: none !important; border-radius: 4px;}
+    .fc .fc-button { min-height: 42px; font-size: .95rem; }
+    .fc-event:focus { outline: 3px solid rgba(2, 132, 199, .45); outline-offset: 2px; }
+    @media (max-width: 767.98px) {
+        #calendar .fc-header-toolbar { align-items: center; gap: .5rem; }
+        #calendar .fc-toolbar-title { font-size: 1.05rem !important; text-align: center; }
+        #calendar .fc-toolbar-chunk { display: flex; }
+        #calendar .fc-footer-toolbar { margin-top: 1rem; }
+        #calendar .fc-footer-toolbar .fc-toolbar-chunk,
+        #calendar .fc-footer-toolbar .fc-button-group { width: 100%; }
+        #calendar .fc-footer-toolbar .fc-button { flex: 1 1 0; white-space: nowrap; padding-inline: .45rem; }
+        #calendar .fc-list-event-title a { white-space: normal; font-size: .95rem; }
+        #calendar .fc-list-event-time { white-space: nowrap; }
+        .calendar-legend { flex-wrap: wrap; gap: .6rem 1rem !important; justify-content: flex-start !important; }
+    }
 </style>
 @endsection

@@ -3,6 +3,7 @@
 
 @section('content')
 <div class="container-fluid px-4 py-4" style="background-color: var(--bg-page); min-height: 100vh;">
+    @include('documents.partials.status_timeline')
     @php
         $user = auth()->user();
         $isReviewer = (isset($canApprove) && $canApprove) || (
@@ -15,16 +16,25 @@
         // 🌟 อัปเดตสีป้ายสถานะให้เป็นสีทึบ (Solid) ป้องกันปัญหาตัวหนังสือกลืนกับพื้นหลัง 🌟
         $badges = [
             'DRAFT'              => ['bg-secondary', 'text-white', 'ฉบับร่าง'],
+            'REGISTERED'         => ['bg-info', 'text-dark', 'รับเรื่องแล้ว'],
+            'IN_REVIEW'          => ['bg-warning', 'text-dark', 'อยู่ระหว่างพิจารณา'],
+            'WAITING_REVIEWER'   => ['bg-warning', 'text-dark', 'รอผู้ตรวจสอบ'],
+            'WAITING_APPROVER'   => ['bg-primary', 'text-white', 'รออนุมัติ'],
             'WAITING_ADMIN'      => ['bg-secondary', 'text-white', 'รอธุรการรับเรื่อง'],
             'WAITING_SUPERVISOR' => ['bg-warning', 'text-dark', 'รอหัวหน้าสำนักปลัด'],
             'WAITING_PALAD'      => ['bg-primary', 'text-white', 'รอปลัด อบต.'],
             'WAITING_NAYOK'      => ['bg-info', 'text-dark', 'รอนายกฯ อนุมัติ'], // ใช้สีฟ้าสว่าง ตัวหนังสือดำ
             'WAITING_NUMBERING'  => ['bg-dark', 'text-white', 'รอธุรการลงทะเบียนเลข'],
-            'APPROVED'           => ['bg-success', 'text-white', 'สั่งการ/ลงเลขเรียบร้อย'],
+            'APPROVED'           => ['bg-warning', 'text-dark', 'อนุมัติแล้ว / รอออกเลข'],
+            'COMPLETED'          => ['bg-success', 'text-white', 'ออกเลขเรียบร้อย'],
+            'ARCHIVED'           => ['bg-dark', 'text-white', 'จัดเก็บแล้ว'],
             'REJECTED'           => ['bg-danger', 'text-white', 'ถูกตีกลับ / แก้ไข'],
             'CANCELED'           => ['bg-dark', 'text-white', 'ยกเลิก / เลขเสีย']
         ];
         $b = $badges[$document->status] ?? ['bg-light', 'text-dark', $document->status];
+        if ($document->isAtFinalApprovalStep()) {
+            $b = ['bg-primary', 'text-white', 'รออนุมัติ'];
+        }
 
         $sigSteps = [
             ['label'=>'ผู้เสนอเรื่อง',       'sig'=>$document->creator_signature,    'name'=>$document->creator->name ?? '-',    'pos'=>$document->creator->position ?? '-',     'at'=>$document->created_at?->format('d/m/Y H:i'), 'icon'=>'fa-user'],
@@ -54,7 +64,7 @@
         </div>
         <div class="d-flex gap-2">
             <button onclick="window.print()" class="btn btn-dark rounded-pill px-4 shadow-sm fw-bold"><i class="fas fa-print me-2"></i>พิมพ์</button>
-            <a href="{{ route('documents.approve_list') }}" class="btn btn-outline-dark rounded-pill px-4 shadow-sm fw-bold bg-white"><i class="fas fa-arrow-left me-1"></i> กลับ</a>
+            <a href="{{ route('documents.approve_list') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ</a>
         </div>
     </div>
 
@@ -91,12 +101,12 @@
                                 <span class="badge bg-success-subtle text-success border border-success-subtle ms-2"><i class="fas fa-check-circle me-1"></i> มีใบแนบท้ายแล้ว</span>
                             @endif
                         </h6>
-                        <a href="{{ asset('storage/' . ($document->signed_path ?: $document->attachment_path)) }}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold shadow-sm">
+                        <a href="{{ route('documents.file', [$document->uuid ?? $document->id, $document->signed_path ? 'signed' : 'main']) }}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold shadow-sm">
                             <i class="fas fa-external-link-alt me-1"></i> เปิดดูฉบับเต็ม
                         </a>
                     </div>
                     <div class="rounded-3 overflow-hidden border shadow-sm">
-                        <iframe src="{{ asset('storage/' . ($document->signed_path ?: $document->attachment_path)) }}" width="100%" height="800px"></iframe>
+                        <iframe src="{{ route('documents.file', [$document->uuid ?? $document->id, $document->signed_path ? 'signed' : 'main']) }}" width="100%" height="800px"></iframe>
                     </div>
                 </div>
             </div>

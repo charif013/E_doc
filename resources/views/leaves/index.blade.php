@@ -3,11 +3,14 @@
 @section('content')
 <div class="container-fluid px-4 py-3" style="background-color: #f0f4f7; min-height: 90vh;">
     
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-4">
         <h4 class="fw-bold text-dark mb-0"><i class="fas fa-history me-2 text-teal"></i> ประวัติการลาของฉัน</h4>
-        <a href="{{ route('leaves.create') }}" class="btn btn-teal fw-bold rounded-pill shadow-sm px-4">
-            + ยื่นใบลาใหม่
-        </a>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <a href="{{ route('home') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก</a>
+            <a href="{{ route('leaves.create') }}" class="btn btn-teal fw-bold rounded-pill shadow-sm px-4">
+                <i class="fas fa-plus me-1" aria-hidden="true"></i>ยื่นใบลาใหม่
+            </a>
+        </div>
     </div>
 
     @if(session('success'))
@@ -78,19 +81,26 @@
 
                             <div class="step-line {{ $leave->delegate_status == 'accepted' ? 'completed' : '' }}"></div>
 
+                            <div class="step {{ $leave->head_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_head' ? 'active' : 'pending') }}">
+                                <div class="step-icon"><i class="fas fa-user-tie"></i></div>
+                                <div class="step-label">ผอ.กองต้นสังกัด</div>
+                            </div>
+
+                            <div class="step-line {{ $leave->head_status == 'approved' ? 'completed' : '' }}"></div>
+
                             <div class="step {{ $leave->inspector_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_inspector' ? 'active' : 'pending') }}">
                                 <div class="step-icon"><i class="fas fa-search"></i></div>
-                                <div class="step-label">นักทรัพยากรบุคคลตรวจสิทธิ์</div>
+                                <div class="step-label">บุคคลตรวจสิทธิ์</div>
                             </div>
 
                             <div class="step-line {{ $leave->inspector_status == 'approved' ? 'completed' : '' }}"></div>
 
-                            <div class="step {{ $leave->head_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_head' ? 'active' : 'pending') }}">
-                                <div class="step-icon"><i class="fas fa-user-tie"></i></div>
-                                <div class="step-label">หัวหน้า/ผอ.กอง</div>
+                            <div class="step {{ $leave->numbered_at ? 'completed' : ($leave->workflow_status == 'pending_numbering' ? 'active' : 'pending') }}">
+                                <div class="step-icon"><i class="fas fa-hashtag"></i></div>
+                                <div class="step-label">ธุรการลงเลขรับ</div>
                             </div>
 
-                            <div class="step-line {{ $leave->head_status == 'approved' ? 'completed' : '' }}"></div>
+                            <div class="step-line {{ $leave->numbered_at ? 'completed' : '' }}"></div>
 
                             <div class="step {{ $leave->palad_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_palad' ? 'active' : 'pending') }}">
                                 <div class="step-icon"><i class="fas fa-stamp"></i></div>
@@ -104,12 +114,6 @@
                                 <div class="step-label">นายก อบต.</div>
                             </div>
 
-                            <div class="step-line {{ $leave->numbered_at ? 'completed' : '' }}"></div>
-
-                            <div class="step {{ $leave->numbered_at ? 'completed' : ($leave->workflow_status == 'pending_numbering' ? 'active' : 'pending') }}">
-                                <div class="step-icon"><i class="fas fa-hashtag"></i></div>
-                                <div class="step-label">ธุรการลงเลข</div>
-                            </div>
                         </div>
                         
                         @if($leave->status == 'REJECTED')

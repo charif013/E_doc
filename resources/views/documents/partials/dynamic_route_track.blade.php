@@ -27,9 +27,11 @@
             @foreach($displayRoutes as $index => $route)
                 @php
                     $isPresenter = (int) $route->step_order === 1;
-                    $isApproved = $route->status === 'approved';
-                    $isRejected = $route->status === 'rejected';
-                    $isCurrent = $route->status === 'pending' && $route->step_order === $document->current_step;
+                    $isFinalReviewer = !$isPresenter && $index === ($routeCount - 1);
+                    $routeStatus = strtolower($route->status instanceof \BackedEnum ? $route->status->value : (string) $route->status);
+                    $isApproved = $routeStatus === 'approved';
+                    $isRejected = $routeStatus === 'rejected';
+                    $isCurrent = $routeStatus === 'pending' && $route->step_order === $document->current_step;
                     $routeColor = $isApproved ? '#16a34a' : ($isRejected ? '#dc2626' : ($isCurrent ? '#0284c7' : '#94a3b8'));
                     $routeBackground = $isApproved ? '#f0fdf4' : ($isRejected ? '#fef2f2' : ($isCurrent ? '#eff6ff' : '#f8fafc'));
                 @endphp
@@ -48,7 +50,9 @@
                             @if(!empty($route->user?->signature))
                                 <img src="{{ getSigUrl($route->user->signature) }}" alt="ลายเซ็น" style="max-height:48px;max-width:150px;mix-blend-mode:multiply;">
                             @endif
-                            <div class="badge bg-success rounded-pill mt-2">{{ $isPresenter ? 'ลงนามนำส่งแล้ว' : 'พิจารณาแล้ว' }}</div>
+                            <div class="badge bg-success rounded-pill mt-2">
+                                {{ $isPresenter ? 'ลงนามนำส่งแล้ว' : ($isFinalReviewer ? 'อนุมัติแล้ว' : 'พิจารณาแล้ว') }}
+                            </div>
                             @if($route->actioned_at)<div class="small text-muted mt-1">{{ $route->actioned_at->format('d/m/Y H:i') }}</div>@endif
                         @elseif($isRejected)
                             <div class="badge bg-danger rounded-pill mt-3">ตีกลับเอกสาร</div>

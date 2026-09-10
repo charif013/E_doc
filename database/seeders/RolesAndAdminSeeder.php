@@ -150,15 +150,27 @@ class RolesAndAdminSeeder extends Seeder
         }
 
         // ==========================================================
-        // 🌟 4. สร้างบัญชีแอดมินสูงสุด (Super Admin)
+        // 🌟 4. สร้างบัญชีแอดมินสูงสุดจาก secret ของ deployment เท่านั้น
         // ==========================================================
         $superAdminRole = Role::firstOrCreate(['name' => 'super-admin']);
 
+        $adminEmail = config('edoc.bootstrap_admin.email');
+        $adminPassword = config('edoc.bootstrap_admin.password');
+        if (! $adminEmail || ! $adminPassword) {
+            $this->command?->warn('ข้ามการสร้าง super-admin: ต้องตั้ง EDOC_ADMIN_EMAIL และ EDOC_ADMIN_PASSWORD');
+
+            return;
+        }
+
+        if (strlen($adminPassword) < 16) {
+            throw new \RuntimeException('EDOC_ADMIN_PASSWORD ต้องมีอย่างน้อย 16 ตัวอักษร');
+        }
+
         $admin = User::firstOrCreate(
-            ['email' => 'admin@edoc.com'], // <--- อีเมลสำหรับล็อกอินเข้าแอดมิน
+            ['email' => $adminEmail],
             [
                 'name' => 'ผู้ดูแลระบบ (Super Admin)',
-                'password' => Hash::make('password123'), // <--- รหัสผ่านเริ่มต้น
+                'password' => Hash::make($adminPassword),
                 'position' => 'นักวิชาการคอมพิวเตอร์',
             ]
         );

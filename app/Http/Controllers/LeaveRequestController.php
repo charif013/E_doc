@@ -12,6 +12,7 @@ use Carbon\Carbon;
 use App\Services\LeaveWorkflowService;
 use App\Services\NotificationDispatcher;
 use App\Http\Requests\ReviewLeaveRequest;
+use Illuminate\Support\Facades\Schema;
 
 class LeaveRequestController extends Controller
 {
@@ -25,12 +26,7 @@ class LeaveRequestController extends Controller
         $currentYear = now()->year;
 
         // ดึงข้อมูลการลาที่เคยอนุมัติไปแล้วในปีนี้
-        $usedLeaves = LeaveRequest::where('user_id', $user->id)
-            ->where('status', 'APPROVED')
-            ->whereYear('start_date', $currentYear)
-            ->selectRaw('leave_type, SUM(total_days) as total_used')
-            ->groupBy('leave_type')
-            ->pluck('total_used', 'leave_type');
+        $usedLeaves = $this->approvedLeaveUsage($user->id, $currentYear);
 
         // คัดแยกประเภทพนักงาน
         $pos = $user->position ?? '';
@@ -114,11 +110,7 @@ class LeaveRequestController extends Controller
             return back()->with('error', 'ไม่สามารถยกเลิกใบลาที่ถูกพิจารณาไปแล้ว หรือถูกยกเลิกไปแล้วได้');
         }
 
-        // 3. อัปเดตสถานะเป็นยกเลิก
-        $leave->update([
-            'status' => 'CANCELED',
-            'workflow_status' => 'canceled',
-        ]);
+        app(LeaveWorkflowService::class)->cancel($leave, auth()->user());
 
         if ($leave->delegate) {
             app(NotificationDispatcher::class)->toUser(
@@ -166,13 +158,7 @@ class LeaveRequestController extends Controller
             'total_days'   => $request->total_days,
             'reason'       => $request->reason,
             'contact_info' => $request->contact_info,
-            'delegate_id'  => $request->delegate_id, // บันทึก ID ผู้รับมอบงาน
-            'delegate_requested_at' => $request->delegate_id ? now() : null,
-            
-            // ตั้งสถานะเริ่มต้น
-            'status'          => 'PENDING',
-            // ถ้าระบุผู้รับมอบงาน ให้ไปรอด่านรับมอบงาน ถ้าไม่ระบุ ให้ข้ามไปหาธุรการเลย
-            'workflow_status' => $request->delegate_id ? 'pending_delegate' : 'pending_inspector',
+            'delegate_user_id' => $request->delegate_id,
         ]);
 
         $this->notifyNextLeaveStage($leave);
@@ -224,33 +210,10 @@ class LeaveRequestController extends Controller
     {
         /** @var User $user */
         $user = auth()->user();
-        $query = LeaveRequest::with('user')->orderBy('created_at', 'desc');
-
-        // 🌟 เปลี่ยนจาก officer เป็น saraban
-        if ($user->hasRole('hr')) {
-            $query->where('workflow_status', 'pending_inspector');
-        } elseif ($user->hasRole('saraban')) {
-            $query->where('workflow_status', 'pending_numbering');
-        } elseif ($user->hasRole('head')) {
-            $query->where('workflow_status', 'pending_head')
-                ->whereHas('user', function ($userQuery) use ($user) {
-                    $userQuery->where('department', $user->department);
-                });
-        // 🌟 รองรับสิทธิ์รองปลัดควบคู่ปลัด
-        } elseif ($user->hasAnyRole(['palad', 'deputy-palad'])) {
-            $query->where('workflow_status', 'pending_palad');     // ด่านที่ 4: ปลัด/รองปลัด
-        } elseif ($user->hasRole('executive')) {
-            $query->where('workflow_status', 'pending_nayok');
-        } elseif ($user->hasRole('super-admin')) {
-            $query->whereIn('workflow_status', [
-                'pending_inspector', 'pending_head', 'pending_palad',
-                'pending_nayok', 'pending_numbering',
-            ]);
-        } else {
-            $query->where('id', 0); // ไม่มีสิทธิ์
-        }
-
-        $leaves = $query->get();
+        $leaves = LeaveRequest::with('user')
+            ->pendingReviewFor($user)
+            ->orderBy('created_at', 'desc')
+            ->get();
         return view('leaves.approve_list', compact('leaves'));
     }
 
@@ -259,14 +222,24 @@ class LeaveRequestController extends Controller
     // ==========================================
     public function show($id)
     {
-        $leave = LeaveRequest::with(['user', 'delegate', 'inspector', 'head', 'palad', 'nayok', 'numberedBy'])->findOrFail($id);
+        $leave = LeaveRequest::with([
+            'user', 'delegate', 'type', 'numberAllocation',
+            'workflow.steps.evidence.actor',
+        ])->findOrFail($id);
         $this->authorize('view', $leave);
 
         $delegateCandidates = $leave->user_id === auth()->id()
             ? User::whereKeyNot(auth()->id())->orderBy('name')->get()
             : collect();
 
-        return view('leaves.show', compact('leave', 'delegateCandidates'));
+        $usedLeaves = $this->approvedLeaveUsage((int) $leave->user_id, now()->year);
+        $sickUsed = (float) ($usedLeaves->get('ลาป่วย') ?? 0);
+        $personalUsed = (float) ($usedLeaves->get('ลากิจส่วนตัว') ?? 0);
+        $vacationUsed = (float) ($usedLeaves->get('ลาพักผ่อน') ?? 0);
+
+        return view('leaves.show', compact(
+            'leave', 'delegateCandidates', 'sickUsed', 'personalUsed', 'vacationUsed'
+        ));
     }
 
     // ==========================================
@@ -309,5 +282,28 @@ class LeaveRequestController extends Controller
     private function notifyNextLeaveStage(LeaveRequest $leave): void
     {
         app(LeaveWorkflowService::class)->notifyNext($leave);
+    }
+
+    private function approvedLeaveUsage(int $userId, int $year)
+    {
+        $connection = (new LeaveRequest)->getConnectionName() ?: config('database.default');
+        $query = LeaveRequest::where('leave_requests.user_id', $userId)
+            ->atCanonicalStatus('APPROVED')
+            ->whereYear('leave_requests.start_date', $year);
+
+        // Compatibility path for legacy databases while rollback remains supported.
+        if (! Schema::connection($connection)->hasTable('leave_types')
+            || ! Schema::connection($connection)->hasColumn('leave_requests', 'leave_type_id')) {
+            return $query
+                ->selectRaw('leave_requests.leave_type AS leave_type_name, SUM(leave_requests.total_days) AS total_used')
+                ->groupBy('leave_requests.leave_type')
+                ->pluck('total_used', 'leave_type_name');
+        }
+
+        return $query
+            ->join('leave_types', 'leave_types.id', '=', 'leave_requests.leave_type_id')
+            ->selectRaw('leave_types.name AS leave_type_name, SUM(leave_requests.total_days) AS total_used')
+            ->groupBy('leave_types.name')
+            ->pluck('total_used', 'leave_type_name');
     }
 }

@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use App\Models\User;
 use App\Services\LineMessagingService;
 use App\Services\NotificationDispatcher;
@@ -19,22 +20,14 @@ class ProfileController extends Controller
     }
 
     /**
-     * สำหรับอัปเดต LINE ID, PIN และ ลายเซ็น
+     * สำหรับอัปเดต PIN และลายเซ็น (LINE ID เปลี่ยนได้ผ่าน OAuth เท่านั้น)
      */
     public function update(Request $request)
     {
         /** @var User $user */
         $user = Auth::user();
 
-        // ===== 1. อัปเดต LINE ID =====
-        if ($request->has('line_id')) { // เช็คแบบ has เพื่อให้ลบไอดีทิ้งได้ (ถ้าส่งค่าว่างมา)
-            $request->validate([
-                'line_id' => 'nullable|string|max:255',
-            ]);
-            $user->line_id = $request->line_id;
-        }
-
-        // ===== 2. อัปเดต PIN =====
+        // ===== 1. อัปเดต PIN =====
         if ($request->filled('pin')) {
             $request->validate([
                 'pin'         => 'required|digits:6',
@@ -62,7 +55,7 @@ class ProfileController extends Controller
             $user->pin = Hash::make($request->pin);
         }
 
-        // ===== 3. อัปเดตลายเซ็น =====
+        // ===== 2. อัปเดตลายเซ็น =====
         if ($request->filled('signature')) {
             $user->signature = $request->signature;
         }
@@ -143,17 +136,32 @@ class ProfileController extends Controller
     public function redirectToLine()
     {
         $clientId = config('services.line.login_channel_id');
-        $redirectUri = urlencode((string) config('services.line.redirect_uri'));
-        $state = csrf_token(); // สร้างรหัสกันการแฮก
-        
-        $url = "https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id={$clientId}&redirect_uri={$redirectUri}&state={$state}&scope=profile&bot_prompt=aggressive";
-        
+        $redirectUri = config('services.line.redirect_uri');
+
+        if (empty($clientId) || empty($redirectUri)) {
+            return redirect()->route('profile.index')
+                ->with('error', 'ผู้ดูแลระบบยังตั้งค่า LINE Login ไม่ครบ');
+        }
+
+        $state = Str::random(64);
+        session()->put('line_oauth_state', $state);
+
+        $url = 'https://access.line.me/oauth2/v2.1/authorize?'.http_build_query([
+            'response_type' => 'code',
+            'client_id' => $clientId,
+            'redirect_uri' => $redirectUri,
+            'state' => $state,
+            'scope' => 'profile openid',
+            'bot_prompt' => 'aggressive',
+        ], '', '&', PHP_QUERY_RFC3986);
+
         return redirect($url);
     }
 
     public function handleLineCallback(Request $request)
     {
-        if (!$request->filled('state') || !hash_equals((string) session()->token(), (string) $request->state)) {
+        $expectedState = (string) session()->pull('line_oauth_state', '');
+        if (!$request->filled('state') || $expectedState === '' || !hash_equals($expectedState, (string) $request->state)) {
             return redirect()->route('profile.index')->with('error', 'ไม่สามารถยืนยันคำขอเชื่อมต่อ LINE ได้ กรุณาลองใหม่');
         }
 
@@ -162,54 +170,137 @@ class ProfileController extends Controller
             return redirect()->route('profile.index')->with('error', 'คุณยกเลิกการเชื่อมต่อ LINE');
         }
 
-        $code = $request->code;
+        if (!$request->filled('code')) {
+            return redirect()->route('profile.index')->with('error', 'LINE ไม่ได้ส่งรหัสยืนยันกลับมา กรุณาลองใหม่');
+        }
+
+        $code = $request->string('code')->toString();
         $clientId = config('services.line.login_channel_id');
         $clientSecret = config('services.line.login_secret');
         $redirectUri = (string) config('services.line.redirect_uri');
 
-        // 1. นำ Code ไปแลกเป็น Access Token จาก LINE
-        $response = Http::asForm()->post('https://api.line.me/oauth2/v2.1/token', [
-            'grant_type' => 'authorization_code',
-            'code' => $code,
-            'redirect_uri' => $redirectUri,
-            'client_id' => $clientId,
-            'client_secret' => $clientSecret,
-        ]);
-
-        if ($response->successful()) {
-            $accessToken = $response->json('access_token');
-
-            // 2. เอา Token ไปขอดึงข้อมูลโปรไฟล์ (เพื่อเอา userId ที่ขึ้นต้นด้วย U)
-            $profileResponse = Http::withToken($accessToken)
-                ->get('https://api.line.me/v2/profile');
-
-            if ($profileResponse->successful()) {
-                $lineId = $profileResponse->json('userId'); 
-
-                // 3. บันทึกไอดีลงฐานข้อมูลให้ User อัตโนมัติ
-                /** @var User $user */
-                $user = Auth::user();
-                $user->line_id = $lineId;
-                $user->save();
-
-                app(NotificationDispatcher::class)->toUser(
-                    $user,
-                    "✅ เชื่อมต่อระบบ e-Doc กับ LINE สำเร็จ\nนับจากนี้คุณจะได้รับแจ้งเตือนเอกสาร การประชุม และใบลาที่เกี่ยวข้องกับคุณ"
-                );
-
-                return redirect()->route('profile.index')->with('success', 'เชื่อมต่อบัญชี LINE สำเร็จ! ระบบจะส่งแจ้งเตือนให้คุณทาง LINE นับจากนี้');
-            }
+        if (empty($clientId) || empty($clientSecret) || empty($redirectUri)) {
+            return redirect()->route('profile.index')->with('error', 'ผู้ดูแลระบบยังตั้งค่า LINE Login ไม่ครบ');
         }
 
-        return redirect()->route('profile.index')->with('error', 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก LINE');
+        // 1. นำ Code ไปแลกเป็น Access Token จาก LINE
+        try {
+            $response = Http::asForm()->timeout(10)->post('https://api.line.me/oauth2/v2.1/token', [
+                'grant_type' => 'authorization_code',
+                'code' => $code,
+                'redirect_uri' => $redirectUri,
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return redirect()->route('profile.index')->with('error', 'ไม่สามารถติดต่อ LINE ได้ กรุณาลองใหม่');
+        }
+
+        if (!$response->successful() || !$response->json('access_token')) {
+            return redirect()->route('profile.index')->with('error', 'ไม่สามารถยืนยันตัวตนกับ LINE ได้ กรุณาลองใหม่');
+        }
+
+        $accessToken = (string) $response->json('access_token');
+
+        try {
+            $profileResponse = Http::withToken($accessToken)
+                ->acceptJson()
+                ->timeout(10)
+                ->get('https://api.line.me/v2/profile');
+            $friendshipResponse = Http::withToken($accessToken)
+                ->acceptJson()
+                ->timeout(10)
+                ->get('https://api.line.me/friendship/v1/status');
+        } catch (\Throwable $e) {
+            report($e);
+
+            return redirect()->route('profile.index')->with('error', 'ไม่สามารถตรวจสอบสถานะ LINE OA ได้ กรุณาลองใหม่');
+        }
+
+        $lineId = $profileResponse->json('userId');
+        if (!$profileResponse->successful() || !is_string($lineId) || !preg_match('/^U[0-9a-f]{32}$/i', $lineId)) {
+            return redirect()->route('profile.index')->with('error', 'ไม่สามารถอ่านข้อมูลบัญชี LINE ได้ กรุณาลองใหม่');
+        }
+
+        /** @var User $user */
+        $user = Auth::user();
+        $alreadyLinked = User::query()
+            ->where('line_id', $lineId)
+            ->whereKeyNot($user->getKey())
+            ->exists();
+        if ($alreadyLinked) {
+            return redirect()->route('profile.index')->with('error', 'บัญชี LINE นี้เชื่อมกับผู้ใช้อื่นในระบบแล้ว');
+        }
+
+        $isFriend = $friendshipResponse->successful()
+            && $friendshipResponse->json('friendFlag') === true;
+
+        // บางระบบยังไม่ได้ผูก OA กับ LINE Login channel สมบูรณ์ ทำให้ Friendship API
+        // ตอบ false ทั้งที่ผู้ใช้เพิ่ม OA แล้ว จึงยืนยันซ้ำด้วย Messaging API ของ OA เดียวกัน
+        if (!$isFriend) {
+            $isFriend = app(LineMessagingService::class)->canAccessUserProfile($lineId);
+        }
+
+        $user->forceFill([
+            'line_id' => $lineId,
+            'line_friend_status' => $isFriend,
+            'line_connected_at' => now(),
+            'line_followed_at' => $isFriend ? now() : null,
+        ])->save();
+
+        if (!$isFriend) {
+            return redirect()->route('profile.index')->with(
+                'warning',
+                'เชื่อมบัญชี LINE แล้ว แต่ยังรับการแจ้งเตือนไม่ได้ กรุณาเพิ่ม LINE Official Account ของระบบเป็นเพื่อน'
+            );
+        }
+
+        app(NotificationDispatcher::class)->toUser(
+            $user,
+            "✅ เชื่อมต่อระบบ e-Doc กับ LINE สำเร็จ\nนับจากนี้คุณจะได้รับแจ้งเตือนเอกสาร การประชุม และใบลาที่เกี่ยวข้องกับคุณ"
+        );
+
+        return redirect()->route('profile.index')->with('success', 'เชื่อมต่อ LINE และเปิดรับการแจ้งเตือนเรียบร้อยแล้ว');
+    }
+
+    public function refreshLineStatus()
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        if (empty($user->line_id)) {
+            return back()->with('error', 'กรุณาเชื่อมต่อบัญชี LINE ก่อนตรวจสอบสถานะ');
+        }
+
+        $isReachable = app(LineMessagingService::class)->canAccessUserProfile((string) $user->line_id);
+        $user->forceFill([
+            'line_friend_status' => $isReachable,
+            'line_followed_at' => $isReachable ? now() : null,
+        ])->save();
+
+        if (!$isReachable) {
+            return back()->with('warning', 'Bot ยังมองไม่เห็นบัญชีนี้ กรุณาเพิ่ม LINE OA ด้วยบัญชีเดียวกับที่ใช้เชื่อมต่อ');
+        }
+
+        app(NotificationDispatcher::class)->toUser(
+            $user,
+            "✅ ตรวจสอบการเชื่อมต่อ e-Doc สำเร็จ\nบัญชีของคุณพร้อมรับการแจ้งเตือนแล้ว"
+        );
+
+        return back()->with('success', 'ตรวจสอบสำเร็จ บัญชี LINE พร้อมรับการแจ้งเตือนแล้ว');
     }
 
     public function unlinkLine()
     {
         /** @var User $user */
         $user = Auth::user();
-        $user->line_id = null;
-        $user->save();
+        $user->forceFill([
+            'line_id' => null,
+            'line_friend_status' => false,
+            'line_connected_at' => null,
+            'line_followed_at' => null,
+        ])->save();
         
         return back()->with('success', 'ยกเลิกการเชื่อมต่อ LINE เรียบร้อยแล้ว');
     }

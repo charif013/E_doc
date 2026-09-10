@@ -15,6 +15,16 @@ class Kernel extends ConsoleKernel
         $schedule->command('leaves:process-delegate-timeouts')
             ->everyFifteenMinutes()
             ->withoutOverlapping();
+
+        $schedule->command('edoc:purge-retention')
+            ->dailyAt('02:30')
+            ->withoutOverlapping();
+
+        if (config('edoc.queue.run_scheduled_worker')) {
+            $schedule->command(
+                'queue:work database --queue=ocr,documents,notifications,default --stop-when-empty --tries=3 --timeout=720 --max-time=780'
+            )->everyMinute()->withoutOverlapping(2);
+        }
     }
 
     /**

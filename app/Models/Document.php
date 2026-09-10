@@ -124,6 +124,33 @@ class Document extends Model
         return $this->hasMany(DocumentRoute::class, 'document_id')->orderBy('step_order', 'asc');
     }
 
+    /** ระบุว่าเอกสารกำลังรอลายเซ็นจากผู้พิจารณาคนสุดท้ายหรือไม่ */
+    public function isAtFinalApprovalStep(): bool
+    {
+        $status = strtoupper((string) $this->status);
+        if (in_array($status, ['DRAFT', 'APPROVED', 'COMPLETED', 'ARCHIVED', 'REJECTED', 'CANCELED', 'WAITING_NUMBERING'], true)) {
+            return false;
+        }
+
+        $routes = $this->relationLoaded('routes') ? $this->routes : $this->routes()->get();
+        $currentStep = (int) $this->current_step;
+        $currentRoute = $routes->firstWhere('step_order', $currentStep);
+
+        if ($currentStep > 1 && $currentRoute && (string) $currentRoute->status === 'pending') {
+            return $currentStep === (int) $routes->max('step_order');
+        }
+
+        if ($this->doc_type === 'outgoing') {
+            return match (true) {
+                str_contains((string) $this->signer_name, 'นายก') => $status === 'WAITING_NAYOK',
+                str_contains((string) $this->signer_name, 'ปลัด') => $status === 'WAITING_PALAD',
+                default => $status === 'WAITING_SUPERVISOR',
+            };
+        }
+
+        return $status === 'WAITING_NAYOK';
+    }
+
     /**
      * Find a document by its public UUID or by a legacy numeric ID.
      *

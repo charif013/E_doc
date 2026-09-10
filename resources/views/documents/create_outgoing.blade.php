@@ -85,8 +85,8 @@
             </div>
             <div class="d-flex align-items-center gap-3">
             <span class="text-muted fw-bold d-none d-md-inline">{{ now()->locale('th')->translatedFormat('d M Y') }}</span>
-            <a href="{{ route('home') }}" class="btn btn-light btn-sm rounded-pill px-3 shadow-sm border">
-                <i class="fas fa-arrow-left me-1"></i> กลับหน้าหลัก
+            <a href="{{ route('home') }}" class="ds-back-link">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก
             </a>
         </div>
         </div>

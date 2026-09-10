@@ -23,9 +23,10 @@
             </h4>
             <small style="color: var(--ink); opacity: 0.7;">อัปโหลดเอกสารต้นฉบับเพื่อให้ AI ช่วยแยกแยะข้อมูลอัตโนมัติ</small>
         </div>
-        <div>
-            <a href="{{ route('home') }}" class="btn-back">
-                <i class="fas fa-arrow-left me-1"></i> กลับหน้าหลัก
+        <div class="d-flex align-items-center gap-3">
+            <span class="text-muted fw-bold d-none d-md-inline">{{ now()->locale('th')->translatedFormat('d M Y') }}</span>
+            <a href="{{ route('home') }}" class="ds-back-link">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก
             </a>
         </div>
     </div>
@@ -52,7 +53,7 @@
                     <button type="button" class="btn-qr" id="scan_document_button">
                         <i class="fas fa-camera"></i> สแกนเอกสาร
                     </button>
-                    <button type="button" class="btn-qr" onclick="startScanner()">
+                    <button type="button" class="btn-qr" onclick="chooseQrScanSource()">
                         <i class="fas fa-qrcode"></i> สแกน QR
                     </button>
                 </div>
@@ -65,7 +66,7 @@
 
             {{-- พื้นที่อัปโหลด --}}
             <div class="upload-area" id="upload_area">
-                <input type="file" name="file" id="file_input" accept=".pdf,.jpg,.jpeg,.png">
+                <input type="file" name="file" id="file_input" accept=".pdf,.jpg,.jpeg,.png" data-file-preview="custom">
                 <div class="upload-icon"><i class="fas fa-file-pdf"></i></div>
                 <div class="upload-text" id="upload_text_default">
                     ลากไฟล์ PDF/รูปภาพ มาวางที่นี่<br>หรือ <span>คลิกเพื่อเลือกไฟล์</span>
@@ -282,19 +283,6 @@
     .custom-bg { background-color: var(--paper-2); }
     .custom-heading { font-family: 'Kanit', sans-serif; color: var(--green-900); }
 
-    .btn-back {
-        background: white;
-        border: 1px solid var(--line);
-        padding: 0.5rem 1.2rem;
-        border-radius: 50px;
-        color: var(--green-900);
-        text-decoration: none;
-        font-family: 'Kanit', sans-serif;
-        font-weight: 500;
-        transition: all 0.2s;
-    }
-    .btn-back:hover { background: var(--paper); color: var(--green-700); }
-
     /* Cards */
     .upload-card, .form-card {
         background: #ffffff;
@@ -378,6 +366,28 @@
         margin: 1rem auto;
         border-radius: 6px;
         box-shadow: 0 4px 16px rgba(15, 23, 42, 0.16);
+    }
+    .document-preview.is-external-link {
+        min-height: 230px;
+        padding: 2rem;
+        align-items: center;
+        background: #f8fafc;
+    }
+    .qr-link-placeholder {
+        max-width: 640px;
+        text-align: center;
+        color: #475569;
+    }
+    .qr-link-placeholder .qr-link-icon {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 1rem;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: #dcfce7;
+        color: #15803d;
+        font-size: 1.6rem;
     }
     @media (max-width: 768px) {
         .document-preview, .document-preview iframe { min-height: 420px; height: 60vh; }
@@ -525,6 +535,7 @@
 @section('scripts')
 
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 {{-- 🌟 Select2 ต้องพึ่ง jQuery — เช็คก่อนว่ามีโหลดอยู่แล้วหรือยัง (กันโหลดซ้ำถ้า layout มีอยู่แล้ว) --}}
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
@@ -647,7 +658,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 text: qrDetected
                     ? 'สร้าง PDF และพบเอกสารสิ่งที่ส่งมาด้วยจาก QR Code แล้ว'
                     : 'สร้าง PDF แล้ว หาก QR ในหนังสือมีขนาดเล็ก กรุณากด “สแกน QR” เพื่อถ่ายใกล้ ๆ',
-                timer: qrDetected ? 2200 : 3000,
+                timer: 1200,
                 showConfirmButton: false
             });
         } catch (error) {
@@ -663,8 +674,11 @@ document.addEventListener('DOMContentLoaded', function() {
         let imageScanner;
         try {
             qrArea.style.display = 'block';
+            // การอ่าน QR จากภาพกล้องความละเอียดเต็มใช้เวลามากและกินหน่วยความจำ
+            // ภาพย่อ 1,600px ยังเพียงพอสำหรับ QR บนเอกสารทั่วไป
+            const qrImageFile = await resizeImageFile(imageFile, 1600, 0.82);
             imageScanner = new Html5Qrcode('reader');
-            const decodedText = await imageScanner.scanFile(imageFile, true);
+            const decodedText = await imageScanner.scanFile(qrImageFile, false);
             return await handleDecodedQr(decodedText, { showSuccess: false });
         } catch (error) {
             // ไม่พบ QR ในภาพทั้งหน้าไม่ถือเป็นข้อผิดพลาด ผู้ใช้ยังสแกนระยะใกล้ได้
@@ -726,7 +740,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             // จำกัดความละเอียดให้ตัวหนังสือยังชัด แต่ไฟล์ไม่ใหญ่เกินไป
-            const maxSide = 2400;
+            const maxSide = 2000;
             const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
             const canvas = document.createElement('canvas');
             canvas.width = Math.round(image.naturalWidth * scale);
@@ -751,12 +765,47 @@ document.addEventListener('DOMContentLoaded', function() {
             const x = (pageWidth - width) / 2;
             const y = (pageHeight - height) / 2;
 
-            pdf.addImage(canvas.toDataURL('image/jpeg', 0.9), 'JPEG', x, y, width, height, undefined, 'FAST');
+            // toBlob ทำงานแบบ asynchronous จึงไม่ล็อกหน้าจอเหมือน toDataURL
+            const jpegBlob = await canvasToBlob(canvas, 'image/jpeg', 0.84);
+            const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
+            pdf.addImage(jpegBytes, 'JPEG', x, y, width, height, undefined, 'FAST');
             const blob = pdf.output('blob');
             return new File([blob], `scanned-document-${Date.now()}.pdf`, {
                 type: 'application/pdf',
                 lastModified: Date.now()
             });
+        } finally {
+            URL.revokeObjectURL(imageUrl);
+        }
+    }
+
+    function canvasToBlob(canvas, type, quality) {
+        return new Promise((resolve, reject) => {
+            canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('ไม่สามารถประมวลผลภาพได้')), type, quality);
+        });
+    }
+
+    async function resizeImageFile(imageFile, maxSide, quality) {
+        const imageUrl = URL.createObjectURL(imageFile);
+        try {
+            const image = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = imageUrl;
+            });
+            const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+            if (scale === 1 && imageFile.size <= 2 * 1024 * 1024) return imageFile;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+            canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+            const context = canvas.getContext('2d', { alpha: false });
+            context.fillStyle = '#ffffff';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            const blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+            return new File([blob], 'qr-scan.jpg', { type: 'image/jpeg', lastModified: Date.now() });
         } finally {
             URL.revokeObjectURL(imageUrl);
         }
@@ -801,6 +850,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     window.showQrDocumentPreview = function(url) {
         qrPreviewArea.innerHTML = '';
+        qrPreviewArea.classList.remove('is-external-link');
         openQrDocumentButton.href = url;
         const parsedUrl = new URL(url);
         const pathname = parsedUrl.pathname.toLowerCase();
@@ -811,22 +861,38 @@ document.addEventListener('DOMContentLoaded', function() {
             image.referrerPolicy = 'no-referrer';
             qrPreviewArea.appendChild(image);
             qrPreviewFileType.textContent = 'QR · รูปภาพ';
-        } else {
+        } else if (pathname.endsWith('.pdf')) {
             const frame = document.createElement('iframe');
             frame.src = url;
             frame.title = 'ตัวอย่างเอกสารจาก QR Code';
             frame.referrerPolicy = 'no-referrer';
             qrPreviewArea.appendChild(frame);
-            qrPreviewFileType.textContent = pathname.endsWith('.pdf') ? 'QR · PDF' : 'QR · เอกสารออนไลน์';
+            qrPreviewFileType.textContent = 'QR · PDF';
+        } else {
+            // ลิงก์ย่อและหน้าเว็บจำนวนมากห้ามแสดงใน iframe ด้วย CSP/X-Frame-Options
+            // จึงไม่ฝังหน้าเว็บ เพื่อตัดข้อความ “refused to connect” ที่ทำให้เข้าใจผิด
+            qrPreviewArea.classList.add('is-external-link');
+            const placeholder = document.createElement('div');
+            placeholder.className = 'qr-link-placeholder';
+            placeholder.innerHTML = `
+                <div class="qr-link-icon"><i class="fas fa-link"></i></div>
+                <h6 class="fw-bold text-dark mb-2">ตรวจพบลิงก์เอกสารออนไลน์</h6>
+                <p class="mb-2">เว็บไซต์ต้นทางอาจไม่อนุญาตให้แสดงภายในระบบ กรุณากด “เปิดต้นฉบับ” เพื่อตรวจสอบหรือดาวน์โหลดเอกสาร</p>
+                <div class="small text-muted text-break"></div>
+            `;
+            placeholder.querySelector('.text-break').textContent = parsedUrl.href;
+            qrPreviewArea.appendChild(placeholder);
+            qrPreviewFileType.textContent = 'QR · ลิงก์ออนไลน์';
         }
         qrPreviewCard.style.display = 'block';
     };
 
-    rescanQrButton.addEventListener('click', startScanner);
+    rescanQrButton.addEventListener('click', chooseQrScanSource);
     removeQrButton.addEventListener('click', function() {
         externalUrlInput.value = '';
         qrPreviewCard.style.display = 'none';
         qrPreviewArea.innerHTML = '';
+        qrPreviewArea.classList.remove('is-external-link');
         qrPreviewFileType.textContent = '';
         openQrDocumentButton.href = '#';
     });
@@ -854,6 +920,113 @@ function getQrBoxSize(viewfinderWidth, viewfinderHeight) {
     const shortestSide = Math.min(viewfinderWidth, viewfinderHeight);
     const size = Math.floor(Math.min(360, shortestSide * 0.82));
     return { width: size, height: size };
+}
+
+async function chooseQrScanSource() {
+    const attachedFile = document.getElementById('file_input')?.files?.[0];
+
+    if (!attachedFile) {
+        await startScanner();
+        return;
+    }
+
+    const choice = await Swal.fire({
+        icon: 'question',
+        title: 'เลือกวิธีสแกน QR Code',
+        text: `พบไฟล์ที่แนบไว้: ${attachedFile.name}`,
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-file-image me-1"></i> สแกนจากไฟล์ที่แนบ',
+        denyButtonText: '<i class="fas fa-camera me-1"></i> เปิดกล้อง / ถ่ายใหม่',
+        cancelButtonText: 'ยกเลิก',
+        reverseButtons: true
+    });
+
+    if (choice.isConfirmed) {
+        await scanQrFromAttachedFile(attachedFile);
+    } else if (choice.isDenied) {
+        await startScanner();
+    }
+}
+
+async function decodeQrImageFile(imageFile) {
+    const scanner = new Html5Qrcode(
+        'reader',
+        typeof Html5QrcodeSupportedFormats !== 'undefined' ? [Html5QrcodeSupportedFormats.QR_CODE] : undefined,
+        false
+    );
+    try {
+        return await scanner.scanFile(imageFile, false);
+    } finally {
+        try { scanner.clear(); } catch (error) { console.error(error); }
+    }
+}
+
+async function scanQrFromAttachedFile(file) {
+    if (typeof Html5Qrcode === 'undefined') {
+        Swal.fire('เปิดตัวสแกนไม่ได้', 'ไม่สามารถโหลดระบบอ่าน QR Code กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่', 'error');
+        return;
+    }
+
+    await stopScanner();
+    const qrArea = document.getElementById('qr_url_area');
+    qrArea.style.display = 'block';
+    Swal.fire({
+        title: 'กำลังตรวจ QR Code...',
+        text: file.type === 'application/pdf' ? 'กำลังตรวจเอกสาร PDF ทีละหน้า' : 'กำลังตรวจรูปภาพที่แนบ',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    try {
+        let decodedText = null;
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+        if (!isPdf) {
+            decodedText = await decodeQrImageFile(file);
+        } else {
+            if (!window.pdfjsLib) throw new Error('PDF reader is unavailable');
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const pdf = await window.pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+
+            for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+                Swal.update({ text: `กำลังตรวจหน้า ${pageNumber} จาก ${pdf.numPages}` });
+                const page = await pdf.getPage(pageNumber);
+                const baseViewport = page.getViewport({ scale: 1 });
+                const scale = Math.min(2.2, 1800 / baseViewport.width);
+                const viewport = page.getViewport({ scale });
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.ceil(viewport.width);
+                canvas.height = Math.ceil(viewport.height);
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                const blob = await new Promise((resolve, reject) => {
+                    canvas.toBlob(value => value ? resolve(value) : reject(new Error('Cannot render PDF page')), 'image/png');
+                });
+                const pageImage = new File([blob], `qr-page-${pageNumber}.png`, { type: 'image/png' });
+
+                try {
+                    decodedText = await decodeQrImageFile(pageImage);
+                    if (decodedText) break;
+                } catch (error) {
+                    // ไม่พบในหน้านี้ ให้ตรวจหน้าถัดไป
+                }
+                page.cleanup();
+            }
+        }
+
+        if (!decodedText) throw new Error('QR code not found');
+        await handleDecodedQr(decodedText);
+    } catch (error) {
+        console.error(error);
+        await Swal.fire({
+            icon: 'warning',
+            title: 'ไม่พบ QR Code ในไฟล์ที่แนบ',
+            text: 'ลองเปิดกล้องหรือถ่ายภาพ QR ให้ใกล้และคมชัดขึ้น',
+            confirmButtonText: 'ตกลง'
+        });
+    } finally {
+        qrArea.style.display = 'none';
+    }
 }
 
 async function startScanner() {

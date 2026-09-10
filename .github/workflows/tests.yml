@@ -11,12 +11,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: '8.4'
           extensions: mbstring, pdo_sqlite, gd
           coverage: none
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       - run: composer install --no-interaction --prefer-dist
       - run: npm ci
@@ -24,3 +24,5 @@ jobs:
       - run: php artisan key:generate
       - run: php artisan test --do-not-cache-result
       - run: npm run build
+      - run: composer audit --locked --no-interaction
+      - run: npm audit --audit-level=moderate

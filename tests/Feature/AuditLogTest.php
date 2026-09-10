@@ -25,4 +25,13 @@ class AuditLogTest extends TestCase
         $this->assertSame('[REDACTED]', $log->new_values['pin']);
         $this->assertSame($user->id, $log->user_id);
     }
+
+    public function test_audit_logs_are_append_only(): void
+    {
+        $user = User::factory()->create();
+        $log = AuditLog::where('auditable_type', User::class)->where('auditable_id', $user->id)->firstOrFail();
+
+        $this->expectException(\LogicException::class);
+        $log->update(['event' => 'tampered']);
+    }
 }

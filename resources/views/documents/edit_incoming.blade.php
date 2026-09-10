@@ -13,8 +13,8 @@
                 <small class="text-muted">แก้ไขข้อมูลหนังสือรับเข้าที่ถูกตีกลับ</small>
             </div>
             {{-- 🌟 จุดที่ 1: เปลี่ยนลิงก์ปุ่มยกเลิกเป็น UUID --}}
-            <a href="{{ route('documents.show', $document->uuid ?? $document->id) }}" class="btn btn-outline-dark btn-sm rounded-pill px-3 shadow-sm bg-white">
-                ← ยกเลิก
+            <a href="{{ route('documents.show', $document->uuid ?? $document->id) }}" class="ds-back-link">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>ยกเลิกและกลับ
             </a>
         </div>
 

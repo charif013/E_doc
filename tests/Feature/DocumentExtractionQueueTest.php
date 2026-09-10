@@ -35,7 +35,7 @@ class DocumentExtractionQueueTest extends TestCase
 
         $task = DocumentExtractionTask::findOrFail($response->json('task_id'));
         $this->assertSame($user->id, $task->user_id);
-        Storage::disk('local')->assertExists($task->file_path);
+        $this->assertTrue(Storage::disk('local')->exists((string) $task->file_path));
         Queue::assertPushedOn('ocr', ProcessDocumentExtraction::class);
     }
 
@@ -85,7 +85,7 @@ class DocumentExtractionQueueTest extends TestCase
         $task->refresh();
         $this->assertSame('completed', $task->status);
         $this->assertSame('หนังสือทดสอบ', $task->result['title']);
-        Storage::disk('local')->assertMissing($task->file_path);
+        $this->assertFalse(Storage::disk('local')->exists((string) $task->file_path));
     }
 
     public function test_job_marks_failure_and_removes_private_source_file(): void
@@ -103,7 +103,7 @@ class DocumentExtractionQueueTest extends TestCase
             $task->refresh();
             $this->assertSame('failed', $task->status);
             $this->assertSame('ไม่สามารถสกัดข้อมูลเอกสารได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง', $task->error_message);
-            Storage::disk('local')->assertMissing($task->file_path);
+            $this->assertFalse(Storage::disk('local')->exists((string) $task->file_path));
         }
     }
 

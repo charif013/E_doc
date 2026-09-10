@@ -6,6 +6,7 @@ use App\Models\DocumentExtractionTask;
 use App\Services\DocumentExtractionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
@@ -22,8 +23,11 @@ class ProcessDocumentExtraction implements ShouldQueue
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public string $taskId)
+    public string $taskId;
+
+    public function __construct(string $taskId)
     {
+        $this->taskId = $taskId;
         $this->onQueue('ocr');
     }
 
@@ -40,10 +44,14 @@ class ProcessDocumentExtraction implements ShouldQueue
             'error_message' => null,
         ]);
 
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::disk('local');
+        $filePath = (string) $task->file_path;
+
         try {
             $result = $extraction->extractPath(
-                Storage::disk('local')->path($task->file_path),
-                pathinfo($task->file_path, PATHINFO_EXTENSION)
+                $disk->path($filePath),
+                pathinfo($filePath, PATHINFO_EXTENSION)
             );
 
             $task->update([
@@ -61,7 +69,7 @@ class ProcessDocumentExtraction implements ShouldQueue
 
             throw $error;
         } finally {
-            Storage::disk('local')->delete($task->file_path);
+            $disk->delete($filePath);
         }
     }
 

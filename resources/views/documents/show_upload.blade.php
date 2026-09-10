@@ -3,6 +3,7 @@
 
 @section('content')
 <div class="container-fluid px-4 py-4" style="background-color: var(--bg-page); min-height: 100vh;">
+    @include('documents.partials.status_timeline')
 
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
@@ -11,8 +12,8 @@
             </h4>
         </div>
         <div>
-            <a href="{{ route('documents.approve_list') }}" class="btn btn-outline-dark btn-sm rounded-pill px-4 shadow-sm fw-bold bg-white">
-                <i class="fas fa-arrow-left me-1"></i> กลับหน้ารายการ
+            <a href="{{ route('documents.approve_list') }}" class="ds-back-link">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ
             </a>
         </div>
     </div>
@@ -53,7 +54,7 @@
                 <h6 class="fw-bold mb-0"><i class="fas fa-file-pdf me-2 text-danger"></i>เอกสารแนบต้นฉบับ</h6>
                 <div>
                     {{-- ปุ่มดูต้นฉบับ --}}
-                    <a href="{{ asset('storage/'.$document->attachment_path) }}" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold me-2 bg-white">
+                    <a href="{{ route('documents.file', [$document->uuid ?? $document->id, 'main']) }}" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold me-2 bg-white">
                         <i class="fas fa-file-alt me-1"></i>ดูต้นฉบับ
                     </a>
                     
@@ -68,7 +69,7 @@
 
             <div class="card border-0 shadow-sm" style="border-radius: 16px; min-height: 800px; overflow: hidden;">
                 <div class="card-body p-0">
-                    <iframe src="{{ asset('storage/'.$document->attachment_path) }}#toolbar=0" width="100%" height="850px" style="border:none;"></iframe>
+                    <iframe src="{{ route('documents.file', [$document->uuid ?? $document->id, 'main']) }}#toolbar=0" width="100%" height="850px" style="border:none;"></iframe>
                 </div>
             </div>
         </div>

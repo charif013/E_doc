@@ -5,13 +5,14 @@ namespace App\Services;
 use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\UriResolver;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 class ExternalDocumentArchiver
 {
     private const MAX_BYTES = 25 * 1024 * 1024;
     private const MAX_REDIRECTS = 3;
+
+    public function __construct(private DocumentFileStorage $documents) {}
 
     public function archive(string $url, string $directory = 'incoming_qr_docs'): array
     {
@@ -116,7 +117,7 @@ class ExternalDocumentArchiver
             $storagePath = trim($directory, '/') . '/' . $storedName;
             $stream = fopen($temporaryPath, 'rb');
             try {
-                Storage::disk('public')->put($storagePath, $stream);
+                $this->documents->put($storagePath, $stream);
             } finally {
                 fclose($stream);
             }

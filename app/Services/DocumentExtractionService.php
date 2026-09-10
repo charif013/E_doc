@@ -127,7 +127,7 @@ class DocumentExtractionService
             $script,
             $inputPath,
             $outputPath,
-        ], base_path());
+        ], sys_get_temp_dir());
         $process->setTimeout((int) config('services.document_extraction.timeout', 600));
         $process->mustRun();
     }

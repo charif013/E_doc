@@ -155,8 +155,12 @@
         </table>
 
         @if($document->assigned_to)
+        @php
+            $assignmentIsFinalized = in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+                && in_array($document->assignment_status, ['pending', 'accepted', 'delegated', 'in_progress', 'completed'], true);
+        @endphp
         <div class="assigned-box">
-            <span style="font-size: 16pt;">ผู้บริหารมอบหมายให้ส่วนราชการดำเนินการ:</span>
+            <span style="font-size: 16pt;">{{ $assignmentIsFinalized ? 'ผู้บริหารมอบหมายให้ส่วนราชการดำเนินการ:' : 'ข้อเสนอการมอบหมาย (รออนุมัติขั้นสุดท้าย):' }}</span>
             <h3>" {{ $document->assigned_to }} "</h3>
         </div>
         @endif
