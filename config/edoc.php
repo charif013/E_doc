@@ -25,4 +25,9 @@ return [
         'run_scheduled_worker' => env('EDOC_RUN_SCHEDULED_QUEUE_WORKER', true),
         'stale_after_minutes' => max(1, (int) env('EDOC_QUEUE_STALE_AFTER_MINUTES', 10)),
     ],
+
+    'monitoring' => [
+        'failed_jobs_last_hour_max' => max(0, (int) env('EDOC_FAILED_JOBS_LAST_HOUR_MAX', 0)),
+        'minimum_free_disk_mb' => max(100, (int) env('EDOC_MINIMUM_FREE_DISK_MB', 2048)),
+    ],
 ];

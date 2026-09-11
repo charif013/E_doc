@@ -1,0 +1,17 @@
+[Unit]
+Description=e-Doc OCR queue worker
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/edoc
+ExecStart=/usr/bin/php artisan queue:work database --queue=ocr --sleep=1 --tries=1 --timeout=720 --max-time=3600
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=750
+
+[Install]
+WantedBy=multi-user.target

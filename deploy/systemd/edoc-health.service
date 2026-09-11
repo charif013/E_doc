@@ -1,0 +1,9 @@
+[Unit]
+Description=e-Doc production health check
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/edoc
+ExecStart=/usr/bin/php artisan edoc:production-health --json

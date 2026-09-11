@@ -1,0 +1,17 @@
+[Unit]
+Description=e-Doc application queue worker
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/edoc
+ExecStart=/usr/bin/php artisan queue:work database --queue=documents,notifications,default --sleep=1 --tries=3 --timeout=120 --max-time=3600
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=150
+
+[Install]
+WantedBy=multi-user.target

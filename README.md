@@ -110,6 +110,20 @@ php artisan edoc:queue-health
 หากเครื่องมีเฉพาะ Laravel scheduler ให้ตั้ง `EDOC_RUN_SCHEDULED_QUEUE_WORKER=true` ระบบจะเปิด worker
 ระยะสั้นทุกนาทีสำหรับ queue `documents,notifications,default` เพื่อไม่ให้งานค้างเงียบ ๆ
 
+## Production operations และ monitoring
+
+ไฟล์ตัวอย่างสำหรับ systemd, Supervisor และ health timer อยู่ใน [`deploy/README.md`](deploy/README.md)
+ตรวจสุขภาพระบบแบบอ่านอย่างเดียวได้ด้วย:
+
+```bash
+php artisan edoc:production-health
+php artisan edoc:production-health --json
+```
+
+คำสั่งคืน exit code ที่ไม่ใช่ศูนย์เมื่อเชื่อมฐานข้อมูลไม่ได้ มีงานค้างเกินกำหนด จำนวน failed jobs
+ในชั่วโมงล่าสุดเกินค่า `EDOC_FAILED_JOBS_LAST_HOUR_MAX`, พื้นที่ว่างต่ำกว่า
+`EDOC_MINIMUM_FREE_DISK_MB`, private storage เขียนไม่ได้ หรือเปิด debug ใน production
+
 ## Deployment checklist
 
 1. สำรองฐานข้อมูลและ `storage/app/public`
