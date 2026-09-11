@@ -37,3 +37,14 @@ php artisan queue:restart
 ```
 
 Store database and `storage/app` backups off-host and verify their SHA-256 hashes before deployment.
+
+## Windows development worker
+
+The OCR worker must run separately from `php artisan serve`. Run it manually with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run-ocr-worker.ps1
+```
+
+For a workstation that receives OCR jobs continuously, register this script in Windows Task Scheduler at user logon and configure the task to ignore a new instance while the existing worker is running.
+If Task Scheduler registration requires administrator rights, add the same hidden PowerShell command to the current user's `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` startup key. The script uses a named mutex and exits immediately when another managed OCR worker is already active.
