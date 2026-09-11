@@ -9,6 +9,7 @@ use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\User;
 use App\Observers\AuditObserver;
+use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\View;
 use App\Models\V2\Document as V2Document;
@@ -28,6 +29,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            ServeCommand::$passthroughVariables = array_values(array_unique([
+                ...ServeCommand::$passthroughVariables,
+                'SystemRoot',
+                'ComSpec',
+                'WINDIR',
+                'TEMP',
+                'TMP',
+            ]));
+        }
+
         Document::observe(AuditObserver::class);
         DocumentAccessRequest::observe(AuditObserver::class);
         LeaveRequest::observe(AuditObserver::class);

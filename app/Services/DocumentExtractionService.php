@@ -5,7 +5,6 @@ namespace App\Services;
 use Closure;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Process;
@@ -59,10 +58,9 @@ class DocumentExtractionService
             throw new RuntimeException('ระบบ AI ยังไม่ได้รับการตั้งค่า');
         }
 
-        $response = Http::withToken($apiKey)
-            ->timeout((int) config('services.typhoon.timeout', 60))
-            ->retry(2, 250, throw: false)
-            ->post(config('services.typhoon.endpoint'), [
+        $typhoon = app(TyphoonClient::class);
+        $response = $typhoon->request($apiKey)
+            ->post($typhoon->endpoint(), [
                 'model' => config('services.typhoon.model'),
                 'messages' => [[
                     'role' => 'user',

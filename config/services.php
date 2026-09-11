@@ -51,6 +51,7 @@ return [
         'model' => env('TYPHOON_MODEL', 'typhoon-v2.5-30b-a3b-instruct'),
         'endpoint' => env('TYPHOON_ENDPOINT', 'https://api.opentyphoon.ai/v1/chat/completions'),
         'timeout' => env('TYPHOON_TIMEOUT', 60),
+        'ca_bundle' => env('TYPHOON_CA_BUNDLE'),
     ],
 
     'document_extraction' => [

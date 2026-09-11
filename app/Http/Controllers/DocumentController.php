@@ -25,6 +25,7 @@ use App\Services\AuditLogger;
 use App\Services\NotificationDispatcher;
 use App\Services\AssignmentNotificationService;
 use App\Services\DocumentFileStorage;
+use App\Services\TyphoonClient;
 use App\Jobs\ProcessDocumentExtraction;
 use App\Models\DocumentExtractionTask;
 use Illuminate\Support\Str;
@@ -1879,9 +1880,9 @@ class DocumentController extends Controller
         $systemPrompt = "คุณคือปลัดองค์การบริหารส่วนตำบล ผู้เชี่ยวชาญระเบียบงานสารบรรณ จงร่างบันทึกข้อความจากหัวข้อที่กำหนดให้ โดยเขียนในรูปแบบเอกสารราชการ ๓ ย่อหน้า (ภาคเหตุ, ภาคความประสงค์, ภาคสรุป) ใช้ภาษาทางการ สั้น กระชับ สละสลวย **คำสั่งสำคัญ:** 1. ให้ตอบมาเฉพาะเนื้อหาล้วนๆ ห้ามมีคำว่า 'เรื่อง', 'เรียน', 'จึงเรียนมาเพื่อโปรดทราบ' หรือคำอธิบายเพิ่มเติมใดๆ 2. ให้ขึ้นต้นแต่ละย่อหน้าด้วยการย่อหน้า (ไม่ต้องพิมพ์คำว่า ภาคเหตุ/ประสงค์/สรุป นำหน้า)";
 
         try {
-            $response = Http::withToken($apiKey)
-                ->timeout(60) 
-                ->post('https://api.opentyphoon.ai/v1/chat/completions', [
+            $typhoon = app(TyphoonClient::class);
+            $response = $typhoon->request($apiKey)
+                ->post($typhoon->endpoint(), [
                     'model' => config('services.typhoon.model'),
                     'messages' => [
                         ['role' => 'system', 'content' => $systemPrompt],
@@ -1904,6 +1905,8 @@ class DocumentController extends Controller
             return response()->json(['error' => 'ระบบ AI ขัดข้องชั่วคราว'], 500);
             
         } catch (\Exception $e) {
+            report(new \RuntimeException('Typhoon draft request failed: '.$e->getMessage()));
+
             return response()->json(['error' => 'ไม่สามารถเชื่อมต่อระบบปัญญาประดิษฐ์ได้'], 500);
         }
     }
@@ -2229,8 +2232,9 @@ class DocumentController extends Controller
                 return response()->json(['success' => false, 'message' => 'ยังไม่ได้ตั้งค่า TYPHOON_API_KEY ในไฟล์ .env ครับ'], 500);
             }
 
-            $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
-                ->post(config('services.typhoon.endpoint'), [
+            $typhoon = app(TyphoonClient::class);
+            $response = $typhoon->request($apiKey)
+                ->post($typhoon->endpoint(), [
                     'model' => config('services.typhoon.model'),
                     'messages' => [['role' => 'user', 'content' => $prompt]],
                     'temperature' => 0.1,
