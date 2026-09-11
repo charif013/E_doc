@@ -28,7 +28,7 @@ class ProductionHealthTest extends TestCase
             'edoc.monitoring.failed_jobs_last_hour_max' => 100,
             'edoc.monitoring.minimum_free_disk_mb' => 100,
         ]);
-        DB::connection($connection)->table('jobs')->insert([
+        $jobId = DB::connection($connection)->table('jobs')->insertGetId([
             'queue' => 'default',
             'payload' => '{}',
             'attempts' => 0,
@@ -37,6 +37,10 @@ class ProductionHealthTest extends TestCase
             'created_at' => now()->subMinutes(2)->timestamp,
         ]);
 
-        $this->artisan('edoc:production-health')->assertFailed();
+        try {
+            $this->artisan('edoc:production-health')->assertFailed();
+        } finally {
+            DB::connection($connection)->table('jobs')->where('id', $jobId)->delete();
+        }
     }
 }
