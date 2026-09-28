@@ -3,6 +3,8 @@
     $user = auth()->user();
     $isSarabanNumbering = ($user->hasRole('saraban') && $document->status === 'WAITING_NUMBERING');
     $hasReservedNumber = !empty($document->doc_number);
+    $isFinalApprovalStep = $document->isAtFinalApprovalStep();
+    $isUploadedSignatureConfirmation = ($document->source_type ?? 'upload') === 'upload' && $isFinalApprovalStep;
 @endphp
 
 <form action="{{ route('documents.review', $document->uuid ?? $document->id) }}" method="POST" id="reviewFormOutgoing">
@@ -36,15 +38,22 @@
                 </div>
                 
                 <div class="alert alert-info py-2 px-3 mt-2 mb-0 border-0 shadow-sm" style="font-size: 13.5px; background: #e0f2fe; color: #0369a1;">
-                    <i class="fas fa-info-circle me-1"></i> <strong>หนังสือส่งออก:</strong> เมื่อออกเลขเสร็จ ระบบจะส่งเรื่องไปให้ <u>{{ explode('—', $document->signer_name)[0] ?? 'ผู้ลงนาม' }}</u> เพื่อพิจารณาและลงนามอัตโนมัติ
+                    <i class="fas fa-info-circle me-1"></i> <strong>หนังสือส่งออก:</strong> ผู้ลงนามอนุมัติแล้ว เมื่อออกเลขระบบจะจัดทำ PDF ฉบับสมบูรณ์พร้อมเลขหนังสือและลายเซ็น
                 </div>
             </div>
         @endif
 
-        <div class="mb-3">
-            <label class="form-label fw-bold text-dark">ความเห็นผู้พิจารณา (แสดงบนเอกสาร)</label>
-            <textarea name="comment" class="form-control" rows="2" placeholder="ระบุความเห็น หรือ เหตุผลที่ส่งคืน (ถ้ามี)..."></textarea>
-        </div>
+        @if($isUploadedSignatureConfirmation)
+            <div class="alert alert-info border-0 shadow-sm mb-3">
+                <i class="fas fa-user-check me-1"></i>
+                โปรดยืนยันว่า PDF ฉบับนี้ลงนามโดยท่านจริง ระบบจะไม่แก้ไขไฟล์ แต่จะเก็บบัญชีผู้ยืนยัน วันเวลา IP ความเห็น และหลักฐานการยืนยันไว้ในประวัติเอกสาร
+            </div>
+        @endif
+
+        @include('documents.partials.required_comment', [
+            'id' => 'comment_outgoing',
+            'label' => $isUploadedSignatureConfirmation ? 'ข้อความยืนยัน/หมายเหตุ' : 'ความเห็นผู้พิจารณา (แสดงบนเอกสาร)'
+        ])
 
         <div class="row align-items-end mt-2">
             <div class="col-md-5 mb-2">
@@ -58,7 +67,7 @@
                     @if($isSarabanNumbering)
                         <button type="submit" onclick="document.getElementById('is_approved_outgoing').value='1'" 
                                 class="btn btn-success py-2 fw-bold rounded-pill shadow-sm">
-                            <i class="fas fa-check-circle me-1"></i> ยืนยันออกเลข และส่งให้ผู้ลงนาม
+                            <i class="fas fa-check-circle me-1"></i> ยืนยันออกเลขและจัดทำฉบับสมบูรณ์
                         </button>
                         <button type="submit" onclick="document.getElementById('is_approved_outgoing').value='0'" 
                                 class="btn btn-danger py-2 fw-bold rounded-pill shadow-sm">
@@ -68,7 +77,14 @@
                         <div class="d-flex gap-2">
                             <button type="submit" onclick="document.getElementById('is_approved_outgoing').value='1'" 
                                     class="btn btn-primary flex-grow-1 py-2 fw-bold rounded-pill shadow-sm">
-                                <i class="fas fa-check-circle me-1"></i> อนุมัติ และลงนาม
+                                <i class="fas fa-check-circle me-1"></i>
+                                @if($isUploadedSignatureConfirmation)
+                                    ยืนยันว่าเป็นผู้ลงนามจริง
+                                @elseif($isFinalApprovalStep)
+                                    อนุมัติและลงนาม
+                                @else
+                                    พิจารณาและส่งต่อ
+                                @endif
                             </button>
                             <button type="submit" onclick="document.getElementById('is_approved_outgoing').value='0'" 
                                     class="btn btn-outline-danger py-2 fw-bold rounded-pill">

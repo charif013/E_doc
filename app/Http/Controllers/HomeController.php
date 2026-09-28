@@ -7,6 +7,7 @@ use App\Models\LeaveRequest;
 use App\Models\RoomBooking;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use App\Services\V2\DashboardDocumentService as V2DashboardDocumentService;
 use App\Services\V2\DocumentReadService as V2DocumentReadService;
 
@@ -24,7 +25,7 @@ class HomeController extends Controller
     )
     {
         /** @var \App\Models\User $user */
-        $user = auth()->user();
+        $user = Auth::user();
         if (config('edoc.v2.document_reads')) {
             return $this->v2Index($request, $user, $v2Documents, $v2DocumentReads);
         }
@@ -271,7 +272,7 @@ class HomeController extends Controller
             if ($user->hasRole('super-admin')) {
                 $query->atWorkflowStage([
                     'pending_delegate', 'pending_head', 'pending_inspector',
-                    'pending_palad', 'pending_nayok', 'pending_numbering',
+                    'pending_palad', 'pending_nayok',
                 ]);
                 return;
             }
@@ -297,9 +298,6 @@ class HomeController extends Controller
             }
             if ($user->hasRole('executive')) {
                 $query->orWhere(fn ($leaves) => $leaves->atWorkflowStage('pending_nayok'));
-            }
-            if ($user->hasRole('saraban')) {
-                $query->orWhere(fn ($leaves) => $leaves->atWorkflowStage('pending_numbering'));
             }
         })->latest()->get();
     }

@@ -1,6 +1,10 @@
 <?php
 
 return [
+    'organization' => [
+        'outgoing_address' => "ที่ทำการองค์การบริหารส่วนตำบลพร่อน\nถนนท่าสาป-ลำใหม่ อำเภอเมืองยะลา\nจังหวัดยะลา ๙๕๑๖๐",
+    ],
+
     'bootstrap_admin' => [
         'email' => env('EDOC_ADMIN_EMAIL'),
         'password' => env('EDOC_ADMIN_PASSWORD'),

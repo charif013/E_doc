@@ -18,7 +18,9 @@ class QueuedWorkflowTest extends TestCase
     public function test_meeting_notification_is_dispatched_to_queue(): void
     {
         Queue::fake();
+        /** @var User $creator */
         $creator = User::factory()->create();
+        /** @var User $invitee */
         $invitee = User::factory()->create([
             'line_id' => 'U-line-test',
             'line_friend_status' => true,
@@ -31,14 +33,20 @@ class QueuedWorkflowTest extends TestCase
             'invitees' => [$invitee->id],
         ])->assertRedirect(route('bookings.index'));
 
-        Queue::assertPushed(SendLineNotification::class, fn ($job) => $job->userIds === [$invitee->id]);
+        Queue::assertPushed(
+            SendLineNotification::class,
+            fn (SendLineNotification $job) => $job->userIds === [$invitee->id],
+        );
     }
 
     public function test_external_document_archive_is_dispatched_to_queue(): void
     {
         Queue::fake();
         Role::create(['name' => 'officer']);
-        $creator = User::factory()->create()->assignRole('officer');
+        /** @var User $creator */
+        $creator = User::factory()->create();
+        $creator->assignRole('officer');
+        /** @var User $reviewer */
         $reviewer = User::factory()->create();
 
         $this->actingAs($creator)->post(route('documents.store_incoming'), [

@@ -73,6 +73,13 @@ class DocumentPolicy
         return $user->hasAnyRole(['super-admin', 'palad', 'saraban']);
     }
 
+    public function dispatch(User $user, Document $document): bool
+    {
+        return $document->doc_type === 'outgoing'
+            && in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+            && ($document->created_by === $user->id || $user->hasAnyRole(['super-admin', 'saraban']));
+    }
+
     public function manageAccess(User $user, Document $document): bool
     {
         return $document->created_by === $user->id || $user->hasAnyRole(['super-admin', 'saraban']);

@@ -43,7 +43,7 @@
                 </div>
 
                 <div class="card-body p-4 p-md-5 pt-4">
-                    <form action="{{ route('leaves.store') }}" method="POST" id="leaveForm" novalidate>
+                    <form action="{{ route('leaves.store') }}" method="POST" enctype="multipart/form-data" id="leaveForm" novalidate>
                         @csrf
 
                         {{-- ── Section 1: ข้อมูลผู้ยื่น ── --}}
@@ -51,20 +51,20 @@
                             <div class="section-indicator"></div>
                             <h6 class="fw-bold mb-0 text-secondary">ข้อมูลผู้ยื่นใบลา</h6>
                         </div>
-                        <div class="row mb-4">
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label label-style">ชื่อ-นามสกุล</label>
-                                <input type="text" class="form-control custom-input bg-light" value="{{ Auth::user()->name }}" readonly>
+                        <dl class="requester-summary mb-4" aria-label="ข้อมูลผู้ยื่นใบลา">
+                            <div class="requester-summary__item">
+                                <dt>ชื่อ-นามสกุล</dt>
+                                <dd>{{ Auth::user()->name ?: '-' }}</dd>
                             </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label label-style">ตำแหน่ง</label>
-                                <input type="text" class="form-control custom-input bg-light" value="{{ Auth::user()->position }}" readonly>
+                            <div class="requester-summary__item">
+                                <dt>ตำแหน่ง</dt>
+                                <dd>{{ Auth::user()->position ?: '-' }}</dd>
                             </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label label-style">สังกัด (กอง/สำนัก)</label>
-                                <input type="text" class="form-control custom-input bg-light" value="{{ Auth::user()->department }}" readonly>
+                            <div class="requester-summary__item">
+                                <dt>สังกัด</dt>
+                                <dd>{{ Auth::user()->department ?: '-' }}</dd>
                             </div>
-                        </div>
+                        </dl>
 
                         {{-- ── Section 2: ประเภทการลา ── --}}
                         <div class="section-title mb-3">
@@ -75,7 +75,7 @@
                             @foreach($balances as $type => $data)
                             <div class="col-md-4 col-sm-6 mb-3">
                                 <input type="radio" name="leave_type" id="type_{{ $loop->index }}"
-                                       value="{{ $type }}" class="d-none leave-type-radio" required>
+                                       value="{{ $type }}" class="d-none leave-type-radio" required data-required-label="ประเภทการลา">
                                 <label for="type_{{ $loop->index }}" class="leave-type-card w-100 m-0 shadow-sm">
                                     <i class="far fa-circle radio-icon fs-5"></i>
                                     <span class="fw-bold">{{ $type }}</span>
@@ -97,14 +97,14 @@
                                 <input type="text" name="start_date" id="start_date"
                                        class="form-control custom-input bg-light"
                                        placeholder="ระบุประเภทการลาก่อน"
-                                       autocomplete="off" required>
+                                       autocomplete="off" required data-required-label="วันที่เริ่มลา">
                             </div>
                             <div class="col-md-4 mb-3">
                                 <label class="form-label label-style">วันที่สิ้นสุด <span class="text-danger">*</span></label>
                                 <input type="text" name="end_date" id="end_date"
                                        class="form-control custom-input bg-light"
                                        placeholder="ระบุประเภทการลาก่อน"
-                                       autocomplete="off" required>
+                                       autocomplete="off" required data-required-label="วันที่สิ้นสุด">
                             </div>
                             <div class="col-md-4 mb-3">
                                 <div class="d-flex justify-content-between align-items-end mb-1">
@@ -116,7 +116,7 @@
                                     </button>
                                 </div>
                                 {{-- ค่าเต็มคำนวณ JS เก็บใน hidden, แสดงแยก --}}
-                                <input type="hidden" name="total_days" id="total_days_hidden">
+                                <input type="hidden" name="total_days" id="total_days_hidden" required data-required-label="จำนวนวันลา" data-validation-target="#total_days_display">
                                 <select id="total_days_select" name="_total_days_select"
                                         class="form-select custom-input bg-light fw-bold text-teal"
                                         style="display:none;" aria-label="จำนวนวันลา">
@@ -140,17 +140,36 @@
                                 <label class="form-label label-style">เหตุผลการลา / อาการป่วย <span class="text-danger">*</span></label>
                                 <textarea name="reason" class="form-control custom-input"
                                           rows="3" maxlength="500"
-                                          placeholder="ระบุเหตุผลหรืออาการ..." required>{{ old('reason') }}</textarea>
+                                          placeholder="ระบุเหตุผลหรืออาการ..." required data-required-label="เหตุผลการลา / อาการป่วย">{{ old('reason') }}</textarea>
                                 <div class="text-end text-muted small mt-1">
                                     <span id="reason_count">0</span>/500
                                 </div>
                             </div>
                             <div class="col-12">
-                                <label class="form-label label-style">ที่อยู่ หรือ เบอร์โทรที่ติดต่อได้ระหว่างลา <span class="text-danger">*</span></label>
+                                <label class="form-label label-style">
+                                    ที่อยู่ หรือ เบอร์โทรที่ติดต่อได้ระหว่างลา
+                                    <span class="text-muted fw-normal">(ถ้ามี)</span>
+                                </label>
                                 <input type="text" name="contact_info" class="form-control custom-input"
                                        placeholder="เบอร์โทรศัพท์ หรือ ที่อยู่..."
                                        maxlength="200"
-                                       value="{{ old('contact_info') }}" required>
+                                       value="{{ old('contact_info') }}">
+                            </div>
+                            <div class="col-12 mt-3">
+                                <label for="leave_attachments" class="form-label label-style">
+                                    ใบรับรองแพทย์ / เอกสารประกอบ
+                                    <span class="text-muted fw-normal">(ถ้ามี)</span>
+                                </label>
+                                <input type="file" name="attachments[]" id="leave_attachments"
+                                       class="form-control custom-input"
+                                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                       multiple>
+                                <div class="form-text">
+                                    แนบได้สูงสุด 5 ไฟล์ รองรับ PDF, JPG, PNG และ Word ขนาดไม่เกิน 10 MB ต่อไฟล์
+                                </div>
+                                @error('attachments.*')
+                                    <div class="text-danger small mt-1 fw-bold">{{ $message }}</div>
+                                @enderror
                             </div>
                         </div>
 
@@ -181,7 +200,7 @@
                                 ยกเลิก
                             </a>
                             <button type="submit" id="submitBtn" class="btn btn-teal btn-lg px-5 rounded-pill shadow-sm fw-bold text-white">
-                                <span id="submitBtnText"><i class="fas fa-paper-plane me-2"></i>ส่งใบลา</span>
+                                <span id="submitBtnText"><i class="fas fa-arrow-right me-2"></i>ถัดไป</span>
                                 <span id="submitBtnLoading" class="d-none">
                                     <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังส่ง...
                                 </span>
@@ -256,6 +275,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
+@include('partials.required-form-validation')
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
@@ -526,6 +546,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ─── Loading state ตอน submit ────────────────────────────────────────────
     document.getElementById('leaveForm').addEventListener('submit', function (e) {
+        if (!window.EdocRequiredValidation.validate(this)) {
+            e.preventDefault();
+            return;
+        }
+
         // ตรวจ total_days ก่อนส่ง (server-side จะตรวจซ้ำอีกรอบ)
         const days = parseFloat(totalHidden.value);
         if (!days || days <= 0) {
@@ -609,6 +634,35 @@ document.addEventListener('DOMContentLoaded', function () {
 input:disabled,
 input[readonly] { cursor: not-allowed; opacity: .7; }
 
+/* ─── Requester Summary ─────────────────────────────────────────────────── */
+.requester-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 0;
+}
+.requester-summary__item {
+    min-width: 0;
+    padding: .15rem 1.15rem .25rem;
+}
+.requester-summary__item:first-child { padding-left: 0; }
+.requester-summary__item + .requester-summary__item {
+    border-left: 1px solid #e2e8f0;
+}
+.requester-summary dt {
+    margin-bottom: .2rem;
+    color: #64748b;
+    font-size: .8rem;
+    font-weight: 500;
+}
+.requester-summary dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: #0f172a;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
 /* ─── Section Indicator ──────────────────────────────────────────────────── */
 .section-title      { display: flex; align-items: center; }
 .section-indicator  {
@@ -667,5 +721,15 @@ input[readonly] { cursor: not-allowed; opacity: .7; }
 .flatpickr-day.is-holiday:hover        { background-color: #f8d7da !important; }
 .flatpickr-day.is-holiday.selected     { background-color: #dc3545 !important; color: white !important; border-color: #dc3545 !important; }
 .flatpickr-day.is-holiday.inRange      { background-color: #f8d7da !important; color: #dc3545 !important; }
+
+@media (max-width: 575.98px) {
+    .requester-summary { grid-template-columns: 1fr; }
+    .requester-summary__item,
+    .requester-summary__item:first-child { padding: .65rem 0; }
+    .requester-summary__item + .requester-summary__item {
+        border-top: 1px solid #e2e8f0;
+        border-left: 0;
+    }
+}
 </style>
 @endsection

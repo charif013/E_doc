@@ -34,6 +34,7 @@ class WorkflowService
                 ->whereNull('revoked_at')->latest('id')->first();
             $definition = $locked->definition()->first();
             $actedAt = now();
+            $requestId ??= request()?->headers->get('X-Request-ID');
             $step->update(['status' => $action, 'comment' => $comment, 'acted_at' => $actedAt]);
             WorkflowActionEvidence::create([
                 'workflow_step_id' => $step->id,

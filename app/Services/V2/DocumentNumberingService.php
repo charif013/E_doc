@@ -32,7 +32,10 @@ class DocumentNumberingService
                     $locked, 'document_id', $numberType, $scope, $fiscalYear,
                     $runningNumber, $formattedNumber, $actorId
                 );
-                $locked->update([$numberType === 'incoming' ? 'receive_number' : 'document_number' => $formattedNumber]);
+                $locked->update([
+                    $numberType === 'incoming' ? 'receive_number' : 'document_number' => $formattedNumber,
+                    'number_status' => 'RESERVED',
+                ]);
 
                 return $locked->fresh();
             }, 3);

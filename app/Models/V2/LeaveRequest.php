@@ -4,6 +4,7 @@ namespace App\Models\V2;
 
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 
@@ -22,6 +23,7 @@ class LeaveRequest extends V2Model
     public function delegate(): BelongsTo { return $this->belongsTo(User::class, 'delegate_user_id'); }
     public function workflow(): HasOne { return $this->hasOne(WorkflowInstance::class); }
     public function numberAllocation(): HasOne { return $this->hasOne(NumberAllocation::class); }
+    public function attachments(): HasMany { return $this->hasMany(\App\Models\LeaveRequestAttachment::class); }
 
     protected function leaveType(): Attribute { return Attribute::get(fn () => $this->type?->name); }
     protected function status(): Attribute { return Attribute::get(fn () => $this->workflow?->status?->value ?? 'PENDING'); }

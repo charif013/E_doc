@@ -73,6 +73,13 @@ class DocumentPolicy
         return $user->hasAnyRole(['super-admin', 'palad', 'saraban']);
     }
 
+    public function dispatch(User $user, Document $document): bool
+    {
+        return $document->doc_type === 'outgoing'
+            && in_array((string) $document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+            && ($document->created_by === $user->id || $user->hasRole('saraban'));
+    }
+
     public function accessConfidential(User $user, Document $document): bool
     {
         $isConfidential = $document->confidentiality_id

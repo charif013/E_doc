@@ -49,12 +49,21 @@
                                     if($leave->status == 'APPROVED') { $badgeClass = 'bg-success'; $statusText = 'อนุมัติแล้ว'; }
                                     elseif($leave->status == 'REJECTED') { $badgeClass = 'bg-danger'; $statusText = 'ไม่อนุมัติ'; }
                                     elseif($leave->status == 'CANCELED') { $badgeClass = 'bg-secondary'; $statusText = 'ยกเลิกแล้ว'; }
+                                    elseif($leave->status == 'DRAFT') { $badgeClass = 'bg-info text-dark'; $statusText = 'ฉบับร่าง'; }
                                 @endphp
                                 
                                 <span class="badge {{ $badgeClass }} fs-6 px-3 py-2 rounded-pill">
                                     {{ $statusText }}
                                 </span>
                                 <div class="mt-2 text-muted" style="font-size: 0.75rem;">ยื่นเมื่อ: {{ $leave->created_at->format('d/m/Y H:i') }}</div>
+
+                                @if($leave->status == 'DRAFT')
+                                    <div class="mt-2">
+                                        <a href="{{ route('leaves.draft', $leave->id) }}" class="btn btn-sm btn-teal rounded-pill px-3 fw-bold">
+                                            <i class="fas fa-file-alt me-1" aria-hidden="true"></i>ตรวจฉบับร่าง
+                                        </a>
+                                    </div>
+                                @endif
                                 
                                 {{-- 🌟 ปุ่มยกเลิก จะโชว์เฉพาะใบลาที่ยังดำเนินการอยู่ --}}
                                 @if(!in_array($leave->status, ['APPROVED', 'REJECTED', 'CANCELED']))
@@ -71,7 +80,12 @@
                             </div>
                         </div>
 
-                        {{-- ส่วนของ Timeline 5 ด่าน --}}
+                        {{-- ขั้นตอนพิจารณา (ฉบับร่างยังไม่เข้าสู่คิว) --}}
+                        @if($leave->status == 'DRAFT')
+                            <div class="alert alert-info mt-4 mb-0">
+                                ฉบับร่างนี้ยังไม่ถูกส่งให้ผู้พิจารณา กรุณาเปิดตรวจและกดยืนยันส่ง
+                            </div>
+                        @else
                         <div class="timeline-stepper mt-4 pt-2 {{ $leave->status == 'CANCELED' ? 'opacity-50' : '' }}">
                             <div class="step {{ $leave->delegate_status == 'accepted' ? 'completed' : ($leave->delegate_status == 'pending' ? 'active' : 'pending') }}">
                                 <div class="step-icon"><i class="fas fa-user-friends"></i></div>
@@ -95,13 +109,6 @@
 
                             <div class="step-line {{ $leave->inspector_status == 'approved' ? 'completed' : '' }}"></div>
 
-                            <div class="step {{ $leave->numbered_at ? 'completed' : ($leave->workflow_status == 'pending_numbering' ? 'active' : 'pending') }}">
-                                <div class="step-icon"><i class="fas fa-hashtag"></i></div>
-                                <div class="step-label">ธุรการลงเลขรับ</div>
-                            </div>
-
-                            <div class="step-line {{ $leave->numbered_at ? 'completed' : '' }}"></div>
-
                             <div class="step {{ $leave->palad_status == 'approved' ? 'completed' : ($leave->workflow_status == 'pending_palad' ? 'active' : 'pending') }}">
                                 <div class="step-icon"><i class="fas fa-stamp"></i></div>
                                 <div class="step-label">ปลัด อบต.</div>
@@ -115,6 +122,7 @@
                             </div>
 
                         </div>
+                        @endif
                         
                         @if($leave->status == 'REJECTED')
                         <div class="alert alert-danger mt-4 mb-0 py-2">
@@ -128,7 +136,8 @@
         @empty
             <div class="col-12 text-center py-5">
                 <img src="https://cdn-icons-png.flaticon.com/512/7486/7486831.png" width="120" class="mb-3 opacity-50">
-                <h5 class="text-muted">ยังไม่มีประวัติการยื่นใบลา</h5>
+                <h5 class="text-muted">ยังไม่มีใบลาที่อนุมัติหรือยกเลิกแล้ว</h5>
+                <p class="text-muted">ใบลาที่กำลังดำเนินการสามารถติดตามได้ที่เมนูพิจารณาใบลา</p>
                 <a href="{{ route('leaves.create') }}" class="btn btn-outline-teal mt-2 rounded-pill">ยื่นใบลาครั้งแรกเลย!</a>
             </div>
         @endforelse

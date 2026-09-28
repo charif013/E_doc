@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AuditLog;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 
 class AuditLogger
@@ -20,7 +21,7 @@ class AuditLogger
         $request = app()->runningInConsole() ? null : request();
 
         return AuditLog::create([
-            'user_id' => auth()->id(),
+            'user_id' => Auth::id(),
             'event' => $event,
             'auditable_type' => $subject ? $subject->getMorphClass() : null,
             'auditable_id' => $subject?->getKey(),

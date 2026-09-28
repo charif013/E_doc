@@ -45,9 +45,8 @@
             </div>
             @endhasanyrole
 
-            <div class="col-md-12 mb-3">
-                <label class="form-label fw-bold text-dark"><i class="fas fa-comment-dots me-1 text-primary"></i> บันทึกความเห็น / สั่งการ</label>
-                <textarea name="comment" class="form-control" rows="3" placeholder="ระบุความเห็น หรือคำสั่งการ (ถ้ามี)..."></textarea>
+            <div class="col-md-12">
+                @include('documents.partials.required_comment', ['id' => 'comment_incoming', 'label' => 'บันทึกความเห็น / สั่งการ', 'rows' => 3])
             </div>
         </div>
 

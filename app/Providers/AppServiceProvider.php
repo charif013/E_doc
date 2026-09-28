@@ -10,7 +10,9 @@ use App\Models\RoomBooking;
 use App\Models\User;
 use App\Observers\AuditObserver;
 use Illuminate\Foundation\Console\ServeCommand;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\View;
 use App\Models\V2\Document as V2Document;
 
@@ -29,6 +31,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Paginator::useBootstrapFive();
+
         if (PHP_OS_FAMILY === 'Windows') {
             ServeCommand::$passthroughVariables = array_values(array_unique([
                 ...ServeCommand::$passthroughVariables,
@@ -48,7 +52,8 @@ class AppServiceProvider extends ServiceProvider
         User::observe(AuditObserver::class);
 
         View::composer('layouts.app', function ($view) {
-            $user = auth()->user();
+            /** @var User|null $user */
+            $user = Auth::user();
             $assignedPendingCount = 0;
             $reviewPendingCount = 0;
             $leaveReviewPendingCount = 0;

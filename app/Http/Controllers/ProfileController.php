@@ -13,9 +13,10 @@ use App\Services\NotificationDispatcher;
 
 class ProfileController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $user = Auth::user();
+        /** @var User $user */
+        $user = $request->user();
         return view('profile.index', compact('user'));
     }
 
@@ -115,7 +116,7 @@ class ProfileController extends Controller
     public function requestPinReset()
     {
         /** @var \App\Models\User $user */
-        $user = auth()->user();
+        $user = Auth::user();
         
         $user->pin_reset_requested = true; // เปลี่ยนสถานะเป็น: ส่งคำขอแล้ว
         $user->save();

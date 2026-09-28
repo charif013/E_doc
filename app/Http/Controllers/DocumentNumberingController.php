@@ -10,11 +10,17 @@ use App\Services\DocumentNumberingService;
 use App\Services\V2\DocumentNumberingService as V2DocumentNumberingService;
 use App\Services\V2\DocumentReadService as V2DocumentReadService;
 use App\Services\V2\DocumentWriteService as V2DocumentWriteService;
+use App\Services\V2\OutgoingPdfSigner as V2OutgoingPdfSigner;
+use App\Services\DocumentFileStorage;
 use App\Models\V2\Document as V2Document;
 use App\Models\V2\NumberSequence as V2NumberSequence;
 use App\Models\V2\User as V2User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class DocumentNumberingController extends Controller
 {
@@ -23,6 +29,8 @@ class DocumentNumberingController extends Controller
         private V2DocumentNumberingService $v2Numbering,
         private V2DocumentReadService $v2Documents,
         private V2DocumentWriteService $v2Writes,
+        private V2OutgoingPdfSigner $v2PdfSigner,
+        private DocumentFileStorage $files,
     ) {}
 
     public function ledger(Request $request)
@@ -100,7 +108,7 @@ class DocumentNumberingController extends Controller
 
             return response()->json([
                 'next_number' => $number,
-                'formatted' => 'ยล 77301/'.$number,
+                'formatted' => $this->toThaiDigits('ยล 77301/'.$number),
                 'fiscal_year' => $year,
                 'scope' => $scope,
             ]);
@@ -118,7 +126,7 @@ class DocumentNumberingController extends Controller
 
             return response()->json([
                 'next_number' => $number,
-                'formatted' => 'ลา/'.$scope.'/'.$number.'/'.($year + 543),
+                'formatted' => $this->toThaiDigits('ลา/'.$scope.'/'.$number.'/'.($year + 543)),
                 'fiscal_year' => $year,
                 'scope' => $scope,
             ]);
@@ -150,7 +158,7 @@ class DocumentNumberingController extends Controller
 
         return response()->json([
             'next_number' => $number,
-            'formatted' => $formatted,
+            'formatted' => $this->toThaiDigits($formatted),
             'scope' => $type === 'leave' ? $department : 'organization',
         ]);
     }
@@ -250,8 +258,17 @@ class DocumentNumberingController extends Controller
             }
             $formatted = (string) $request->input('doc_number');
             $running = $request->integer('running_number') ?: $this->numberFromFormatted($formatted);
-            $this->v2Writes->allocateNumber($document, $request->user()->id, $running, $formatted);
-            return back()->with('success', 'ลงทะเบียนเลขเอกสารใน V2 เรียบร้อยแล้ว');
+            $numbered = $this->v2Writes->allocateNumber($document, $request->user()->id, $running, $formatted, true);
+            if ($numbered->doc_type === 'outgoing' && $numbered->source_type === 'system') {
+                $signerId = $numbered->workflow?->steps()
+                    ->where('action_type', 'SIGNATURE')->where('status', 'APPROVED')
+                    ->orderByDesc('step_order')->value('assigned_user_id');
+                $signer = $signerId ? User::find($signerId) : null;
+                if (! $signer || ! $this->v2PdfSigner->stamp($numbered, $signer)) {
+                    return back()->with('error', 'ออกเลขเรียบร้อยแล้ว แต่สร้าง PDF ฉบับสมบูรณ์ไม่สำเร็จ กรุณาแจ้งผู้ดูแลระบบ');
+                }
+            }
+            return back()->with('success', 'ลงทะเบียนเลขเอกสารและจัดทำฉบับสมบูรณ์เรียบร้อยแล้ว');
         }
         $document = Document::whereIdentifier($id)->firstOrFail();
         $this->authorize('number', $document);
@@ -262,9 +279,17 @@ class DocumentNumberingController extends Controller
 
         $formatted = (string) $request->input('doc_number');
         $running = $request->integer('running_number') ?: $this->numberFromFormatted($formatted);
-        $this->numbering->allocate($document, $request->user(), $running, $formatted, 'APPROVED');
+        $numbered = $this->numbering->allocate($document, $request->user(), $running, $formatted, 'APPROVED');
+        if ($numbered->doc_type === 'outgoing' && $numbered->source_type === 'system') {
+            $signerId = $numbered->routes()->where('status', 'approved')->orderByDesc('step_order')->value('user_id')
+                ?: ($numbered->nayok_id ?: ($numbered->palad_id ?: $numbered->supervisor_id));
+            $signer = $signerId ? User::find($signerId) : null;
+            if (! $signer || ! $this->finalizeLegacyOutgoingPdf($numbered, $signer)) {
+                return back()->with('error', 'ออกเลขเรียบร้อยแล้ว แต่สร้าง PDF ฉบับสมบูรณ์ไม่สำเร็จ กรุณาแจ้งผู้ดูแลระบบ');
+            }
+        }
 
-        return back()->with('success', 'ลงทะเบียนเลขที่เอกสารเรียบร้อยแล้ว');
+        return back()->with('success', 'ลงทะเบียนเลขเอกสารและจัดทำฉบับสมบูรณ์เรียบร้อยแล้ว');
     }
 
     public function reserve(AssignDocumentNumberRequest $request, string $id)
@@ -275,7 +300,7 @@ class DocumentNumberingController extends Controller
             $formatted = (string) $request->input('doc_number');
             $running = $request->integer('running_number') ?: $this->numberFromFormatted($formatted);
             if (! $running) { throw \Illuminate\Validation\ValidationException::withMessages(['running_number' => 'กรุณารันเลขก่อนจอง']); }
-            $this->v2Writes->allocateNumber($document, $request->user()->id, $running, $formatted);
+            $this->v2Writes->allocateNumber($document, $request->user()->id, $running, $formatted, false);
             return back()->with('success', 'จองเลขเอกสารใน V2 เรียบร้อยแล้ว');
         }
         $document = Document::whereIdentifier($id)->firstOrFail();
@@ -295,7 +320,55 @@ class DocumentNumberingController extends Controller
 
     private function numberFromFormatted(string $number): ?int
     {
+        $number = strtr($number, [
+            '๐' => '0', '๑' => '1', '๒' => '2', '๓' => '3', '๔' => '4',
+            '๕' => '5', '๖' => '6', '๗' => '7', '๘' => '8', '๙' => '9',
+        ]);
+
         return preg_match('/(\d+)(?!.*\d)/', $number, $matches) ? (int) $matches[1] : null;
+    }
+
+    private function finalizeLegacyOutgoingPdf(Document $document, User $signer): bool
+    {
+        if (! $signer->signature) {
+            return false;
+        }
+
+        $signedStoragePath = 'documents/signed/system-'.$document->id.'-'.Str::uuid().'.pdf';
+        $absolutePath = Storage::disk('documents')->path($signedStoragePath);
+        File::ensureDirectoryExists(dirname($absolutePath));
+
+        try {
+            Pdf::loadView('documents.pdf_outgoing', [
+                'document' => $document,
+                'signatureData' => (string) $signer->signature,
+            ])->setOption(['isRemoteEnabled' => true])->save($absolutePath);
+            if (! File::exists($absolutePath)) {
+                return false;
+            }
+
+            $oldSignedPath = $document->signed_path;
+            $document->signed_path = $signedStoragePath;
+            $document->save();
+            if ($oldSignedPath && $oldSignedPath !== $signedStoragePath) {
+                $this->files->delete($oldSignedPath);
+            }
+
+            return true;
+        } catch (\Throwable $error) {
+            $this->files->delete($signedStoragePath);
+            report($error);
+
+            return false;
+        }
+    }
+
+    private function toThaiDigits(string|int $value): string
+    {
+        return strtr((string) $value, [
+            '0' => '๐', '1' => '๑', '2' => '๒', '3' => '๓', '4' => '๔',
+            '5' => '๕', '6' => '๖', '7' => '๗', '8' => '๘', '9' => '๙',
+        ]);
     }
 
     private function v2Ledger(Request $request, string $type)

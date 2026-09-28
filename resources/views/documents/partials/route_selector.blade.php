@@ -3,14 +3,40 @@
     $routeUsersByDepartment = $users
         ->groupBy(fn ($routeUser) => $routeUser->department ?: 'ไม่ระบุสำนัก/กอง')
         ->sortKeys();
+    $routePresets = $routePresets ?? collect();
 @endphp
 
-<div class="card border-0 shadow-sm mb-4 route-selector" data-route-selector>
+<div class="card border-0 shadow-sm mb-4 route-selector"
+     data-route-selector
+     data-presets="{{ $routePresets->values()->toJson(JSON_UNESCAPED_UNICODE) }}"
+     data-store-url="{{ route('documents.route_presets.store') }}"
+     data-delete-url-template="{{ route('documents.route_presets.destroy', ['preset' => '__PRESET__']) }}">
+    <input type="hidden" data-required-collection=".route-user" data-required-label="ผู้พิจารณาในเส้นทางการส่งเอกสาร" data-validation-target=".route-selector">
     <div class="card-header bg-white border-0 pt-4 px-4">
         <h6 class="fw-bold mb-1"><i class="fas fa-route text-primary me-2"></i>เส้นทางการส่งเอกสาร</h6>
-        <p class="text-muted small mb-0">เลือกผู้พิจารณาตามลำดับ ระบบจะส่งเอกสารให้ทีละคนจากบนลงล่าง</p>
+        <p class="text-muted small mb-0">เลือกผู้ตรวจ/ผู้พิจารณาตามลำดับ ระบบจะเพิ่มผู้ลงนามหนังสือและล็อกไว้เป็นขั้นตอนสุดท้ายให้อัตโนมัติ</p>
     </div>
     <div class="card-body px-4">
+        <div class="rounded-3 border bg-light p-3 mb-3">
+            <label class="form-label small fw-bold mb-2" for="route-preset-selector">
+                <i class="fas fa-star text-warning me-1"></i>เส้นทางประจำ
+            </label>
+            <div class="d-flex gap-2 flex-wrap">
+                <select id="route-preset-selector" class="form-select form-select-sm route-preset-select flex-grow-1" style="min-width:220px;" aria-label="เลือกเส้นทางประจำ">
+                    <option value="">-- เลือกเส้นทางที่บันทึกไว้ --</option>
+                </select>
+                <button type="button" class="btn btn-primary btn-sm apply-route-preset" disabled>
+                    <i class="fas fa-bolt me-1"></i>ใช้เส้นทางนี้
+                </button>
+                <button type="button" class="btn btn-outline-success btn-sm save-route-preset">
+                    <i class="fas fa-bookmark me-1"></i>บันทึกชุดปัจจุบัน
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm delete-route-preset" disabled title="ลบเส้นทางประจำ">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </div>
+            <div class="route-preset-status small mt-2 d-none" role="status" aria-live="polite"></div>
+        </div>
         <div class="route-rows"></div>
         <button type="button" class="btn btn-outline-primary btn-sm mt-2 add-route">
             <i class="fas fa-plus me-1"></i> เพิ่มผู้พิจารณา
@@ -20,7 +46,8 @@
         <template class="route-row-template">
             <div class="route-row d-flex gap-2 align-items-center mb-2 flex-wrap flex-md-nowrap p-2 rounded-3 bg-light border">
                 <span class="badge bg-primary route-number" style="min-width:2rem">1</span>
-                <select name="routing_users[]" class="form-select route-user flex-grow-1" style="min-width: 220px;" required>
+                <select name="routing_users[]" class="form-select route-user flex-grow-1" style="min-width: 220px;" required
+                        data-required-label="ผู้พิจารณาในเส้นทางการส่งเอกสาร">
                     <option value="">-- เลือกผู้พิจารณา --</option>
                     @foreach($routeUsersByDepartment as $department => $departmentUsers)
                         <optgroup label="{{ $department }}">
@@ -50,6 +77,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const rows = container.querySelector('.route-rows');
         const template = container.querySelector('.route-row-template');
         const initial = @json(array_values($selectedRoutes));
+        const presetSelect = container.querySelector('.route-preset-select');
+        const applyPresetButton = container.querySelector('.apply-route-preset');
+        const savePresetButton = container.querySelector('.save-route-preset');
+        const deletePresetButton = container.querySelector('.delete-route-preset');
+        const presetStatus = container.querySelector('.route-preset-status');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const presetList = JSON.parse(container.dataset.presets || '[]');
+        const presets = new Map(presetList.map(preset => [String(preset.id), preset]));
+        const form = container.closest('form');
+        const signerSelect = form?.querySelector('#signer');
+        const signerUserIdInput = form?.querySelector('#signer_user_id');
+
+        const showPresetStatus = (message, isError = false) => {
+            presetStatus.textContent = message;
+            presetStatus.classList.remove('d-none', 'text-success', 'text-danger');
+            presetStatus.classList.add(isError ? 'text-danger' : 'text-success');
+        };
+
+        const renderPresetOptions = (selectedId = '') => {
+            presetSelect.replaceChildren(new Option('-- เลือกเส้นทางที่บันทึกไว้ --', ''));
+            [...presets.values()]
+                .sort((a, b) => a.name.localeCompare(b.name, 'th'))
+                .forEach(preset => presetSelect.add(new Option(
+                    `${preset.name} (${preset.route_user_ids.length} คน)`,
+                    String(preset.id)
+                )));
+            presetSelect.value = String(selectedId);
+            const hasSelection = presets.has(presetSelect.value);
+            applyPresetButton.disabled = !hasSelection;
+            deletePresetButton.disabled = !hasSelection;
+        };
 
         const updateAvailableUsers = () => {
             const selects = [...rows.querySelectorAll('.route-user')];
@@ -76,8 +134,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const renumber = () => rows.querySelectorAll('.route-row').forEach((row, index) => {
             row.querySelector('.route-number').textContent = index + 1;
-            row.querySelector('.move-up').disabled = index === 0;
-            row.querySelector('.move-down').disabled = index === rows.children.length - 1;
+            const isSigner = row.dataset.routeRole === 'signer';
+            row.querySelector('.move-up').disabled = isSigner || index === 0;
+            row.querySelector('.move-down').disabled = isSigner
+                || index === rows.children.length - 1
+                || row.nextElementSibling?.dataset.routeRole === 'signer';
+            row.querySelector('.remove-route').disabled = isSigner;
+            row.classList.toggle('border-success', isSigner);
+            row.querySelector('.route-number').classList.toggle('bg-success', isSigner);
+            row.querySelector('.route-user').style.pointerEvents = isSigner ? 'none' : '';
+            row.querySelector('.route-user').setAttribute('aria-label', isSigner ? 'ผู้ลงนามหนังสือ (ล็อกเป็นขั้นตอนสุดท้าย)' : 'ผู้พิจารณา');
         });
 
         const addRow = (value = '') => {
@@ -111,8 +177,135 @@ document.addEventListener('DOMContentLoaded', () => {
             updateAvailableUsers();
         };
 
+        const syncSignerRoute = () => {
+            if (!signerSelect) return;
+
+            const signerId = signerSelect.selectedOptions[0]?.dataset.userId || '';
+            if (signerUserIdInput) signerUserIdInput.value = signerId;
+
+            if (signerId) {
+                rows.querySelectorAll('.route-row').forEach(row => {
+                    if (!row.querySelector('.route-user').value) row.remove();
+                });
+            }
+
+            rows.querySelectorAll('[data-route-role="signer"]').forEach(row => {
+                if (row.querySelector('.route-user').value !== signerId) row.remove();
+            });
+            if (!signerId) {
+                renumber();
+                updateAvailableUsers();
+                return;
+            }
+
+            let signerRow = [...rows.querySelectorAll('.route-row')]
+                .find(row => row.querySelector('.route-user').value === signerId);
+            if (!signerRow) {
+                addRow(signerId);
+                signerRow = rows.lastElementChild;
+            }
+            signerRow.dataset.routeRole = 'signer';
+            rows.appendChild(signerRow);
+            renumber();
+            updateAvailableUsers();
+        };
+
         container.querySelector('.add-route').addEventListener('click', () => addRow());
         (initial.length ? initial : ['']).forEach(addRow);
+        signerSelect?.addEventListener('change', syncSignerRoute);
+        syncSignerRoute();
+        renderPresetOptions();
+
+        presetSelect.addEventListener('change', () => {
+            const hasSelection = presets.has(presetSelect.value);
+            applyPresetButton.disabled = !hasSelection;
+            deletePresetButton.disabled = !hasSelection;
+        });
+
+        applyPresetButton.addEventListener('click', () => {
+            const preset = presets.get(presetSelect.value);
+            if (!preset) return;
+
+            const availableUserIds = new Set(
+                [...template.content.querySelectorAll('.route-user option[value]')]
+                    .map(option => option.value)
+                    .filter(Boolean)
+            );
+            const validUserIds = preset.route_user_ids.map(String).filter(id => availableUserIds.has(id));
+            if (!validUserIds.length) {
+                showPresetStatus('ผู้พิจารณาในเส้นทางนี้ไม่อยู่ในรายชื่อผู้ใช้งานปัจจุบัน', true);
+                return;
+            }
+
+            rows.replaceChildren();
+            validUserIds.forEach(addRow);
+            syncSignerRoute();
+            const skipped = preset.route_user_ids.length - validUserIds.length;
+            showPresetStatus(skipped
+                ? `ใช้เส้นทาง “${preset.name}” แล้ว (ข้ามผู้ใช้ที่ไม่พร้อมใช้งาน ${skipped} คน)`
+                : `ใช้เส้นทาง “${preset.name}” แล้ว`);
+        });
+
+        savePresetButton.addEventListener('click', async () => {
+            const routeUserIds = [...rows.querySelectorAll('.route-user')]
+                .filter(select => select.closest('.route-row')?.dataset.routeRole !== 'signer')
+                .map(select => select.value)
+                .filter(Boolean);
+            if (!routeUserIds.length) {
+                showPresetStatus('กรุณาเลือกผู้พิจารณาอย่างน้อย 1 คนก่อนบันทึก', true);
+                return;
+            }
+
+            const suggestedName = presets.get(presetSelect.value)?.name || '';
+            const name = window.prompt('ตั้งชื่อเส้นทางประจำ เช่น “เสนอปลัดและนายก”', suggestedName)?.trim();
+            if (!name) return;
+
+            savePresetButton.disabled = true;
+            try {
+                const response = await fetch(container.dataset.storeUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                    },
+                    body: JSON.stringify({ name, route_user_ids: routeUserIds }),
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.message || 'บันทึกเส้นทางประจำไม่สำเร็จ');
+
+                presets.set(String(result.preset.id), result.preset);
+                renderPresetOptions(result.preset.id);
+                showPresetStatus(result.message);
+            } catch (error) {
+                showPresetStatus(error.message || 'บันทึกเส้นทางประจำไม่สำเร็จ', true);
+            } finally {
+                savePresetButton.disabled = false;
+            }
+        });
+
+        deletePresetButton.addEventListener('click', async () => {
+            const preset = presets.get(presetSelect.value);
+            if (!preset || !window.confirm(`ลบเส้นทางประจำ “${preset.name}” ใช่หรือไม่`)) return;
+
+            deletePresetButton.disabled = true;
+            try {
+                const deleteUrl = container.dataset.deleteUrlTemplate.replace('__PRESET__', preset.id);
+                const response = await fetch(deleteUrl, {
+                    method: 'DELETE',
+                    headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.message || 'ลบเส้นทางประจำไม่สำเร็จ');
+
+                presets.delete(String(preset.id));
+                renderPresetOptions();
+                showPresetStatus(result.message);
+            } catch (error) {
+                showPresetStatus(error.message || 'ลบเส้นทางประจำไม่สำเร็จ', true);
+                deletePresetButton.disabled = false;
+            }
+        });
 
         container.closest('form')?.addEventListener('submit', event => {
             const values = [...rows.querySelectorAll('.route-user')].map(select => select.value).filter(Boolean);

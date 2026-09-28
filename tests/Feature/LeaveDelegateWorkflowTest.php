@@ -39,7 +39,9 @@ class LeaveDelegateWorkflowTest extends TestCase
 
     public function test_delegate_can_accept_assignment(): void
     {
+        /** @var User $owner */
         $owner = User::factory()->create();
+        /** @var User $delegate */
         $delegate = User::factory()->create();
         $leave = $this->leave($owner, $delegate);
 
@@ -55,8 +57,11 @@ class LeaveDelegateWorkflowTest extends TestCase
     public function test_delegate_can_find_pending_leave_on_assigned_work_page(): void
     {
         Role::findOrCreate('worker');
+        /** @var User $owner */
         $owner = User::factory()->create(['name' => 'ผู้ยื่นใบลา']);
-        $delegate = User::factory()->create()->assignRole('worker');
+        /** @var User $delegate */
+        $delegate = User::factory()->create();
+        $delegate->assignRole('worker');
         $this->leave($owner, $delegate);
 
         $this->actingAs($delegate)->get(route('documents.assigned'))
@@ -70,8 +75,11 @@ class LeaveDelegateWorkflowTest extends TestCase
 
     public function test_delegate_can_decline_with_reason_and_owner_can_reassign(): void
     {
+        /** @var User $owner */
         $owner = User::factory()->create();
+        /** @var User $delegate */
         $delegate = User::factory()->create();
+        /** @var User $replacement */
         $replacement = User::factory()->create();
         $leave = $this->leave($owner, $delegate);
 
@@ -95,8 +103,11 @@ class LeaveDelegateWorkflowTest extends TestCase
 
     public function test_unrelated_user_cannot_respond_or_reassign(): void
     {
+        /** @var User $owner */
         $owner = User::factory()->create();
+        /** @var User $delegate */
         $delegate = User::factory()->create();
+        /** @var User $unrelated */
         $unrelated = User::factory()->create();
         $leave = $this->leave($owner, $delegate);
 
@@ -114,16 +125,18 @@ class LeaveDelegateWorkflowTest extends TestCase
             'services.leave_delegate.remind_after_hours' => 24,
             'services.leave_delegate.escalate_after_hours' => 48,
         ]);
+        /** @var User $owner */
         $owner = User::factory()->create();
+        /** @var User $delegate */
         $delegate = User::factory()->create();
         $leave = $this->leave($owner, $delegate, ['delegate_requested_at' => now()->subHours(25)]);
 
         $this->artisan('leaves:process-delegate-timeouts')->assertSuccessful();
-        $this->assertNotNull($leave->fresh()->delegate_reminded_at);
+        $this->assertNotNull($leave->refresh()->delegate_reminded_at);
 
         $leave->update(['delegate_requested_at' => now()->subHours(49)]);
         $this->artisan('leaves:process-delegate-timeouts')->assertSuccessful();
-        $this->assertSame('delegate_escalated', $leave->fresh()->workflow_status);
-        $this->assertNotNull($leave->fresh()->delegate_escalated_at);
+        $this->assertSame('delegate_escalated', $leave->refresh()->workflow_status);
+        $this->assertNotNull($leave->refresh()->delegate_escalated_at);
     }
 }

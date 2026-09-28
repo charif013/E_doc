@@ -2,6 +2,13 @@
 @section('title', 'สมุดคุมเลขสารบรรณ')
 
 @section('content')
+@php
+    // แปลงเฉพาะตอนแสดงผล ฐานข้อมูลและค่าที่ส่งกลับไปจองเลขยังคงเป็นเลขอารบิกเพื่อให้คำนวณได้ถูกต้อง
+    $toThaiDigits = static fn ($value) => strtr((string) $value, [
+        '0' => '๐', '1' => '๑', '2' => '๒', '3' => '๓', '4' => '๔',
+        '5' => '๕', '6' => '๖', '7' => '๗', '8' => '๘', '9' => '๙',
+    ]);
+@endphp
 <div class="container-fluid px-4 py-3">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
@@ -38,11 +45,11 @@
 
                 <select name="year" class="form-select form-select-sm shadow-sm fw-bold" onchange="this.form.submit()" style="width: 150px;">
                     @for($y = date('Y') + 1; $y >= 2024; $y--)
-                        <option value="{{ $y }}" {{ $year == $y ? 'selected' : '' }}>ปีงบประมาณ {{ $y + 543 }}</option>
+                        <option value="{{ $y }}" {{ $year == $y ? 'selected' : '' }}>ปีงบประมาณ {{ $toThaiDigits($y + 543) }}</option>
                     @endfor
                 </select>
             </form>
-            <span class="badge bg-primary rounded-pill px-3 py-2 shadow-sm">เลขล่าสุดที่ออก: {{ $maxNumber }}</span>
+            <span class="badge bg-primary rounded-pill px-3 py-2 shadow-sm">เลขล่าสุดที่ออก: {{ $toThaiDigits($maxNumber) }}</span>
         </div>
 
         <div class="card-body p-0">
@@ -60,7 +67,6 @@
                     <tbody>
                         @php
                             $reservePrefix = '';
-                            $thDigits = ['๐','๑','๒','๓','๔','๕','๖','๗','๘','๙'];
                             if($type === 'incoming') {
                                 $reservePrefix = 'ยล 77301/';
                             } elseif(in_array($type, ['outgoing', 'internal'])) {
@@ -73,8 +79,8 @@
                             $status = $data['status'];
                             $doc = $data['doc'];
 
-                            $thNum = ($type === 'outgoing') ? str_replace(range(0,9), $thDigits, $num) : $num;
-                            $formattedReserveNum = $reservePrefix . $thNum;
+                            $formattedReserveNum = $reservePrefix . $num;
+                            $displayReserveNum = $toThaiDigits($formattedReserveNum);
 
                             $bgRow = '#ffffff';
                             if ($status === 'ว่าง') $bgRow = '#f8fafc'; 
@@ -83,7 +89,7 @@
                         @endphp
 
                         <tr style="background: {{ $bgRow }}">
-                            <td class="fw-bold fs-5" style="color: {{ $status === 'ว่าง' ? '#cbd5e1' : 'var(--primary)' }}">{{ $num }}</td>
+                            <td class="fw-bold fs-5" style="color: {{ $status === 'ว่าง' ? '#cbd5e1' : 'var(--primary)' }}">{{ $toThaiDigits($num) }}</td>
                             <td>
                                 @if($status === 'ว่าง')
                                     <span class="badge bg-secondary-subtle text-secondary rounded-pill px-3">ยังไม่ออกเลข</span>
@@ -98,34 +104,34 @@
                                 @endif
                             </td>
                             <td class="fw-bold text-dark">
-                                {{ $type === 'leave'
+                                {{ $toThaiDigits($type === 'leave'
                                     ? ($doc->leave_number ?? '-')
-                                    : ($type === 'incoming' ? ($doc->formatted_receive_number ?? '-') : ($doc->formatted_doc_number ?? '-')) }}
+                                    : ($type === 'incoming' ? ($doc->formatted_receive_number ?? '-') : ($doc->formatted_doc_number ?? '-'))) }}
                             </td>
                             <td class="text-start">
                                 @if($doc && $type === 'leave')
                                     <a href="{{ route('leaves.show', $doc->id) }}" class="text-decoration-none text-success-emphasis fw-bold">
-                                        {{ $doc->leave_type }} — {{ $doc->user->name ?? 'ไม่ทราบชื่อ' }}
+                                        {{ $toThaiDigits($doc->leave_type) }} — {{ $toThaiDigits($doc->user->name ?? 'ไม่ทราบชื่อ') }}
                                     </a>
                                     <div class="small text-muted mt-1">
-                                        {{ \Carbon\Carbon::parse($doc->start_date)->format('d/m/Y') }} - {{ \Carbon\Carbon::parse($doc->end_date)->format('d/m/Y') }}
-                                        · ลงเลขโดย {{ $doc->numberedBy->name ?? 'ระบบ' }}
+                                        {{ $toThaiDigits(\Carbon\Carbon::parse($doc->start_date)->format('d/m/Y')) }} - {{ $toThaiDigits(\Carbon\Carbon::parse($doc->end_date)->format('d/m/Y')) }}
+                                        · ลงเลขโดย {{ $toThaiDigits($doc->numberedBy->name ?? 'ระบบ') }}
                                     </div>
                                 @elseif($doc)
                                     @if($status === 'จองรออนุมัติ' || $status === 'จองเลขมือ')
                                         {{-- 🌟 ลิงก์ UUID --}}
-                                        <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="text-warning-emphasis fw-bold text-decoration-none">{{ $doc->title }}</a><br>
+                                        <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="text-warning-emphasis fw-bold text-decoration-none">{{ $toThaiDigits($doc->title) }}</a><br>
                                         <div class="small mt-1">
-                                            <span class="text-muted"><i class="fas fa-user-edit"></i> จองโดย: {{ $doc->creator->name ?? 'ระบบ' }}</span> 
-                                            <span class="text-primary fw-bold ms-1">({{ $doc->creator->department ?? '-' }})</span>
+                                            <span class="text-muted"><i class="fas fa-user-edit"></i> จองโดย: {{ $toThaiDigits($doc->creator->name ?? 'ระบบ') }}</span> 
+                                            <span class="text-primary fw-bold ms-1">({{ $toThaiDigits($doc->creator->department ?? '-') }})</span>
                                         </div>
                                     @elseif($status === 'ยกเลิก')
-                                        <span class="text-danger fw-bold text-decoration-line-through">{{ $doc->title }}</span><br>
-                                        <small class="text-danger fw-bold"><i class="fas fa-exclamation-triangle"></i> เหตุผล: {{ $doc->reject_reason ?? 'ยกเลิกการออกเลข/ไม่มีการระบุเหตุผล' }}</small>
+                                        <span class="text-danger fw-bold text-decoration-line-through">{{ $toThaiDigits($doc->title) }}</span><br>
+                                        <small class="text-danger fw-bold"><i class="fas fa-exclamation-triangle"></i> เหตุผล: {{ $toThaiDigits($doc->reject_reason ?? 'ยกเลิกการออกเลข/ไม่มีการระบุเหตุผล') }}</small>
                                     @else
                                         {{-- 🌟 ลิงก์ UUID --}}
-                                        <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="text-decoration-none text-success-emphasis fw-bold">{{ $doc->title }}</a>
-                                        <div class="small text-muted mt-1">{{ \Carbon\Carbon::parse($doc->created_at)->addYears(543)->format('d M Y H:i') }} น.</div>
+                                        <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="text-decoration-none text-success-emphasis fw-bold">{{ $toThaiDigits($doc->title) }}</a>
+                                        <div class="small text-muted mt-1">{{ $toThaiDigits(\Carbon\Carbon::parse($doc->created_at)->addYears(543)->locale('th')->translatedFormat('d M Y H:i')) }} น.</div>
                                     @endif
                                 @else
                                     <span class="text-muted fst-italic">พื้นที่ว่างสามารถใช้งานได้ (ธุรการกดปุ่มจองได้ทันที)</span>
@@ -138,7 +144,7 @@
                                         <input type="hidden" name="type" value="{{ $type }}">
                                         <input type="hidden" name="running_number" value="{{ $num }}">
                                         <input type="hidden" name="doc_number" value="{{ $formattedReserveNum }}">
-                                        <button type="submit" class="btn btn-outline-warning btn-sm fw-bold rounded-pill shadow-sm" onclick="return confirm('ยืนยันการจองเลขที่: {{ $formattedReserveNum }} ?')">
+                                        <button type="submit" class="btn btn-outline-warning btn-sm fw-bold rounded-pill shadow-sm" onclick="return confirm('ยืนยันการจองเลขที่: {{ $displayReserveNum }} ?')">
                                             <i class="fas fa-lock"></i> จองเลขนี้
                                         </button>
                                     </form>

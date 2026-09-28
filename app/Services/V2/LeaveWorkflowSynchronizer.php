@@ -13,12 +13,12 @@ use Illuminate\Support\Facades\DB;
 class LeaveWorkflowSynchronizer
 {
     private const DEFINITION_CODE = 'APPLICATION_LEAVE';
+    private const DEFINITION_VERSION = 2;
 
     private const STEPS = [
         1 => ['name' => 'Delegate response', 'action' => 'ACCEPTANCE', 'role' => null, 'required' => false],
         2 => ['name' => 'Department head approval', 'action' => 'APPROVAL', 'role' => 'head', 'required' => true],
         3 => ['name' => 'HR inspection', 'action' => 'APPROVAL', 'role' => 'hr', 'required' => true],
-        4 => ['name' => 'Leave number allocation', 'action' => 'NUMBERING', 'role' => 'saraban', 'required' => true],
         5 => ['name' => 'Palad approval', 'action' => 'APPROVAL', 'role' => 'palad', 'required' => true],
         6 => ['name' => 'Executive approval', 'action' => 'APPROVAL', 'role' => 'executive', 'required' => true],
     ];
@@ -72,13 +72,13 @@ class LeaveWorkflowSynchronizer
     private function ensureDefinition(ConnectionInterface $db): int
     {
         $definition = $db->table('workflow_definitions')
-            ->where('code', self::DEFINITION_CODE)->where('version', 1)->first();
+            ->where('code', self::DEFINITION_CODE)->where('version', self::DEFINITION_VERSION)->first();
         $now = now();
         $definitionId = $definition?->id ?: $db->table('workflow_definitions')->insertGetId([
             'code' => self::DEFINITION_CODE,
             'name' => 'Application leave workflow',
             'resource_type' => 'LEAVE',
-            'version' => 1,
+            'version' => self::DEFINITION_VERSION,
             'is_active' => true,
             'created_at' => $now,
             'updated_at' => $now,

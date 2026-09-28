@@ -5,37 +5,48 @@
     }
     $isOutgoingTimeline = strtolower((string) ($document->doc_type ?? '')) === 'outgoing';
     $isIncomingTimeline = strtolower((string) ($document->doc_type ?? '')) === 'incoming';
+    $timelineUsesRouteStates = false;
 
     if ($isOutgoingTimeline) {
-        // หนังสือส่งออกได้รับเลขตั้งแต่หน้ากรอกรายละเอียด จึงไม่มีขั้นรอออกเลข
-        $selectedSigner = trim((string) ($document->signer_name ?? ''));
-        $signerParts = preg_split('/\s*[—–]\s*/u', $selectedSigner, 2);
-        $signerName = trim((string) ($signerParts[0] ?? ''));
-        $signerPosition = trim((string) ($signerParts[1] ?? ''));
-        $signerStepLabel = $signerName !== '' ? "รอ{$signerName}ลงนาม" : 'รอผู้ลงนาม';
-        $signerStepDescription = $signerPosition !== '' ? $signerPosition : 'ผู้ลงนามพิจารณาอนุมัติ';
-        $timelineOrder = [
-            'DRAFT' => 0,
-            'REJECTED' => 0,
-            'WAITING_ADMIN' => 1,
-            'REGISTERED' => 1,
-            'IN_REVIEW' => 1,
-            'WAITING_REVIEWER' => 1,
-            'WAITING_SUPERVISOR' => 1,
-            'WAITING_PALAD' => 2,
-            'WAITING_NAYOK' => 2,
-            'WAITING_APPROVER' => 2,
-            'WAITING_NUMBERING' => 2,
-            'APPROVED' => 3,
-            'COMPLETED' => 3,
-            'ARCHIVED' => 3,
-        ];
-        $timelineSteps = [
-            ['ร่าง', 'จัดทำหนังสือส่งออก'],
-            ['รอตรวจ', 'ธุรการตรวจสอบ'],
-            [$signerStepLabel, $signerStepDescription],
-            ['เสร็จสิ้น', 'พร้อมใช้งาน'],
-        ];
+        // หนังสือส่งออกใช้เส้นทางจริงเป็นแหล่งข้อมูลเดียว ผู้ลงนามคือขั้นตอนสุดท้าย
+        $timelineUsesRouteStates = true;
+        $actualRoutes = $document->relationLoaded('routes')
+            ? $document->routes
+            : $document->routes()->with('user')->get();
+        $actualRoutes = $actualRoutes->sortBy('step_order')->values();
+        $lastRouteIndex = $actualRoutes->count() - 1;
+        $routeCurrentStep = (int) ($document->current_step ?? 1);
+        $timelineSteps = $actualRoutes->map(function ($route, $index) use ($lastRouteIndex, $routeCurrentStep) {
+            $actionType = strtoupper((string) ($route->action_type ?? ''));
+            $isCreator = (int) $route->step_order === 1 || $actionType === 'SUBMIT';
+            $isSigner = ! $isCreator && ($actionType === 'SIGNATURE' || $index === $lastRouteIndex);
+            $routeStatus = strtoupper((string) ($route->status instanceof \BackedEnum ? $route->status->value : $route->status));
+            $name = trim((string) ($route->user?->name ?? 'ไม่พบข้อมูลผู้ใช้'));
+            $position = trim((string) ($route->user?->position ?? ''));
+            $label = $isCreator ? 'จัดทำ' : ($isSigner ? 'ลงนามหนังสือ' : 'ตรวจ/พิจารณา');
+            $description = $name.($position !== '' ? ' · '.$position : '');
+            $state = $routeStatus === 'APPROVED'
+                ? 'done'
+                : (($routeStatus === 'PENDING' && (int) $route->step_order === $routeCurrentStep) ? 'current' : 'waiting');
+
+            return [$label, $description, $state];
+        })->all();
+        $isSystemOutgoing = ($document->source_type ?? 'upload') === 'system';
+        $numberConfirmed = strtoupper((string) ($document->number_status ?? 'UNASSIGNED')) === 'CONFIRMED'
+            || in_array($timelineStatus, ['COMPLETED', 'ARCHIVED'], true);
+        if ($isSystemOutgoing) {
+            $waitingForNumber = in_array($timelineStatus, ['WAITING_NUMBERING', 'APPROVED'], true) && ! $numberConfirmed;
+            $timelineSteps[] = [
+                'ลงเลขสารบรรณ',
+                'เจ้าหน้าที่สารบรรณออกเลขหลังผู้ลงนามอนุมัติ',
+                $numberConfirmed ? 'done' : ($waitingForNumber ? 'current' : 'waiting'),
+            ];
+        }
+        $finished = $isSystemOutgoing
+            ? $numberConfirmed
+            : in_array($timelineStatus, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true);
+        $timelineSteps[] = ['เสร็จสิ้น', 'หนังสือพร้อมใช้งาน', $finished ? 'done' : 'waiting'];
+        $timelineOrder = [];
     } elseif ($isIncomingTimeline) {
         // หนังสือรับเข้าระบุเลขรับตั้งแต่ตอนลงทะเบียน จึงจบงานหลังอนุมัติ
         $timelineOrder = [
@@ -89,7 +100,10 @@
     }
     $timelineCurrent = $timelineOrder[$timelineStatus] ?? 0;
     $timelineIsFinished = in_array($timelineStatus, ['COMPLETED', 'ARCHIVED'], true)
-        || (($isOutgoingTimeline || $isIncomingTimeline) && $timelineStatus === 'APPROVED');
+        || ($isIncomingTimeline && $timelineStatus === 'APPROVED')
+        || ($isOutgoingTimeline && $timelineStatus === 'APPROVED'
+            && (($document->source_type ?? 'upload') !== 'system'
+                || strtoupper((string) ($document->number_status ?? 'UNASSIGNED')) === 'CONFIRMED'));
 @endphp
 
 <section class="document-status-timeline no-print" aria-labelledby="document-status-title">
@@ -102,13 +116,18 @@
         @endif
     </div>
     <ol class="status-timeline-list" style="--timeline-step-count: {{ count($timelineSteps) }};">
-        @foreach($timelineSteps as $index => [$label, $description])
+        @foreach($timelineSteps as $index => $timelineStep)
             @php
-                $isDone = $timelineStatus !== 'REJECTED'
-                    && ($index < $timelineCurrent || ($timelineIsFinished && $index === $timelineCurrent));
-                $isCurrent = !$timelineIsFinished
-                    && $index === $timelineCurrent
-                    && !in_array($timelineStatus, ['CANCELED']);
+                [$label, $description, $routeState] = array_pad($timelineStep, 3, null);
+                $isDone = $timelineUsesRouteStates
+                    ? $routeState === 'done'
+                    : ($timelineStatus !== 'REJECTED'
+                        && ($index < $timelineCurrent || ($timelineIsFinished && $index === $timelineCurrent)));
+                $isCurrent = $timelineUsesRouteStates
+                    ? $routeState === 'current' && !in_array($timelineStatus, ['CANCELED', 'REJECTED'], true)
+                    : (!$timelineIsFinished
+                        && $index === $timelineCurrent
+                        && !in_array($timelineStatus, ['CANCELED']));
             @endphp
             <li class="status-timeline-step {{ $isDone ? 'is-done' : '' }} {{ $isCurrent ? 'is-current' : '' }}"
                 @if($isCurrent) aria-current="step" @endif>

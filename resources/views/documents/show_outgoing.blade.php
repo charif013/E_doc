@@ -32,6 +32,11 @@
             'CANCELED'           => ['bg-dark', 'text-white', 'ยกเลิก / เลขเสีย']
         ];
         $b = $badges[$document->status] ?? ['bg-light', 'text-dark', $document->status];
+        if (($document->source_type ?? 'upload') === 'system'
+            && $document->status === 'APPROVED'
+            && ($document->number_status ?? 'UNASSIGNED') !== 'CONFIRMED') {
+            $b = ['bg-dark', 'text-white', 'ผู้ลงนามอนุมัติแล้ว / รอสารบรรณลงเลข'];
+        }
         if ($document->isAtFinalApprovalStep()) {
             $b = ['bg-primary', 'text-white', 'รออนุมัติ'];
         }
@@ -52,6 +57,13 @@
                 return asset('storage/' . preg_replace('/^(public|storage)\//', '', ltrim($path, '/'))); 
             } 
         }
+
+        $numberBadges = [
+            'UNASSIGNED' => ['bg-light text-muted', 'ยังไม่ออกเลข'],
+            'RESERVED' => ['bg-warning-subtle text-warning-emphasis', 'จองเลขแล้ว'],
+            'CONFIRMED' => ['bg-success-subtle text-success', 'ยืนยันเลขแล้ว'],
+        ];
+        $numberBadge = $numberBadges[$document->number_status ?? 'UNASSIGNED'] ?? $numberBadges['UNASSIGNED'];
     @endphp
 
     <div class="d-flex justify-content-between align-items-center mb-4 mx-auto no-print" style="max-width: 950px;">
@@ -60,10 +72,13 @@
             <div class="d-flex align-items-center gap-2 mt-2">
                 <span class="badge bg-primary-subtle text-primary border rounded-pill px-3 py-2 shadow-sm">อ้างอิง: #{{ str_pad($document->id, 5, '0', STR_PAD_LEFT) }}</span>
                 <span class="badge {{ $b[0] }} {{ $b[1] }} border rounded-pill px-3 py-2 shadow-sm">{{ $b[2] }}</span>
+                <span class="badge {{ $numberBadge[0] }} border rounded-pill px-3 py-2 shadow-sm"><i class="fas fa-hashtag me-1"></i>{{ $numberBadge[1] }}</span>
             </div>
         </div>
         <div class="d-flex gap-2">
-            <button onclick="window.print()" class="btn btn-dark rounded-pill px-4 shadow-sm fw-bold"><i class="fas fa-print me-2"></i>พิมพ์</button>
+            @if($document->attachment_path)
+                <a href="{{ route('documents.file', [$document->uuid ?? $document->id, $document->signed_path ? 'signed' : 'main']) }}" target="_blank" class="btn btn-dark rounded-pill px-4 shadow-sm fw-bold"><i class="fas fa-print me-2"></i>เปิด PDF เพื่อพิมพ์</a>
+            @endif
             <a href="{{ route('documents.approve_list') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ</a>
         </div>
     </div>
@@ -81,24 +96,18 @@
             </div>
         @endif
 
-        {{-- ซ่อนกระดาษ A4 ถ้าเป็นการอัปโหลดไฟล์เข้ามาล้วนๆ --}}
-        @if(!str_contains(strip_tags($document->content), 'อ้างอิงจากไฟล์แนบในระบบ'))
-        <div class="card border-0 shadow-sm mb-4 doc-container" style="border-radius: 0; background: #525659; padding: 40px 0;">
-            <div class="doc-paper shadow-lg mx-auto bg-white" style="width: 210mm; min-height: 297mm; padding: 20mm 15mm 20mm 25mm; position: relative;">
-                @include('documents.partials.paper')
-            </div>
-        </div>
-        @endif
-
-        {{-- PDF Viewer (แสดงไฟล์แนบที่อัปโหลด + ใบแนบท้าย ถ้ามี) --}}
+        {{-- หนังสือส่งออกแสดงจาก PDF จริงเท่านั้น เพื่อไม่ให้ปะปนกับแม่แบบบันทึกข้อความ --}}
         @if($document->attachment_path)
             <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius: 16px;">
                 <div class="card-body p-4">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h6 class="fw-bold text-dark mb-0">
-                            <i class="fas fa-file-pdf me-2 text-danger"></i>ไฟล์เอกสารที่อัปโหลด
-                            @if($document->signed_path) 
-                                <span class="badge bg-success-subtle text-success border border-success-subtle ms-2"><i class="fas fa-check-circle me-1"></i> มีใบแนบท้ายแล้ว</span>
+                            <i class="fas fa-file-pdf me-2 text-danger"></i>
+                            {{ ($document->source_type ?? 'upload') === 'system' ? 'หนังสือส่งออกที่จัดทำในระบบ' : 'ไฟล์หนังสือส่งออกที่อัปโหลด' }}
+                            @if($document->signed_path)
+                                <span class="badge bg-success-subtle text-success border border-success-subtle ms-2"><i class="fas fa-signature me-1"></i> ลงนามแล้ว</span>
+                            @elseif(($document->source_type ?? 'upload') === 'upload' && in_array((string) $document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true))
+                                <span class="badge bg-success-subtle text-success border border-success-subtle ms-2"><i class="fas fa-user-check me-1"></i> ผู้ลงนามยืนยันแล้ว</span>
                             @endif
                         </h6>
                         <a href="{{ route('documents.file', [$document->uuid ?? $document->id, $document->signed_path ? 'signed' : 'main']) }}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold shadow-sm">
@@ -132,10 +141,47 @@
 
         @include('documents.partials.dynamic_route_track')
 
+        @include('documents.partials.outgoing_deliveries')
+
+        @php $revisionHistory = $document->revisions()->with('creator')->orderByDesc('version_no')->get(); @endphp
+        @if($revisionHistory->isNotEmpty())
+            <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius:16px;">
+                <div class="card-header bg-white py-3 border-bottom">
+                    <h6 class="fw-bold mb-0 text-dark"><i class="fas fa-history text-primary me-2"></i>ประวัติฉบับเอกสาร</h6>
+                </div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush">
+                        @foreach($revisionHistory as $revision)
+                            <div class="list-group-item px-4 py-3">
+                                <div class="d-flex justify-content-between align-items-start gap-3">
+                                    <div>
+                                        <span class="badge bg-primary rounded-pill me-2">ฉบับที่ {{ $revision->version_no }}</span>
+                                        <span class="fw-bold text-dark">{{ $revision->change_note ?: 'บันทึกการแก้ไขเอกสาร' }}</span>
+                                        <div class="small text-muted mt-1">
+                                            โดย {{ $revision->creator->name ?? 'ผู้ใช้งานระบบ' }}
+                                            @if($revision->created_at) · {{ $revision->created_at->format('d/m/Y H:i') }} @endif
+                                        </div>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        @if($loop->first)<span class="badge bg-success-subtle text-success border">ฉบับปัจจุบัน</span>@endif
+                                        @if($revision->file_path)
+                                            <a href="{{ route('documents.revision_file', [$document->uuid ?? $document->id, $revision->version_no]) }}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                                                <i class="fas fa-file-pdf me-1"></i>เปิดไฟล์ฉบับนี้
+                                            </a>
+                                        @endif
+                                    </div>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+        @endif
+
         @if($isReviewer)
             <div class="card border-0 shadow-sm overflow-hidden mb-4 no-print" style="border-radius: 16px; border-left: 5px solid var(--primary) !important;">
                 <div class="card-header bg-white py-3 border-bottom-0"><h6 class="fw-bold mb-0 text-dark"><i class="fas fa-signature text-primary me-2"></i>ส่วนการพิจารณาและอนุมัติ</h6></div>
-                <div class="card-body pt-0">@include('documents.partials.review_box_internal')</div>
+                <div class="card-body pt-0">@include('documents.partials.review_box_outgoing')</div>
             </div>
         @endif
 
@@ -155,109 +201,6 @@
     </div>
 </div>
 
-<style>
-    @font-face { font-family: 'MySarabun'; src: url('{{ asset("fonts/THSarabunIT๙.ttf") }}') format('truetype'); font-weight: normal; font-style: normal; }
-    @font-face { font-family: 'MySarabun'; src: url('{{ asset("fonts/THSarabunIT๙_Bold.ttf") }}') format('truetype'); font-weight: bold; font-style: normal; }
-    
-    .doc-paper, .doc-paper * { font-family: 'MySarabun', sans-serif !important; line-height: 1.15 !important; }
-    
-    .doc-paper { 
-        color: #000; 
-        background-color: white; 
-        background-image: linear-gradient(to bottom, transparent 296mm, #94a3b8 296mm, #94a3b8 297mm); 
-        background-size: 100% 297mm; 
-        box-sizing: border-box; 
-    }
-    
-    /* 🌟🌟🌟 ทะลวงโครงสร้าง Layout ของระบบ สำหรับการปริ้นโดยเฉพาะ 🌟🌟🌟 */
-    @media print {
-        @page { 
-            size: A4; 
-            margin: 0; 
-        }
-
-        html, body, #app, main, .wrapper, .content-wrapper, .container-fluid, .doc-container {
-            height: auto !important;
-            min-height: auto !important;
-            max-height: none !important;
-            overflow: visible !important;
-            position: static !important;
-            background: white !important;
-        }
-
-        body * { visibility: hidden; }
-        .doc-paper, .doc-paper * { visibility: visible; }
-
-        .no-print, .doc-paper .no-print, .doc-paper .no-print * {
-            display: none !important;
-            visibility: hidden !important;
-            height: 0 !important;
-            position: absolute !important;
-        }
-
-        .doc-paper {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            margin: 0 !important;
-            padding: 20mm 15mm 20mm 25mm !important; 
-            width: 210mm !important;
-            height: auto !important;
-            min-height: auto !important;
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            overflow: visible !important;
-        }
-
-        /* 🌟🌟 1. ปิดการใช้ Flexbox ทั่วทั้งเอกสาร (ตัวการทำให้ Chrome หั่นหน้ากระดาษ) 🌟🌟 */
-        .doc-paper .row,
-        .doc-paper .d-flex {
-            display: block !important;
-            width: 100% !important;
-        }
-
-        /* 🌟🌟 2. ดันกล่องลายเซ็นไปฝั่งขวา (ใช้ inline-block เพื่อให้ห้ามตัดหน้าทำงาน) 🌟🌟 */
-        .doc-paper .col-md-6.text-center,
-        .doc-paper .offset-md-6,
-        .doc-paper .justify-content-end > div {
-            display: inline-block !important;
-            width: 50% !important;
-            margin-left: 50% !important;
-            text-align: center !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-            -webkit-column-break-inside: avoid !important;
-        }
-
-        /* 🌟🌟 3. จัดให้คำว่า (ลงชื่อ) และเส้นประอยู่บรรทัดเดียวกัน 🌟🌟 */
-        .doc-paper .align-items-end {
-            display: block !important;
-            text-align: center !important;
-            margin-bottom: 5px !important;
-        }
-
-        .doc-paper .align-items-end > span,
-        .doc-paper .align-items-end > div {
-            display: inline-block !important;
-            vertical-align: bottom !important;
-        }
-
-        /* 🌟🌟 4. ป้องกันรูปภาพลายเซ็น และกล่องความเห็นโดนผ่าครึ่ง 🌟🌟 */
-        .doc-paper img,
-        .doc-paper .mt-4,
-        .doc-paper .mt-5 {
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-            -webkit-column-break-inside: avoid !important;
-        }
-
-        .doc-paper img {
-            display: block !important;
-            margin: 0 auto !important;
-        }
-    }
-</style>
 @endsection
 
 @section('scripts')
@@ -269,13 +212,19 @@
             html: `
                 <p class="mb-3" style="font-size: 14px; color: #475569;">กรุณากรอกรหัส PIN 6 หลักของคุณ</p>
                 <input type="password" id="swal-pin" class="swal2-input" maxlength="6" pattern="[0-9]*" inputmode="numeric" placeholder="••••••" style="text-align: center; letter-spacing: 10px; font-size: 24px; width: 200px; margin: 0 auto 20px auto;">
-                <div class="form-check text-start mx-auto mt-3" style="max-width: 280px; padding-left: 2rem;">
-                    <input class="form-check-input" type="checkbox" id="swal-stamp-creator" value="1" checked style="cursor: pointer; transform: scale(1.2);">
-                    <label class="form-check-label" for="swal-stamp-creator" style="font-size: 14px; color: #334155; cursor: pointer; padding-left: 5px;">
-                        ประทับลายเซ็นลงบนไฟล์ PDF<br>
-                        <span style="font-size: 12px; color: #ef4444;">(เอาออกหากในไฟล์มีลายเซ็นสดอยู่แล้ว)</span>
-                    </label>
-                </div>
+                @if(($document->source_type ?? 'upload') === 'upload')
+                    <div class="alert alert-info text-start mx-auto mt-3 mb-0" style="max-width: 360px; font-size: 13px;">
+                        <i class="fas fa-file-shield me-1"></i>
+                        ระบบจะเก็บ PDF ฉบับที่อัปโหลดไว้โดยไม่แก้ไข และส่งให้ผู้ลงนามที่เลือกยืนยันตัวตนในขั้นตอนสุดท้าย
+                    </div>
+                @else
+                    <div class="form-check text-start mx-auto mt-3" style="max-width: 280px; padding-left: 2rem;">
+                        <input class="form-check-input" type="checkbox" id="swal-stamp-creator" value="1" checked style="cursor: pointer; transform: scale(1.2);">
+                        <label class="form-check-label" for="swal-stamp-creator" style="font-size: 14px; color: #334155; cursor: pointer; padding-left: 5px;">
+                            ประทับลายเซ็นลงบนไฟล์ PDF
+                        </label>
+                    </div>
+                @endif
             `,
             showCancelButton: true,
             confirmButtonColor: '#0ea5e9',
@@ -284,7 +233,8 @@
             cancelButtonText: 'ยกเลิก',
             preConfirm: () => {
                 const pin = document.getElementById('swal-pin').value;
-                const stamp = document.getElementById('swal-stamp-creator').checked ? '1' : '0';
+                const stampControl = document.getElementById('swal-stamp-creator');
+                const stamp = stampControl && stampControl.checked ? '1' : '0';
                 if (!pin || pin.length !== 6 || !/^\d+$/.test(pin)) {
                     Swal.showValidationMessage('กรุณากรอกรหัส PIN ให้ครบ 6 หลัก (ตัวเลขเท่านั้น)');
                     return false;
@@ -295,7 +245,7 @@
             if (result.isConfirmed) {
                 document.getElementById('signaturePinInput').value = result.value.pin;
                 document.getElementById('stampCreatorInput').value = result.value.stamp;
-                Swal.fire({ title: 'กำลังดำเนินการ...', text: 'ระบบกำลังประทับลายเซ็นและต่อใบแนบท้าย', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+                Swal.fire({ title: 'กำลังดำเนินการ...', text: 'ระบบกำลังส่งเอกสารเข้าสู่เส้นทางพิจารณา', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
                 document.getElementById('signDocumentForm').submit();
             }
         });

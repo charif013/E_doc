@@ -3,6 +3,7 @@
 namespace App\Services\V2;
 
 use App\Services\DocumentFileStorage;
+use App\Services\DocumentRevisionService;
 use App\Models\User as LegacyUser;
 use App\Models\V2\Document;
 use App\Models\V2\DocumentCategory;
@@ -28,6 +29,7 @@ class DocumentWriteService
         private WorkflowService $workflow,
         private DocumentNumberingService $numbering,
         private DocumentFileStorage $files,
+        private DocumentRevisionService $revisions,
     ) {}
 
     public function create(array $data, array $routeUserIds, int $actorId, ?UploadedFile $file = null): Document
@@ -48,7 +50,7 @@ class DocumentWriteService
                     'version_no' => 1, 'uploaded_by' => $actorId,
                 ]);
             }
-            $this->createWorkflow($document, $actorId, $routeUserIds);
+            $this->createWorkflow($document, $actorId, $routeUserIds, $data['signer_user_id'] ?? null);
 
             if (! empty($data['running_number'])) {
                 $formatted = (string) ($type === 'incoming'
@@ -56,6 +58,8 @@ class DocumentWriteService
                     : ($data['doc_number'] ?? ''));
                 $this->numbering->allocate($document, $actorId, (int) $data['running_number'], $formatted, $this->scope($type, $actorId));
             }
+
+            $this->revisions->record($document->fresh(), $actorId, 'สร้างฉบับร่าง');
 
             return $document->fresh();
         }, 3);
@@ -69,7 +73,11 @@ class DocumentWriteService
         }
 
         return DB::connection('mysql_v2')->transaction(function () use ($document, $data, $actorId, $file) {
+            $wasRejected = $document->status === 'REJECTED';
             $locked = Document::whereKey($document->id)->lockForUpdate()->firstOrFail();
+            $previousSignerId = $locked->doc_type === 'outgoing'
+                ? $this->signerIdFromName((string) $locked->signer_name)
+                : null;
             $locked->update($this->documentColumns($data, $actorId, $locked->doc_type, false) + [
                 'status' => 'DRAFT', 'rejection_reason' => null,
             ]);
@@ -83,7 +91,12 @@ class DocumentWriteService
                     $step->update(['status' => 'PENDING', 'comment' => null, 'acted_at' => null]);
                 });
                 $locked->workflow->update(['status' => 'PENDING', 'current_step' => 1, 'completed_at' => null]);
+                if ($locked->doc_type === 'outgoing' && ! empty($data['signer_user_id'])) {
+                    $this->syncOutgoingSignerStep($locked->workflow, (int) $data['signer_user_id'], $previousSignerId);
+                }
             }
+
+            $this->revisions->record($locked->fresh(), $actorId, $wasRejected ? 'แก้ไขตามข้อเสนอแนะและส่งใหม่' : 'แก้ไขฉบับร่าง');
 
             return $locked->fresh();
         }, 3);
@@ -93,6 +106,7 @@ class DocumentWriteService
     {
         $this->guard->ensureEnabled();
         if ($document->created_by !== $actor->id || $document->status !== 'DRAFT') { abort(403); }
+        $this->ensureOutgoingSignerStep($document);
         $instance = $document->workflow()->firstOrFail();
         $this->workflow->act($instance, $actor, 'APPROVED', 'ลงนามและส่งเรื่อง', null, 'CREATED');
         $instance->refresh();
@@ -117,13 +131,21 @@ class DocumentWriteService
         }
         $action = $approved ? 'APPROVED' : 'REJECTED';
         $evidenceAction ??= $action;
+        if ($approved) {
+            $this->ensureOutgoingSignerStep($document);
+        }
         $this->workflow->act($document->workflow()->firstOrFail(), $actor, $action, $comment, null, $evidenceAction);
         $reviewed = $document->fresh();
         if (! $approved) {
             $document->update(['rejection_reason' => $comment]);
         } elseif ($reviewed->status === 'APPROVED' && $reviewed->doc_type === 'outgoing') {
-            // หนังสือส่งออกมีเลขตั้งแต่สร้างเอกสาร การอนุมัติขั้นสุดท้ายจึงจบกระบวนการทันที
-            $document->update(['status' => 'COMPLETED']);
+            if ($reviewed->source_type === 'system') {
+                // หนังสือที่จัดทำในระบบต้องรอสารบรรณลงเลขหลังผู้ลงนามอนุมัติแล้ว
+                $document->update(['number_status' => 'UNASSIGNED', 'finalized_at' => null]);
+            } else {
+                // PDF ที่จัดทำแล้วมีเลขอยู่ในต้นฉบับ จบงานได้หลังผู้ลงนามยืนยันตัวตน
+                $document->update(['status' => 'COMPLETED', 'number_status' => 'CONFIRMED', 'finalized_at' => now()]);
+            }
         } elseif ($reviewed->doc_type === 'incoming' && $assignmentChoice !== null) {
             $proposal = $document->assignments()->where('status', 'PROPOSED')->latest('id')->first();
             if ($reviewed->status === 'APPROVED') {
@@ -204,7 +226,7 @@ class DocumentWriteService
         $document->delete();
     }
 
-    public function allocateNumber(Document $document, int $actorId, int $runningNumber, string $formatted): Document
+    public function allocateNumber(Document $document, int $actorId, int $runningNumber, string $formatted, bool $confirm = true): Document
     {
         $this->guard->ensureEnabled();
         $numbered = $this->numbering->allocate(
@@ -214,7 +236,15 @@ class DocumentWriteService
             $formatted,
             $this->scope($document->doc_type, (int) $document->created_by)
         );
-        if ($numbered->status === 'APPROVED') { $numbered->update(['status' => 'COMPLETED']); }
+        $numberingData = [
+            'number_status' => $confirm ? 'CONFIRMED' : 'RESERVED',
+            'finalized_at' => $confirm ? now() : null,
+        ];
+        if ($confirm && $numbered->doc_type === 'outgoing' && $numbered->source_type === 'system') {
+            $numberingData['document_date'] = now()->toDateString();
+        }
+        $numbered->update($numberingData);
+        if ($confirm && $numbered->status === 'APPROVED') { $numbered->update(['status' => 'COMPLETED']); }
         return $numbered->fresh();
     }
 
@@ -298,6 +328,12 @@ class DocumentWriteService
             'document_date' => $data['doc_date'] ?? null,
             'receive_date' => $data['receive_date'] ?? null,
             'title' => $data['title'], 'content' => $data['content'] ?? null,
+            'source_type' => $data['document_source'] ?? $data['source_type'] ?? 'upload',
+            'sender_address' => $data['sender_address'] ?? null,
+            'closing_text' => $data['closing_text'] ?? null,
+            'contact_line' => $data['contact_line'] ?? null,
+            'attachment_description' => $data['attachment'] ?? $data['attachment_description'] ?? null,
+            'number_status' => ! empty($data['doc_number']) ? 'RESERVED' : 'UNASSIGNED',
             'sender_name' => $data['doc_from'] ?? null, 'recipient_name' => $data['doc_to'] ?? null,
             'signer_name' => $data['signer_name'] ?? null, 'reference_text' => $data['reference_doc'] ?? null,
             'remark' => $data['remark'] ?? null,
@@ -310,7 +346,7 @@ class DocumentWriteService
         return $columns;
     }
 
-    private function createWorkflow(Document $document, int $actorId, array $routeUserIds): void
+    private function createWorkflow(Document $document, int $actorId, array $routeUserIds, ?int $signerId = null): void
     {
         $definition = WorkflowDefinition::firstOrCreate(
             ['code' => 'DOCUMENT_DYNAMIC', 'version' => 1],
@@ -321,13 +357,81 @@ class DocumentWriteService
             'status' => 'PENDING', 'current_step' => 1, 'started_at' => now(),
         ]);
         foreach (array_merge([$actorId], $routeUserIds) as $index => $userId) {
+            $isSigner = $document->doc_type === 'outgoing' && $signerId && (int) $userId === $signerId;
             WorkflowStep::create([
                 'workflow_instance_id' => $instance->id, 'step_order' => $index + 1,
-                'step_name' => $index === 0 ? 'Document creator' : 'Document reviewer '.($index + 1),
-                'action_type' => $index === 0 ? 'SUBMIT' : 'APPROVAL',
+                'step_name' => $index === 0 ? 'Document creator' : ($isSigner ? 'Document signer' : 'Document reviewer '.($index + 1)),
+                'action_type' => $index === 0 ? 'SUBMIT' : ($isSigner ? 'SIGNATURE' : 'APPROVAL'),
                 'assigned_user_id' => $userId, 'status' => 'PENDING',
             ]);
         }
+    }
+
+    private function signerIdFromName(string $signerName): ?int
+    {
+        $name = trim((string) (preg_split('/\s*[—–]\s*/u', $signerName, 2)[0] ?? ''));
+
+        return $name === '' ? null : LegacyUser::where('name', $name)->value('id');
+    }
+
+    private function syncOutgoingSignerStep(WorkflowInstance $workflow, int $signerId, ?int $previousSignerId): void
+    {
+        $reviewerIds = $workflow->steps()->where('step_order', '>', 1)->orderBy('step_order')->get()
+            ->reject(fn (WorkflowStep $step) => $step->action_type === 'SIGNATURE'
+                || (int) $step->assigned_user_id === $signerId
+                || ($previousSignerId && (int) $step->assigned_user_id === $previousSignerId))
+            ->pluck('assigned_user_id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        $workflow->steps()->where('step_order', '>', 1)->delete();
+        foreach ([...$reviewerIds->all(), $signerId] as $index => $userId) {
+            $isSigner = (int) $userId === $signerId;
+            WorkflowStep::create([
+                'workflow_instance_id' => $workflow->id,
+                'step_order' => $index + 2,
+                'step_name' => $isSigner ? 'Document signer' : 'Document reviewer '.($index + 2),
+                'action_type' => $isSigner ? 'SIGNATURE' : 'APPROVAL',
+                'assigned_user_id' => $userId,
+                'status' => 'PENDING',
+            ]);
+        }
+    }
+
+    /** ทำให้เอกสาร V2 เก่าก็จบที่ผู้ลงนามที่เลือก และจำแนกขั้นลงนามออกจากขั้นพิจารณา */
+    private function ensureOutgoingSignerStep(Document $document): void
+    {
+        if ($document->doc_type !== 'outgoing') {
+            return;
+        }
+
+        DB::connection('mysql_v2')->transaction(function () use ($document) {
+            $workflow = WorkflowInstance::where('document_id', $document->id)->lockForUpdate()->firstOrFail();
+            // steps() มี orderBy(step_order) เริ่มต้น จึงต้อง reorder ก่อนหาแถวสุดท้ายจริง
+            $lastStep = $workflow->steps()->reorder()->orderByDesc('step_order')->lockForUpdate()->first();
+            // ข้อมูล V2 รุ่นเก่าอาจมีเพียงชื่อข้อความ ให้คงผู้รับขั้นสุดท้ายเดิมไว้เป็นผู้ลงนาม
+            $signerId = $this->signerIdFromName((string) $document->signer_name)
+                ?: (int) $lastStep?->assigned_user_id;
+            if (! $signerId) {
+                throw ValidationException::withMessages([
+                    'signer_name' => 'ไม่พบบัญชีผู้ลงนาม กรุณาแก้ไขและเลือกผู้ลงนามใหม่ก่อนส่งเรื่อง',
+                ]);
+            }
+
+            if ($lastStep && (int) $lastStep->assigned_user_id === $signerId) {
+                $lastStep->update(['step_name' => 'Document signer', 'action_type' => 'SIGNATURE']);
+                return;
+            }
+
+            WorkflowStep::create([
+                'workflow_instance_id' => $workflow->id,
+                'step_order' => ((int) $lastStep?->step_order) + 1,
+                'step_name' => 'Document signer',
+                'action_type' => 'SIGNATURE',
+                'assigned_user_id' => $signerId,
+                'status' => 'PENDING',
+            ]);
+        }, 3);
     }
 
     private function storeFile(Document $document, UploadedFile $file, string $type, string $folder, int $actorId): void

@@ -22,6 +22,7 @@ class DocumentExtractionQueueTest extends TestCase
     {
         Storage::fake('local');
         Queue::fake();
+        /** @var User $user */
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)->postJson(route('documents.auto_extract'), [
@@ -41,7 +42,9 @@ class DocumentExtractionQueueTest extends TestCase
 
     public function test_only_task_owner_can_read_extraction_status(): void
     {
+        /** @var User $owner */
         $owner = User::factory()->create();
+        /** @var User $other */
         $other = User::factory()->create();
         $task = DocumentExtractionTask::create([
             'user_id' => $owner->id,
@@ -109,6 +112,7 @@ class DocumentExtractionQueueTest extends TestCase
 
     private function makeTaskWithStoredFile(): DocumentExtractionTask
     {
+        /** @var User $user */
         $user = User::factory()->create();
         $path = 'document_extractions/test.pdf';
         Storage::disk('local')->put($path, '%PDF test');

@@ -25,7 +25,9 @@ class AiDraftTest extends TestCase
             ]),
         ]);
 
-        $response = $this->actingAs(User::factory()->create())
+        /** @var User $user */
+        $user = User::factory()->create();
+        $response = $this->actingAs($user)
             ->postJson(route('ai.generate_draft'), ['topic' => 'ทดสอบระบบ']);
 
         $response->assertOk()->assertJson(['draft' => "\t\tข้อความร่างทดสอบ"]);
@@ -40,7 +42,9 @@ class AiDraftTest extends TestCase
         ]);
         Http::preventStrayRequests();
 
-        $this->actingAs(User::factory()->create())
+        /** @var User $user */
+        $user = User::factory()->create();
+        $this->actingAs($user)
             ->postJson(route('ai.generate_draft'), ['topic' => 'ทดสอบระบบ'])
             ->assertStatus(500)
             ->assertJson(['error' => 'ไม่สามารถเชื่อมต่อระบบปัญญาประดิษฐ์ได้']);

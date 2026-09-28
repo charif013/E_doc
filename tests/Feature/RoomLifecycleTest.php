@@ -17,6 +17,7 @@ class RoomLifecycleTest extends TestCase
     public function test_admin_soft_deletes_room_but_preserves_booking_history_and_audit(): void
     {
         Role::create(['name' => 'super-admin']);
+        /** @var User $admin */
         $admin = User::factory()->create();
         $admin->assignRole('super-admin');
         $room = Room::create(['name' => 'ห้องเดิม', 'status' => 'active']);
@@ -28,13 +29,15 @@ class RoomLifecycleTest extends TestCase
         $this->actingAs($admin)->delete(route('admin.rooms.destroy', $room))->assertSessionHas('success');
 
         $this->assertSoftDeleted('rooms', ['id' => $room->id]);
-        $this->assertSame('ห้องเดิม', $booking->fresh()->room->name);
+        $this->assertSame('ห้องเดิม', $booking->refresh()->room->name);
         $this->assertTrue(AuditLog::where('auditable_type', Room::class)->where('event', 'deleted')->exists());
     }
 
     public function test_invitee_pair_is_unique(): void
     {
+        /** @var User $creator */
         $creator = User::factory()->create();
+        /** @var User $invitee */
         $invitee = User::factory()->create();
         $room = Room::create(['name' => 'ห้องหนึ่ง', 'status' => 'active']);
         $booking = RoomBooking::create([

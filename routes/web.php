@@ -14,6 +14,8 @@ use App\Http\Controllers\DocumentAccessController;
 use App\Http\Controllers\DocumentNumberingController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\LineWebhookController;
+use App\Http\Controllers\DocumentRoutePresetController;
+use App\Http\Controllers\OutgoingDeliveryController;
 use App\Http\Controllers\V2\SystemHealthController as V2SystemHealthController;
 
 // =============================================================================
@@ -81,6 +83,10 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/history',               [LeaveRequestController::class, 'index'])->name('index');
         Route::get('/create',                [LeaveRequestController::class, 'create'])->name('create');
         Route::post('/',                     [LeaveRequestController::class, 'store'])->name('store');
+        Route::get('/{id}/draft',            [LeaveRequestController::class, 'draft'])->whereNumber('id')->name('draft');
+        Route::post('/{id}/draft/submit',    [LeaveRequestController::class, 'submitDraft'])->whereNumber('id')->name('draft.submit');
+        Route::get('/{id}/attachments/{attachment}', [LeaveRequestController::class, 'downloadAttachment'])
+            ->whereNumber(['id', 'attachment'])->name('attachments.download');
         Route::put('/{id}/cancel',           [LeaveRequestController::class, 'cancel'])->name('cancel');
         Route::post('/{id}/delegate-action', [LeaveRequestController::class, 'delegateAction'])->name('delegateAction');
         Route::post('/{id}/reassign-delegate', [LeaveRequestController::class, 'reassignDelegate'])->name('reassign_delegate');
@@ -129,6 +135,8 @@ Route::middleware(['auth'])->group(function () {
         Route::middleware([
             'role:super-admin|executive|palad|deputy-palad|head|saraban|officer|finance|parcel|hr|analyst|engineer|education|health|disaster|auditor|teacher'
         ])->group(function () {
+            Route::post('/route-presets', [DocumentRoutePresetController::class, 'store'])->name('route_presets.store');
+            Route::delete('/route-presets/{preset}', [DocumentRoutePresetController::class, 'destroy'])->name('route_presets.destroy');
             Route::get('/create',          [DocumentController::class, 'create'])->middleware('edoc.legacy-document-write')->name('create');
             Route::get('/create-incoming', [DocumentController::class, 'createIncoming'])->middleware('edoc.legacy-document-write')->name('create_incoming');
             Route::get('/create-upload',   [DocumentController::class, 'createUpload'])->middleware('edoc.legacy-document-write')->name('create_upload');
@@ -159,6 +167,12 @@ Route::middleware(['auth'])->group(function () {
         // Controller จะตรวจอีกชั้นว่าต้องเป็นคิวปัจจุบันของผู้ใช้นั้นจริง
         Route::get('/approve-list', [DocumentController::class, 'approveList'])->name('approve_list');
         Route::post('/{id}/review', [DocumentController::class, 'reviewDocument'])->middleware('edoc.legacy-document-write')->name('review');
+        Route::post('/{id}/deliveries', [OutgoingDeliveryController::class, 'store'])
+            ->middleware('edoc.legacy-document-write')->name('deliveries.store');
+        Route::patch('/{id}/deliveries/{delivery}', [OutgoingDeliveryController::class, 'update'])
+            ->middleware('edoc.legacy-document-write')->name('deliveries.update');
+        Route::get('/{id}/deliveries/{delivery}/evidence', [OutgoingDeliveryController::class, 'evidence'])
+            ->name('deliveries.evidence');
 
         // 🌟 ระบบรับทราบคำสั่ง (สำหรับ ผอ.กอง)
         Route::post('/{id}/acknowledge', [DocumentController::class, 'acknowledge'])->middleware('edoc.legacy-document-write')->name('acknowledge');
@@ -181,6 +195,9 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/{id}/file/{kind}',   [DocumentController::class, 'file'])
             ->whereIn('kind', ['main', 'signed', 'external'])
             ->name('file');
+        Route::get('/{id}/revisions/{version}/file', [DocumentController::class, 'revisionFile'])
+            ->whereNumber('version')
+            ->name('revision_file');
         Route::get('/{id}/routing-slip', [DocumentController::class, 'routingSlip'])->name('routing_slip');
         
         // 🌟 ฟังก์ชันจัดการเอกสารลับ (ตัด /documents และ name(documents.) ออกเพราะอยู่ใน Group แล้ว)
@@ -190,7 +207,7 @@ Route::middleware(['auth'])->group(function () {
     });
 
     // =========================================================================
-    // โซนพิจารณาใบลา (5 ด่านตามระเบียบ อบต.)
+    // โซนพิจารณาใบลา (หัวหน้าต้นสังกัด → งานบุคคล → ปลัด → นายก)
     // =========================================================================
     Route::middleware([
         'role:super-admin|executive|palad|deputy-palad|head|hr|saraban|officer'

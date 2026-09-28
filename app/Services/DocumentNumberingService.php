@@ -35,12 +35,22 @@ class DocumentNumberingService
                         $query->whereHas('creator', fn ($users) => $users->where('department', $scope));
                     })
                     ->lockForUpdate()
-                    ->exists();
+                    ->first();
 
                 if ($historicalConflict) {
-                    throw ValidationException::withMessages([
-                        'doc_number' => 'เลขเอกสารนี้ถูกใช้งานแล้ว กรุณาเลือกเลขใหม่',
-                    ]);
+                    $isReservedPlaceholder = $historicalConflict->status === 'RESERVED'
+                        && $historicalConflict->number_status === 'RESERVED'
+                        && $historicalConflict->title === '[จองเลขเอกสารล่วงหน้า]';
+
+                    if (! $isReservedPlaceholder) {
+                        throw ValidationException::withMessages([
+                            'doc_number' => 'เลขเอกสารนี้ถูกใช้งานแล้ว กรุณาเลือกเลขใหม่',
+                        ]);
+                    }
+
+                    // โอนเลขจากแถวจองชั่วคราวมาให้เอกสารจริง โดยคง running number เดิมในสมุดเลข
+                    DocumentNumberAllocation::where('document_id', $historicalConflict->id)->delete();
+                    $historicalConflict->delete();
                 }
 
                 DocumentNumberAllocation::where('document_id', $locked->id)->delete();
@@ -56,6 +66,8 @@ class DocumentNumberingService
 
                 $locked->doc_number = $formattedNumber;
                 $locked->running_number = $runningNumber;
+                $locked->number_status = $status === 'APPROVED' ? 'CONFIRMED' : 'RESERVED';
+                $locked->finalized_at = $status === 'APPROVED' ? now() : null;
                 if ($status !== null) {
                     $locked->status = $status;
                 }

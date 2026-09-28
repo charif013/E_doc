@@ -49,10 +49,7 @@
             </div>
         @endif
 
-        <div class="mb-3">
-            <label class="form-label fw-bold text-dark">ความเห็นผู้พิจารณา (แสดงบนเอกสาร)</label>
-            <textarea name="comment" class="form-control" rows="2" placeholder="ระบุความเห็น หรือ เหตุผลที่ส่งคืน (ถ้ามี)..."></textarea>
-        </div>
+        @include('documents.partials.required_comment', ['id' => 'comment_internal', 'label' => 'ความเห็นผู้พิจารณา (แสดงบนเอกสาร)'])
 
         <div class="row align-items-end mt-2">
             <div class="col-md-5 mb-2">

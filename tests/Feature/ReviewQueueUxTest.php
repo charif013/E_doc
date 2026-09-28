@@ -52,10 +52,98 @@ class ReviewQueueUxTest extends TestCase
 
         $this->actingAs($head)->get(route('leaves.approve_list'))
             ->assertOk()
-            ->assertSee('ใบลาที่ต้องดำเนินการ')
+            ->assertSee('ใบลาที่ต้องติดตามหรือดำเนินการ')
             ->assertSee($officer->name)
             ->assertSee('รอหัวหน้าส่วนราชการ')
             ->assertSee(route('leaves.show', $leave->id), false);
+    }
+
+    public function test_hr_can_track_every_submitted_leave_but_can_act_only_at_hr_stage(): void
+    {
+        Role::create(['name' => 'hr']);
+        Role::create(['name' => 'officer']);
+        $hr = User::factory()->create()->assignRole('hr');
+        $owner = User::factory()->create()->assignRole('officer');
+
+        $makeLeave = function (string $reason, string $workflowStatus, bool $isDraft = false) use ($owner) {
+            return LeaveRequest::create([
+                'user_id' => $owner->id,
+                'leave_type' => 'ลาป่วย',
+                'start_date' => now()->addDay()->toDateString(),
+                'end_date' => now()->addDay()->toDateString(),
+                'total_days' => 1,
+                'reason' => $reason,
+                'status' => $isDraft ? 'DRAFT' : 'PENDING',
+                'workflow_status' => $isDraft ? 'draft' : $workflowStatus,
+                'is_draft' => $isDraft,
+            ]);
+        };
+
+        $waitingHead = $makeLeave('รายการรอหัวหน้า', 'pending_head');
+        $waitingHr = $makeLeave('รายการรอบุคคล', 'pending_inspector');
+        $waitingPalad = $makeLeave('รายการรอปลัด', 'pending_palad');
+        $draft = $makeLeave('รายการฉบับร่างส่วนตัว', 'draft', true);
+
+        $response = $this->actingAs($hr)->get(route('leaves.approve_list'));
+        $response->assertOk()
+            ->assertSee('ความคืบหน้าการอนุมัติใบลา')
+            ->assertSee(route('leaves.show', $waitingHead), false)
+            ->assertSee(route('leaves.show', $waitingHr), false)
+            ->assertSee(route('leaves.show', $waitingPalad), false)
+            ->assertSee('รอหัวหน้าส่วนราชการ')
+            ->assertSee('รอบุคคลตรวจสิทธิ์')
+            ->assertSee('รอปลัด อบต.')
+            ->assertDontSee(route('leaves.show', $draft), false);
+
+        $this->assertFalse($hr->can('review', $waitingHead));
+        $this->assertTrue($hr->can('review', $waitingHr));
+        $this->assertFalse($hr->can('review', $waitingPalad));
+        $this->assertTrue($hr->can('view', $waitingHead));
+        $this->assertFalse($hr->can('view', $draft));
+        $this->actingAs($hr)->get(route('leaves.show', $waitingPalad))->assertOk();
+    }
+
+    public function test_owner_history_contains_only_approved_and_canceled_leaves(): void
+    {
+        Role::create(['name' => 'officer']);
+        $owner = User::factory()->create()->assignRole('officer');
+        $makeLeave = function (string $status, string $workflowStatus, bool $isDraft = false) use ($owner) {
+            return LeaveRequest::create([
+                'user_id' => $owner->id,
+                'leave_type' => 'ลากิจส่วนตัว',
+                'start_date' => now()->addDay()->toDateString(),
+                'end_date' => now()->addDay()->toDateString(),
+                'total_days' => 1,
+                'reason' => "ทดสอบ {$workflowStatus}",
+                'status' => $status,
+                'workflow_status' => $workflowStatus,
+                'is_draft' => $isDraft,
+            ]);
+        };
+
+        $approved = $makeLeave('APPROVED', 'approved');
+        $canceled = $makeLeave('CANCELED', 'canceled');
+        $pending = $makeLeave('PENDING', 'pending_head');
+        $rejected = $makeLeave('REJECTED', 'rejected');
+        $draft = $makeLeave('DRAFT', 'draft', true);
+
+        $history = $this->actingAs($owner)->get(route('leaves.index'));
+        $history->assertOk()
+            ->assertSee('อนุมัติแล้ว')
+            ->assertSee('ยกเลิกแล้ว')
+            ->assertDontSee('กำลังดำเนินการ')
+            ->assertDontSee('ไม่อนุมัติ')
+            ->assertDontSee('ฉบับร่าง');
+
+        $progress = $this->actingAs($owner)->get(route('leaves.approve_list'));
+        $progress->assertOk()
+            ->assertSee(route('leaves.show', $pending), false)
+            ->assertSee(route('leaves.show', $rejected), false)
+            ->assertSee(route('leaves.show', $draft), false)
+            ->assertDontSee(route('leaves.show', $approved), false)
+            ->assertDontSee(route('leaves.show', $canceled), false)
+            ->assertSee('ดูความคืบหน้า')
+            ->assertSee('ตรวจฉบับร่าง');
     }
 
     public function test_document_changes_to_waiting_approval_when_final_signer_queue_is_reached(): void
@@ -94,11 +182,17 @@ class ReviewQueueUxTest extends TestCase
             'current_step' => 2,
         ]);
 
+        $this->actingAs($firstReviewer)->from(route('documents.show', $document->uuid))
+            ->post(route('documents.review', $document->uuid), [
+                'pin' => '123456',
+                'is_approved' => '1',
+            ])->assertSessionHasErrors('comment');
+
         $this->actingAs($firstReviewer)->post(route('documents.review', $document->uuid), [
             'pin' => '123456',
             'is_approved' => '1',
             'comment' => 'เห็นชอบ',
-        ])->assertRedirect();
+        ])->assertRedirect(route('documents.approve_list'));
         $this->assertDatabaseHas('documents', [
             'id' => $document->id,
             'status' => 'WAITING_APPROVER',
@@ -160,6 +254,7 @@ class ReviewQueueUxTest extends TestCase
             ->post(route('documents.review', $document->uuid), [
                 'pin' => '123456',
                 'is_approved' => '1',
+                'comment' => 'รับทราบ',
             ])->assertSessionHasErrors('assignment_choice');
 
         $this->assertDatabaseHas('documents', [
@@ -173,7 +268,7 @@ class ReviewQueueUxTest extends TestCase
             'is_approved' => '1',
             'assignment_choice' => 'กองช่าง',
             'comment' => 'เสนอให้กองช่างดำเนินการ',
-        ])->assertRedirect();
+        ])->assertRedirect(route('documents.approve_list'));
 
         $this->assertDatabaseHas('documents', [
             'id' => $document->id,
@@ -198,7 +293,7 @@ class ReviewQueueUxTest extends TestCase
             'is_approved' => '1',
             'assignment_choice' => 'กองช่าง',
             'comment' => 'อนุมัติ',
-        ])->assertRedirect();
+        ])->assertRedirect(route('documents.approve_list'));
 
         $this->assertDatabaseHas('documents', [
             'id' => $document->id,

@@ -42,6 +42,7 @@ class V2SchemaAndServicesTest extends TestCase
             'organization_units', 'users', 'user_signatures', 'documents', 'document_files',
             'leave_requests', 'workflow_instances', 'workflow_steps', 'workflow_action_evidence',
             'number_sequences', 'number_allocations', 'rooms', 'room_bookings', 'audit_logs',
+            'document_route_presets', 'outgoing_deliveries',
         ] as $table) {
             $this->assertTrue($schema->hasTable($table), "Missing V2 table: {$table}");
         }
@@ -296,14 +297,14 @@ class V2SchemaAndServicesTest extends TestCase
         $this->assertDatabaseCount('workflow_steps', 2, 'mysql_v2');
 
         $service->submit($document, User::findOrFail(1));
-        $this->assertSame('IN_REVIEW', $document->fresh()->status);
-        $service->review($document->fresh(), User::findOrFail(2), true, 'Approved', null);
-        $this->assertSame('APPROVED', $document->fresh()->status);
+        $this->assertSame('IN_REVIEW', $document->refresh()->status);
+        $service->review($document->refresh(), User::findOrFail(2), true, 'Approved', null);
+        $this->assertSame('APPROVED', $document->refresh()->status);
         $this->assertDatabaseHas('workflow_action_evidence', ['actor_id' => 1, 'action' => 'CREATED'], 'mysql_v2');
         $this->assertDatabaseHas('workflow_action_evidence', ['actor_id' => 2, 'action' => 'APPROVED'], 'mysql_v2');
 
-        $service->allocateNumber($document->fresh(), 1, 25, 'ยล 77301/25');
-        $this->assertSame('COMPLETED', $document->fresh()->status);
+        $service->allocateNumber($document->refresh(), 1, 25, 'ยล 77301/25');
+        $this->assertSame('COMPLETED', $document->refresh()->status);
         $this->assertDatabaseHas('number_allocations', [
             'document_id' => $document->id, 'running_number' => 25, 'formatted_number' => 'ยล 77301/25',
         ], 'mysql_v2');
@@ -320,14 +321,16 @@ class V2SchemaAndServicesTest extends TestCase
 
         $document = app(DocumentWriteService::class)->create([
             'doc_type' => 'outgoing',
+            'source_type' => 'upload',
             'doc_number' => 'ยล 77301/7',
             'running_number' => 7,
             'doc_date' => '2026-09-05',
             'title' => 'Outgoing numbered document',
             'doc_to' => 'หน่วยงานปลายทาง',
+            'signer_user_id' => 2,
         ], [2], 1);
 
-        $this->assertSame('ยล 77301/7', $document->fresh()->document_number);
+        $this->assertSame('ยล 77301/7', $document->refresh()->document_number);
         $this->assertDatabaseHas('number_allocations', [
             'document_id' => $document->id,
             'running_number' => 7,
@@ -335,10 +338,99 @@ class V2SchemaAndServicesTest extends TestCase
         ], 'mysql_v2');
 
         $service = app(DocumentWriteService::class);
-        $service->submit($document->fresh(), User::findOrFail(1));
-        $service->review($document->fresh(), User::findOrFail(2), true, 'อนุมัติ', null);
+        $service->submit($document->refresh(), User::findOrFail(1));
+        $this->assertDatabaseCount('workflow_steps', 2, 'mysql_v2');
+        $this->assertDatabaseHas('workflow_steps', [
+            'workflow_instance_id' => $document->workflow()->value('id'),
+            'step_order' => 2,
+            'assigned_user_id' => 2,
+            'action_type' => 'SIGNATURE',
+        ], 'mysql_v2');
+        $service->review(
+            $document->refresh(),
+            User::findOrFail(2),
+            true,
+            'ยืนยันว่าเป็นผู้ลงนามใน PDF ที่อัปโหลดจริง',
+            null,
+            'SIGNATURE_CONFIRMED'
+        );
 
-        $this->assertSame('COMPLETED', $document->fresh()->status);
+        $this->assertSame('COMPLETED', $document->refresh()->status);
+        $this->assertDatabaseHas('workflow_action_evidence', [
+            'resource_type' => 'DOCUMENT',
+            'resource_id' => $document->id,
+            'actor_id' => 2,
+            'action' => 'SIGNATURE_CONFIRMED',
+        ], 'mysql_v2');
+    }
+
+    public function test_v2_system_outgoing_waits_for_numbering_after_the_signer_approves(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        DB::connection('mysql_v2')->table('document_types')->insert([
+            'code' => 'OUTGOING', 'name' => 'Outgoing', 'direction' => 'OUTGOING',
+            'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $service = app(DocumentWriteService::class);
+        $document = $service->create([
+            'doc_type' => 'outgoing',
+            'document_source' => 'system',
+            'doc_date' => '2026-09-28',
+            'title' => 'V2 system outgoing waits for numbering',
+            'content' => 'Test content',
+            'doc_to' => 'Destination',
+            'signer_user_id' => 2,
+        ], [2], 1);
+
+        $service->submit($document, User::findOrFail(1));
+        $service->review($document->fresh(), User::findOrFail(2), true, 'Signed', null);
+
+        $document->refresh();
+        $this->assertSame('APPROVED', $document->status);
+        $this->assertSame('UNASSIGNED', $document->number_status);
+        $this->assertNull($document->document_number);
+        $this->assertNull($document->finalized_at);
+
+        $service->allocateNumber($document, 1, 77, 'ยล ๗๗๓๐๑/๗๗');
+        $document->refresh();
+        $this->assertSame('COMPLETED', $document->status);
+        $this->assertSame('CONFIRMED', $document->number_status);
+        $this->assertSame('ยล ๗๗๓๐๑/๗๗', $document->document_number);
+        $this->assertNotNull($document->finalized_at);
+    }
+
+    public function test_v2_real_document_claims_an_existing_reserved_ledger_slot(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        DB::connection('mysql_v2')->table('document_types')->insert([
+            'code' => 'OUTGOING', 'name' => 'Outgoing', 'direction' => 'OUTGOING',
+            'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $service = app(DocumentWriteService::class);
+        $placeholder = $service->reserveSlot('outgoing', 1, 101, 'ยล ๗๗๓๐๑/๑๐๑');
+        $document = $service->create([
+            'doc_type' => 'outgoing',
+            'source_type' => 'upload',
+            'doc_number' => 'ยล ๗๗๓๐๑/๑๐๑',
+            'running_number' => 101,
+            'doc_date' => '2026-09-28',
+            'title' => 'Uploaded document using reservation 101',
+            'doc_to' => 'Destination',
+            'signer_user_id' => 2,
+        ], [2], 1);
+
+        $this->assertNotNull(Document::withTrashed()->findOrFail($placeholder->id)->deleted_at);
+        $this->assertDatabaseHas('number_allocations', [
+            'running_number' => 101,
+            'formatted_number' => 'ยล ๗๗๓๐๑/๑๐๑',
+            'document_id' => $document->id,
+        ], 'mysql_v2');
+        $this->assertSame(1, DB::connection('mysql_v2')->table('number_allocations')
+            ->where('running_number', 101)->count());
     }
 
     public function test_future_reviewer_cannot_view_document_until_current_step_reaches_them(): void
@@ -358,6 +450,7 @@ class V2SchemaAndServicesTest extends TestCase
         ], [2, 3], 1);
         $service->submit($document, User::findOrFail(1));
 
+        /** @var LegacyUser&MockInterface $futureReviewer */
         $futureReviewer = Mockery::mock(LegacyUser::class)->makePartial();
         $futureReviewer->forceFill(['id' => 3]);
         $futureReviewer->shouldReceive('hasRole')->with('super-admin')->andReturn(false);
@@ -365,12 +458,12 @@ class V2SchemaAndServicesTest extends TestCase
         $futureReviewer->shouldReceive('hasRole')->with('head')->andReturn(false);
         $policy = app(DocumentPolicy::class);
 
-        $this->assertFalse($policy->view($futureReviewer, $document->fresh()));
+        $this->assertFalse($policy->view($futureReviewer, $document->refresh()));
         $this->assertCount(0, app(DashboardDocumentService::class)->data($futureReviewer)['recentDocs']);
 
-        $service->review($document->fresh(), User::findOrFail(2), true, 'ผ่าน', null);
+        $service->review($document->refresh(), User::findOrFail(2), true, 'ผ่าน', null);
 
-        $this->assertTrue($policy->view($futureReviewer, $document->fresh()));
+        $this->assertTrue($policy->view($futureReviewer, $document->refresh()));
         $this->assertCount(1, app(DashboardDocumentService::class)->data($futureReviewer)['recentDocs']);
     }
 
@@ -396,11 +489,11 @@ class V2SchemaAndServicesTest extends TestCase
             'doc_type' => 'internal', 'title' => 'Reject me', 'doc_date' => '2026-09-02', 'content' => 'Draft',
         ], [2], 1);
         $service->submit($document, User::findOrFail(1));
-        $service->review($document->fresh(), User::findOrFail(2), false, 'Needs correction', null);
-        $this->assertSame('REJECTED', $document->fresh()->status);
-        $this->assertSame('Needs correction', $document->fresh()->rejection_reason);
+        $service->review($document->refresh(), User::findOrFail(2), false, 'Needs correction', null);
+        $this->assertSame('REJECTED', $document->refresh()->status);
+        $this->assertSame('Needs correction', $document->refresh()->rejection_reason);
 
-        $updated = $service->update($document->fresh(), [
+        $updated = $service->update($document->refresh(), [
             'title' => 'Corrected', 'doc_date' => '2026-09-02', 'content' => 'Corrected content',
         ], 1);
         $this->assertSame('DRAFT', $updated->status);
@@ -469,7 +562,7 @@ class V2SchemaAndServicesTest extends TestCase
             'receive_number' => 'รับ 1', 'content' => 'Details',
         ], [2, 3], 1);
         $service->submit($document, User::findOrFail(1));
-        $service->review($document->fresh(), User::findOrFail(2), true, 'เสนอให้กองช่าง', 'กองช่าง');
+        $service->review($document->refresh(), User::findOrFail(2), true, 'เสนอให้กองช่าง', 'กองช่าง');
 
         $this->assertDatabaseHas('document_assignments', [
             'document_id' => $document->id,
@@ -484,9 +577,9 @@ class V2SchemaAndServicesTest extends TestCase
         $head->shouldReceive('hasRole')->with('head')->andReturn(true);
         $this->assertCount(0, app(\App\Services\V2\DocumentReadService::class)->assignedDocuments($head));
 
-        $service->review($document->fresh(), User::findOrFail(3), true, 'อนุมัติ', 'กองช่าง');
+        $service->review($document->refresh(), User::findOrFail(3), true, 'อนุมัติ', 'กองช่าง');
 
-        $this->assertSame('APPROVED', $document->fresh()->status);
+        $this->assertSame('APPROVED', $document->refresh()->status);
         $this->assertDatabaseHas('document_assignments', [
             'document_id' => $document->id,
             'assigned_unit_id' => $unitId,

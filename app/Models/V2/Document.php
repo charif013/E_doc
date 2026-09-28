@@ -17,6 +17,7 @@ class Document extends V2Model
     protected $casts = [
         'document_date' => 'date',
         'receive_date' => 'date',
+        'finalized_at' => 'datetime',
     ];
 
     public function type(): BelongsTo { return $this->belongsTo(DocumentType::class, 'document_type_id'); }
@@ -25,6 +26,8 @@ class Document extends V2Model
     public function confidentiality(): BelongsTo { return $this->belongsTo(DocumentConfidentiality::class, 'confidentiality_id'); }
     public function creator(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
     public function files(): HasMany { return $this->hasMany(DocumentFile::class); }
+    public function revisions(): HasMany { return $this->hasMany(DocumentRevision::class)->orderByDesc('version_no'); }
+    public function deliveries(): HasMany { return $this->hasMany(OutgoingDelivery::class)->latest('sent_at')->latest('id'); }
     public function assignments(): HasMany { return $this->hasMany(DocumentAssignment::class); }
     public function accessRequests(): HasMany { return $this->hasMany(DocumentAccessRequest::class); }
     public function workflow(): HasOne { return $this->hasOne(WorkflowInstance::class); }

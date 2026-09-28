@@ -20,7 +20,9 @@ class LineIntegrationTest extends TestCase
             'services.line.redirect_uri' => 'https://edoc.example/line/callback',
         ]);
 
-        $response = $this->actingAs(User::factory()->create())->get(route('line.login'));
+        /** @var User $user */
+        $user = User::factory()->create();
+        $response = $this->actingAs($user)->get(route('line.login'));
 
         $response->assertRedirectContains('https://access.line.me/oauth2/v2.1/authorize?');
         $location = $response->headers->get('Location');
@@ -44,6 +46,7 @@ class LineIntegrationTest extends TestCase
             'api.line.me/v2/profile' => Http::response(['userId' => $lineId]),
             'api.line.me/friendship/v1/status' => Http::response(['friendFlag' => true]),
         ]);
+        /** @var User $user */
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)
@@ -73,6 +76,7 @@ class LineIntegrationTest extends TestCase
             'api.line.me/friendship/v1/status' => Http::response(['friendFlag' => false]),
             'api.line.me/v2/bot/profile/*' => Http::response([], 404),
         ]);
+        /** @var User $user */
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)
@@ -100,6 +104,7 @@ class LineIntegrationTest extends TestCase
             'api.line.me/friendship/v1/status' => Http::response(['friendFlag' => false]),
             'api.line.me/v2/bot/profile/*' => Http::response(['userId' => $lineId]),
         ]);
+        /** @var User $user */
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)
@@ -119,6 +124,7 @@ class LineIntegrationTest extends TestCase
         Http::fake([
             'api.line.me/v2/bot/profile/*' => Http::response(['userId' => $lineId]),
         ]);
+        /** @var User $user */
         $user = User::factory()->create([
             'line_id' => $lineId,
             'line_friend_status' => false,
@@ -136,6 +142,7 @@ class LineIntegrationTest extends TestCase
     {
         config(['services.line.messaging_secret' => 'webhook-secret']);
         $lineId = 'U'.str_repeat('c', 32);
+        /** @var User $user */
         $user = User::factory()->create([
             'line_id' => $lineId,
             'line_friend_status' => false,

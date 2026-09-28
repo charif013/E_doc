@@ -9,6 +9,7 @@ use App\Services\LeaveWorkflowService;
 use App\Services\V2\DataLifecycleService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
 use Tests\Concerns\UsesV2Database;
 use Tests\TestCase;
@@ -52,16 +53,19 @@ class V2LeaveWorkflowSynchronizationTest extends TestCase
         $this->assertSame('pending_head', $leave->workflow_status);
         $service->approve($leave, User::findOrFail(2));
         $service->approve($leave->fresh(), User::findOrFail(3));
-        $service->approve($leave->fresh(), User::findOrFail(4), 1);
         $service->approve($leave->fresh(), User::findOrFail(5));
         $service->approve($leave->fresh(), User::findOrFail(6));
 
         $leave = $leave->fresh(['workflow', 'numberAllocation']);
         $this->assertSame('APPROVED', $leave->status);
         $this->assertSame('approved', $leave->workflow_status);
-        $this->assertSame(5, DB::connection('mysql_v2')->table('workflow_action_evidence')
+        $this->assertSame(4, DB::connection('mysql_v2')->table('workflow_action_evidence')
             ->where('resource_type', 'LEAVE')->where('resource_id', $leave->id)->count());
-        $this->assertNotNull($leave->numberAllocation);
+        $this->assertNull($leave->numberAllocation);
+        $this->assertDatabaseMissing('workflow_steps', [
+            'workflow_instance_id' => $leave->workflow->id,
+            'step_order' => 4,
+        ], 'mysql_v2');
         foreach (['leave_type', 'delegate_id', 'workflow_status', 'status', 'head_id', 'head_signature', 'running_number'] as $column) {
             $this->assertFalse(Schema::connection('mysql_v2')->hasColumn('leave_requests', $column));
         }
@@ -82,6 +86,38 @@ class V2LeaveWorkflowSynchronizationTest extends TestCase
         $this->assertDatabaseHas('workflow_action_evidence', [
             'resource_type' => 'LEAVE', 'resource_id' => $leave->id,
             'workflow_step_id' => null, 'workflow_instance_id' => null,
+        ], 'mysql_v2');
+    }
+
+    public function test_canonical_leave_draft_has_no_workflow_until_user_confirms_submission(): void
+    {
+        $user = User::findOrFail(1);
+        $signature = 'data:image/png;base64,'.base64_encode('canonical-applicant-signature');
+        $user->update(['pin' => Hash::make('123456'), 'signature' => $signature]);
+
+        $this->actingAs($user)->post(route('leaves.store'), [
+            'leave_type' => 'ลาพักผ่อน',
+            'start_date' => '2026-09-20',
+            'end_date' => '2026-09-20',
+            'total_days' => 1,
+            'reason' => 'ตรวจฉบับร่าง canonical',
+        ])->assertRedirect();
+
+        $leave = LeaveRequest::firstOrFail();
+        $this->assertTrue($leave->is_draft);
+        $this->assertSame('draft', $leave->workflow_status);
+        $this->assertDatabaseMissing('workflow_instances', ['leave_request_id' => $leave->id], 'mysql_v2');
+
+        $this->actingAs($user)->post(route('leaves.draft.submit', $leave), ['pin' => '123456'])
+            ->assertRedirect(route('leaves.approve_list'));
+
+        $leave->refresh();
+        $this->assertFalse($leave->is_draft);
+        $this->assertSame('pending_head', $leave->workflow_status);
+        $this->assertSame($signature, $leave->applicant_signature);
+        $this->assertDatabaseHas('workflow_instances', [
+            'leave_request_id' => $leave->id,
+            'current_step' => 2,
         ], 'mysql_v2');
     }
 }

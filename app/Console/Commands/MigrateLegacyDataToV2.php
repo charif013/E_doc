@@ -688,7 +688,7 @@ class MigrateLegacyDataToV2 extends Command
     {
         return match (strtolower((string) $status)) {
             'pending_delegate', 'delegate_declined', 'delegate_escalated' => 1,
-            'pending_head' => 2, 'pending_inspector' => 3, 'pending_numbering' => 4,
+            'pending_head' => 2, 'pending_inspector' => 3, 'pending_numbering' => 5,
             'pending_palad' => 5, 'pending_nayok' => 6, default => null,
         };
     }

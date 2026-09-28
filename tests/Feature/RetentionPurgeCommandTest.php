@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\UsesV2Database;
@@ -12,13 +13,16 @@ class RetentionPurgeCommandTest extends TestCase
 {
     use UsesV2Database;
 
+    private FilesystemAdapter $localDisk;
+    private FilesystemAdapter $documentsDisk;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->bootV2Database();
         $this->seedV2User();
-        Storage::fake('local');
-        Storage::fake('documents');
+        $this->localDisk = Storage::fake('local');
+        $this->documentsDisk = Storage::fake('documents');
         CarbonImmutable::setTestNow('2026-09-02 12:00:00');
     }
 
@@ -58,8 +62,8 @@ class RetentionPurgeCommandTest extends TestCase
             ['document_id' => 1, 'file_type' => 'MAIN', 'original_name' => 'expired.pdf', 'file_path' => 'retention/expired.pdf', 'created_at' => now(), 'updated_at' => now()],
             ['document_id' => 2, 'file_type' => 'MAIN', 'original_name' => 'recoverable.pdf', 'file_path' => 'retention/recoverable.pdf', 'created_at' => now(), 'updated_at' => now()],
         ]);
-        Storage::disk('documents')->put('retention/expired.pdf', 'expired');
-        Storage::disk('documents')->put('retention/recoverable.pdf', 'recoverable');
+        $this->documentsDisk->put('retention/expired.pdf', 'expired');
+        $this->documentsDisk->put('retention/recoverable.pdf', 'recoverable');
 
         $definitionId = $db->table('workflow_definitions')->insertGetId([
             'code' => 'RETENTION_TEST', 'name' => 'Retention test', 'resource_type' => 'DOCUMENT',
@@ -81,7 +85,7 @@ class RetentionPurgeCommandTest extends TestCase
             'action' => 'CREATED', 'actor_name' => 'Test',
             'signature_path' => 'retention/evidence.png', 'acted_at' => now(), 'created_at' => now(),
         ]);
-        Storage::disk('local')->put('retention/evidence.png', 'evidence');
+        $this->localDisk->put('retention/evidence.png', 'evidence');
 
         $leaveTypeId = $db->table('leave_types')->insertGetId([
             'code' => 'TEST', 'name' => 'Test leave', 'is_active' => true,
@@ -100,7 +104,7 @@ class RetentionPurgeCommandTest extends TestCase
             ->expectsOutputToContain('Dry run completed')
             ->assertSuccessful();
         $this->assertDatabaseHas('documents', ['id' => 1], 'mysql_v2');
-        Storage::disk('documents')->assertExists('retention/expired.pdf');
+        $this->documentsDisk->assertExists('retention/expired.pdf');
 
         $this->artisan('edoc:purge-retention')->assertSuccessful();
 
@@ -114,8 +118,8 @@ class RetentionPurgeCommandTest extends TestCase
             'resource_type' => 'DOCUMENT', 'resource_id' => 1,
             'workflow_step_id' => null, 'workflow_instance_id' => null,
         ], 'mysql_v2');
-        Storage::disk('documents')->assertMissing('retention/expired.pdf');
-        Storage::disk('local')->assertExists('retention/evidence.png');
-        Storage::disk('documents')->assertExists('retention/recoverable.pdf');
+        $this->documentsDisk->assertMissing('retention/expired.pdf');
+        $this->localDisk->assertExists('retention/evidence.png');
+        $this->documentsDisk->assertExists('retention/recoverable.pdf');
     }
 }

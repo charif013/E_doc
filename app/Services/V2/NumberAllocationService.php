@@ -68,9 +68,26 @@ class NumberAllocationService
                     })
                     ->when($existing, fn ($query) => $query->where('id', '!=', $existing->id))
                     ->lockForUpdate()
-                    ->exists();
+                    ->first();
                 if ($conflict) {
-                    throw ValidationException::withMessages([$errorField => 'เลขนี้ถูกใช้ในชุดเลขเดียวกันแล้ว']);
+                    $reservedPlaceholder = null;
+                    if ($resourceColumn === 'document_id' && $conflict->document_id) {
+                        $reservedPlaceholder = $resource->newQuery()
+                            ->whereKey($conflict->document_id)
+                            ->where('title', '[จองเลขเอกสารล่วงหน้า]')
+                            ->where('number_status', 'RESERVED')
+                            ->where('status', 'REGISTERED')
+                            ->lockForUpdate()
+                            ->first();
+                    }
+
+                    if (! $reservedPlaceholder) {
+                        throw ValidationException::withMessages([$errorField => 'เลขนี้ถูกใช้ในชุดเลขเดียวกันแล้ว']);
+                    }
+
+                    // ใช้ allocation เดิมเป็นช่องเลขเดียวกันในสมุด แล้วผูกใหม่กับเอกสารจริง
+                    $db->table('number_allocations')->where('id', $conflict->id)->delete();
+                    $reservedPlaceholder->delete();
                 }
 
                 $payload = [

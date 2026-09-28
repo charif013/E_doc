@@ -60,4 +60,50 @@ class RegistryUxTest extends TestCase
             ->assertSee('registry-internal-number', false)
             ->assertSee('color: #5b21b6 !important', false);
     }
+
+    public function test_number_ledger_displays_all_document_digits_as_thai_digits(): void
+    {
+        Role::findOrCreate('saraban');
+        $saraban = User::factory()->create()->assignRole('saraban');
+
+        Document::create([
+            'doc_type' => 'outgoing',
+            'doc_number' => 'ยล 77301/7',
+            'running_number' => 7,
+            'title' => 'ทดสอบเอกสารชุด 6',
+            'status' => 'APPROVED',
+            'created_by' => $saraban->id,
+        ]);
+
+        $this->actingAs($saraban)
+            ->get(route('documents.number_ledger', ['type' => 'outgoing']))
+            ->assertOk()
+            ->assertSee('ยล ๗๗๓๐๑/๗')
+            ->assertSee('ทดสอบเอกสารชุด ๖')
+            ->assertSee('>๗</td>', false)
+            ->assertDontSee('ยล 77301/7');
+    }
+
+    public function test_next_number_api_returns_the_same_thai_digit_format_as_the_ledger(): void
+    {
+        Role::findOrCreate('saraban');
+        $saraban = User::factory()->create()->assignRole('saraban');
+
+        Document::create([
+            'doc_type' => 'outgoing',
+            'doc_number' => 'ยล 77301/8',
+            'running_number' => 8,
+            'title' => 'รายการก่อนหน้า',
+            'status' => 'APPROVED',
+            'created_by' => $saraban->id,
+        ]);
+
+        $this->actingAs($saraban)
+            ->getJson(route('documents.api_next_number', ['type' => 'outgoing']))
+            ->assertOk()
+            ->assertJson([
+                'next_number' => 9,
+                'formatted' => 'ยล ๗๗๓๐๑/๙',
+            ]);
+    }
 }

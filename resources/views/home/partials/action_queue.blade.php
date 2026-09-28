@@ -68,7 +68,6 @@
                             'pending_inspector' => 'รอตรวจสอบสิทธิ์',
                             'pending_palad' => 'รอปลัดพิจารณา',
                             'pending_nayok' => 'รอนายกอนุมัติ',
-                            'pending_numbering' => 'รอธุรการลงเลข',
                             default => 'รอพิจารณา',
                         };
                     @endphp

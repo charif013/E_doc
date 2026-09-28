@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Services\ExternalDocumentArchiver;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -12,7 +13,8 @@ class ExternalDocumentArchiverTest extends TestCase
 {
     public function test_it_archives_a_public_document_and_records_integrity_metadata(): void
     {
-        Storage::fake('documents');
+        /** @var FilesystemAdapter $documentsDisk */
+        $documentsDisk = Storage::fake('documents');
         Http::fake([
             'https://93.184.216.34/document.pdf' => Http::response('%PDF-test-content', 200, [
                 'Content-Type' => 'application/pdf',
@@ -23,7 +25,7 @@ class ExternalDocumentArchiverTest extends TestCase
         $result = app(ExternalDocumentArchiver::class)
             ->archive('https://93.184.216.34/document.pdf');
 
-        Storage::disk('documents')->assertExists($result['external_attachment_path']);
+        $documentsDisk->assertExists($result['external_attachment_path']);
         $this->assertSame('document.pdf', $result['external_original_name']);
         $this->assertSame('application/pdf', $result['external_mime_type']);
         $this->assertSame(hash('sha256', '%PDF-test-content'), $result['external_sha256']);

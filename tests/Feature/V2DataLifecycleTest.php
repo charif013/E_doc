@@ -8,6 +8,7 @@ use App\Models\V2\WorkflowActionEvidence;
 use App\Models\V2\WorkflowInstance;
 use App\Models\V2\WorkflowStep;
 use App\Services\V2\DataLifecycleService;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use LogicException;
@@ -18,14 +19,17 @@ class V2DataLifecycleTest extends TestCase
 {
     use UsesV2Database;
 
+    private FilesystemAdapter $localDisk;
+    private FilesystemAdapter $documentsDisk;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->bootV2Database();
         $this->seedV2User();
         $this->seedV2Document();
-        Storage::fake('local');
-        Storage::fake('documents');
+        $this->localDisk = Storage::fake('local');
+        $this->documentsDisk = Storage::fake('documents');
         $this->seedChildren();
     }
 
@@ -47,8 +51,8 @@ class V2DataLifecycleTest extends TestCase
         $this->assertSame(1, WorkflowInstance::count());
         $this->assertSame(1, WorkflowStep::count());
         $this->assertSame(1, WorkflowActionEvidence::count());
-        Storage::disk('documents')->assertExists('documents/main.pdf');
-        Storage::disk('local')->assertExists('documents/evidence.png');
+        $this->documentsDisk->assertExists('documents/main.pdf');
+        $this->localDisk->assertExists('documents/evidence.png');
     }
 
     public function test_force_delete_uses_central_service_and_removes_database_children_and_files(): void
@@ -63,8 +67,8 @@ class V2DataLifecycleTest extends TestCase
         $this->assertDatabaseHas('workflow_action_evidence', [
             'resource_type' => 'DOCUMENT', 'resource_id' => 1, 'workflow_step_id' => null,
         ], 'mysql_v2');
-        Storage::disk('documents')->assertMissing('documents/main.pdf');
-        Storage::disk('local')->assertExists('documents/evidence.png');
+        $this->documentsDisk->assertMissing('documents/main.pdf');
+        $this->localDisk->assertExists('documents/evidence.png');
     }
 
     public function test_workflow_evidence_is_append_only(): void
@@ -82,7 +86,7 @@ class V2DataLifecycleTest extends TestCase
             'document_id' => 1, 'file_type' => 'MAIN', 'original_name' => 'main.pdf',
             'file_path' => 'documents/main.pdf', 'created_at' => now(), 'updated_at' => now(),
         ]);
-        Storage::disk('documents')->put('documents/main.pdf', 'main');
+        $this->documentsDisk->put('documents/main.pdf', 'main');
 
         $definitionId = $db->table('workflow_definitions')->insertGetId([
             'code' => 'LIFECYCLE_TEST', 'name' => 'Lifecycle test', 'resource_type' => 'DOCUMENT',
@@ -104,6 +108,6 @@ class V2DataLifecycleTest extends TestCase
             'action' => 'CREATED', 'actor_name' => 'Tester',
             'signature_path' => 'documents/evidence.png', 'acted_at' => now(), 'created_at' => now(),
         ]);
-        Storage::disk('local')->put('documents/evidence.png', 'evidence');
+        $this->localDisk->put('documents/evidence.png', 'evidence');
     }
 }

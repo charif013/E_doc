@@ -13,7 +13,8 @@ class Document extends Model
     protected $fillable = [
         'running_number',
         // 🌟 ข้อมูลพื้นฐานและสถานะ
-        'doc_type', 
+        'doc_type',
+        'source_type',
         'doc_number', 
         'doc_date', 
         'title', 
@@ -41,6 +42,8 @@ class Document extends Model
 
         // 🌟 ข้อมูลหนังสือส่งออก 
         'doc_to', 'signer_name', 'reference_doc', 'remark',
+        'sender_address', 'closing_text', 'contact_line', 'attachment_description',
+        'number_status', 'finalized_at',
 
         // 🌟 การมอบหมายส่วนราชการ (สำหรับ ปลัด/นายก สั่งการ)
         'assigned_to', 'assigned_user_id', 'delegated_by', 'assignment_status', 'assigned_at',
@@ -106,6 +109,7 @@ class Document extends Model
         'assigned_at' => 'datetime',
         'acknowledged_at' => 'datetime',
         'external_downloaded_at' => 'datetime',
+        'finalized_at' => 'datetime',
     ];
 
     protected static function boot()
@@ -122,6 +126,16 @@ class Document extends Model
     public function routes()
     {
         return $this->hasMany(DocumentRoute::class, 'document_id')->orderBy('step_order', 'asc');
+    }
+
+    public function revisions()
+    {
+        return $this->hasMany(DocumentRevision::class)->orderByDesc('version_no');
+    }
+
+    public function deliveries()
+    {
+        return $this->hasMany(OutgoingDelivery::class)->latest('sent_at')->latest('id');
     }
 
     /** ระบุว่าเอกสารกำลังรอลายเซ็นจากผู้พิจารณาคนสุดท้ายหรือไม่ */

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
+use App\Models\User;
 use Illuminate\Http\Request;
 
 class AuditLogController extends Controller
@@ -23,6 +24,11 @@ class AuditLogController extends Controller
             ->when($filters['to'] ?? null, fn ($query, $to) => $query->whereDate('created_at', '<=', $to))
             ->latest()->paginate(50)->appends($request->query());
 
-        return view('admin.audit_logs.index', compact('logs', 'filters'));
+        $actors = User::withTrashed()
+            ->whereIn('id', AuditLog::query()->whereNotNull('user_id')->distinct()->pluck('user_id'))
+            ->orderBy('name')
+            ->get(['id', 'name', 'email', 'deleted_at']);
+
+        return view('admin.audit_logs.index', compact('logs', 'filters', 'actors'));
     }
 }

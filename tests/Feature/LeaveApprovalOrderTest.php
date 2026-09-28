@@ -6,6 +6,7 @@ use App\Models\LeaveRequest;
 use App\Models\User;
 use App\Services\LeaveWorkflowService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -28,7 +29,6 @@ class LeaveApprovalOrderTest extends TestCase
         $head = User::factory()->create(['department' => 'กองช่าง'])->assignRole('head');
         $otherHead = User::factory()->create(['department' => 'กองคลัง'])->assignRole('head');
         $hr = User::factory()->create(['department' => 'สำนักงานปลัด'])->assignRole('hr');
-        $saraban = User::factory()->create(['department' => 'สำนักงานปลัด'])->assignRole('saraban');
         $palad = User::factory()->create()->assignRole('palad');
         $nayok = User::factory()->create()->assignRole('executive');
 
@@ -53,14 +53,9 @@ class LeaveApprovalOrderTest extends TestCase
 
         $workflow->approve($leave->fresh(), $hr);
         $leave->refresh();
-        $this->assertSame('pending_numbering', $leave->workflow_status);
-        $this->assertNull($leave->numbered_at);
-
-        $workflow->approve($leave, $saraban, 1);
-        $leave->refresh();
         $this->assertSame('pending_palad', $leave->workflow_status);
-        $this->assertSame('ลา/กองช่าง/1/'.(now()->month >= 10 ? now()->year + 544 : now()->year + 543), $leave->leave_number);
-        $this->assertNotNull($leave->numbered_at);
+        $this->assertNull($leave->numbered_at);
+        $this->assertNull($leave->leave_number);
 
         $workflow->approve($leave, $palad);
         $this->assertSame('pending_nayok', $leave->fresh()->workflow_status);
@@ -71,37 +66,70 @@ class LeaveApprovalOrderTest extends TestCase
         $this->assertSame('APPROVED', $leave->status);
     }
 
-    public function test_leave_number_books_are_separate_for_each_department(): void
+    public function test_leave_approval_does_not_allocate_a_document_number(): void
     {
-        $engineeringOwner = User::factory()->create(['department' => 'กองช่าง']);
-        $financeOwner = User::factory()->create(['department' => 'กองคลัง']);
-        $saraban = User::factory()->create(['department' => 'สำนักงานปลัด'])->assignRole('saraban');
+        $owner = User::factory()->create(['department' => 'กองช่าง']);
+        $palad = User::factory()->create()->assignRole('palad');
         $workflow = app(LeaveWorkflowService::class);
 
-        $makeLeave = fn (User $owner) => LeaveRequest::create([
+        $leave = LeaveRequest::create([
             'user_id' => $owner->id,
             'leave_type' => 'ลาพักผ่อน',
             'start_date' => now()->addDay()->toDateString(),
             'end_date' => now()->addDay()->toDateString(),
             'total_days' => 1,
-            'reason' => 'ทดสอบสมุดแยกกอง',
+            'reason' => 'ทดสอบไม่ลงเลขใบลา',
             'contact_info' => '0800000000',
             'status' => 'PENDING',
-            'workflow_status' => 'pending_numbering',
+            'workflow_status' => 'pending_palad',
             'head_status' => 'approved',
             'inspector_status' => 'approved',
         ]);
 
-        $engineeringLeave = $workflow->approve($makeLeave($engineeringOwner), $saraban, 1);
-        $financeLeave = $workflow->approve($makeLeave($financeOwner), $saraban, 1);
+        $workflow->approve($leave, $palad);
+        $leave->refresh();
 
-        $this->assertStringContainsString('ลา/กองช่าง/1/', $engineeringLeave->leave_number);
-        $this->assertStringContainsString('ลา/กองคลัง/1/', $financeLeave->leave_number);
-        $this->assertDatabaseHas('document_number_allocations', [
-            'leave_request_id' => $engineeringLeave->id, 'scope' => 'กองช่าง', 'running_number' => 1,
+        $this->assertSame('pending_nayok', $leave->workflow_status);
+        $this->assertNull($leave->leave_number);
+        $this->assertDatabaseMissing('document_number_allocations', ['leave_request_id' => $leave->id]);
+    }
+
+    public function test_approval_returns_to_review_queue_and_displays_reviewer_signature(): void
+    {
+        $owner = User::factory()->create(['department' => 'กองช่าง']);
+        $signature = 'data:image/png;base64,'.base64_encode('signature-image');
+        $head = User::factory()->create([
+            'department' => 'กองช่าง',
+            'position' => 'ผู้อำนวยการกองช่าง',
+            'pin' => Hash::make('123456'),
+            'signature' => $signature,
+        ])->assignRole('head');
+        $leave = LeaveRequest::create([
+            'user_id' => $owner->id,
+            'leave_type' => 'ลาป่วย',
+            'start_date' => now()->addDay()->toDateString(),
+            'end_date' => now()->addDay()->toDateString(),
+            'total_days' => 1,
+            'reason' => 'ทดสอบลายเซ็นบนใบลา',
+            'status' => 'PENDING',
+            'workflow_status' => 'pending_head',
         ]);
-        $this->assertDatabaseHas('document_number_allocations', [
-            'leave_request_id' => $financeLeave->id, 'scope' => 'กองคลัง', 'running_number' => 1,
-        ]);
+
+        $this->actingAs($head)->post(route('leaves.reviewAction', $leave), [
+            'is_approved' => 1,
+            'pin' => '123456',
+            'reject_reason' => 'เห็นควรอนุญาต เนื่องจากงานไม่ติดขัด',
+        ])->assertRedirect(route('leaves.approve_list'));
+
+        $leave->refresh();
+        $this->assertSame('pending_inspector', $leave->workflow_status);
+        $this->assertNotNull($leave->head_signature);
+        $this->assertSame('เห็นควรอนุญาต เนื่องจากงานไม่ติดขัด', $leave->head_comment);
+        $this->actingAs($head)->get(route('leaves.show', $leave))
+            ->assertOk()
+            ->assertSee('ความเห็นหัวหน้าส่วนราชการ')
+            ->assertSee('เห็นควรอนุญาต เนื่องจากงานไม่ติดขัด')
+            ->assertSee('ผู้อำนวยการกองช่าง')
+            ->assertSee($leave->head_signature, false);
     }
 }

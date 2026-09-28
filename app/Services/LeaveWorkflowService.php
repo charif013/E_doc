@@ -2,14 +2,12 @@
 
 namespace App\Services;
 
-use App\Models\DocumentNumberAllocation;
 use App\Models\LeaveRequest;
 use App\Models\User;
 use App\Models\V2\User as V2User;
 use App\Models\V2\WorkflowActionEvidence;
 use App\Models\V2\WorkflowInstance;
 use App\Models\V2\WorkflowStep;
-use App\Services\V2\NumberAllocationService;
 use App\Services\V2\WorkflowService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -21,7 +19,6 @@ class LeaveWorkflowService
     public function __construct(
         private NotificationDispatcher $notifications,
         private LineMessagingService $line,
-        private NumberAllocationService $numberAllocations,
         private WorkflowService $workflows,
     ) {}
 
@@ -114,6 +111,14 @@ class LeaveWorkflowService
 
     public function cancel(LeaveRequest $leave, User $actor): LeaveRequest
     {
+        if ($leave->is_draft && ! $leave->workflow) {
+            $attributes = ['is_draft' => false];
+            if (Schema::connection($leave->getConnectionName())->hasColumn('leave_requests', 'workflow_status')) {
+                $attributes += ['status' => 'CANCELED', 'workflow_status' => 'canceled'];
+            }
+            $leave->forceFill($attributes)->save();
+            return $leave->fresh();
+        }
         if (! $this->usesCanonicalWorkflow($leave)) {
             $leave->update(['status' => 'CANCELED', 'workflow_status' => 'canceled']);
             return $leave->fresh();
@@ -142,9 +147,6 @@ class LeaveWorkflowService
             ]);
             return $leave->fresh(['user', 'delegate']);
         }
-        if ($leave->workflow_status === 'pending_numbering') {
-            throw ValidationException::withMessages(['reject_reason' => 'ขั้นตอนลงเลขไม่สามารถตีกลับใบลาได้']);
-        }
         $workflow = $this->lockedWorkflow($leave, $actor);
         $this->workflows->act($workflow, V2User::findOrFail($actor->id), 'rejected', $reason);
         $leave = $leave->fresh(['user', 'delegate', 'workflow.steps']);
@@ -155,27 +157,21 @@ class LeaveWorkflowService
         return $leave;
     }
 
-    public function approve(LeaveRequest $leave, User $actor, ?int $runningNumber = null): LeaveRequest
+    public function approve(LeaveRequest $leave, User $actor, ?int $runningNumber = null, ?string $comment = null): LeaveRequest
     {
         if (! $this->usesCanonicalWorkflow($leave)) {
-            return $this->legacyApprove($leave, $actor, $runningNumber);
+            return $this->legacyApprove($leave, $actor, $comment);
         }
         $workflow = $this->lockedWorkflow($leave, $actor);
-        $stepOrder = (int) $workflow->current_step;
-        $evidenceAction = null;
-        if ($stepOrder === 4) {
-            $this->allocateLeaveNumber($leave, $actor, $runningNumber);
-            $evidenceAction = 'NUMBER_ALLOCATED';
-        }
         $this->workflows->act(
-            $workflow, V2User::findOrFail($actor->id), 'approved', null, null, $evidenceAction
+            $workflow, V2User::findOrFail($actor->id), 'approved', $comment
         );
+        $this->skipLegacyNumberingStep($workflow);
 
         $leave = $leave->fresh(['user', 'delegate', 'workflow.steps', 'numberAllocation']);
         if ($leave->workflow_status === 'approved') {
             $this->notifications->toUser($leave->user,
-                "✅ ใบลาของคุณได้รับอนุมัติเรียบร้อยแล้ว\nเลขที่: ".($leave->leave_number ?: '-')
-                ."\nประเภท: {$leave->leave_type}\nวันที่: ".Carbon::parse($leave->start_date)->format('d/m/Y')
+                "✅ ใบลาของคุณได้รับอนุมัติเรียบร้อยแล้ว\nประเภท: {$leave->leave_type}\nวันที่: ".Carbon::parse($leave->start_date)->format('d/m/Y')
                 .' - '.Carbon::parse($leave->end_date)->format('d/m/Y')
             );
         } else {
@@ -218,7 +214,6 @@ class LeaveWorkflowService
             'pending_inspector' => $this->line->usersWithRoles('hr'),
             'pending_palad' => $this->line->usersWithRoles(['palad', 'deputy-palad']),
             'pending_nayok' => $this->line->usersWithRoles('executive'),
-            'pending_numbering' => $this->line->usersWithRoles('saraban'),
             default => collect(),
         };
         $action = $leave->workflow_status === 'pending_delegate'
@@ -268,21 +263,6 @@ class LeaveWorkflowService
         ]);
     }
 
-    private function allocateLeaveNumber(LeaveRequest $leave, User $actor, ?int $number): void
-    {
-        if (! $number || $number < 1) {
-            throw ValidationException::withMessages(['running_number' => 'กรุณารันเลขก่อนยืนยัน']);
-        }
-        $now = now();
-        $fiscalYear = $now->month >= 10 ? $now->year + 1 : $now->year;
-        $scope = $leave->user?->department ?: 'ไม่ระบุสังกัด';
-        $formatted = "ลา/{$scope}/{$number}/".($fiscalYear + 543);
-        $this->numberAllocations->allocate(
-            $leave, 'leave_request_id', 'leave', $scope, $fiscalYear,
-            $number, $formatted, $actor->id, $now, 'running_number'
-        );
-    }
-
     private function legacyDelegationResponse(
         LeaveRequest $leave, User $delegate, string $action, ?string $reason
     ): LeaveRequest {
@@ -300,7 +280,7 @@ class LeaveWorkflowService
         return $leave->fresh(['user', 'delegate']);
     }
 
-    private function legacyApprove(LeaveRequest $leave, User $actor, ?int $runningNumber): LeaveRequest
+    private function legacyApprove(LeaveRequest $leave, User $actor, ?string $comment = null): LeaveRequest
     {
         if (! $this->canReview($actor, $leave)) {
             abort(403, 'ใบลานี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในคิวของคุณ');
@@ -308,20 +288,23 @@ class LeaveWorkflowService
         $updates = match ($leave->workflow_status) {
             'pending_head' => [
                 'workflow_status' => 'pending_inspector', 'head_id' => $actor->id,
-                'head_status' => 'approved', 'head_signature' => $actor->signature, 'head_at' => now(),
+                'head_status' => 'approved', 'head_signature' => $actor->signature,
+                'head_comment' => $comment, 'head_at' => now(),
             ],
             'pending_inspector' => [
-                'workflow_status' => 'pending_numbering', 'inspector_id' => $actor->id,
-                'inspector_status' => 'approved', 'inspector_signature' => $actor->signature, 'inspector_at' => now(),
+                'workflow_status' => 'pending_palad', 'inspector_id' => $actor->id,
+                'inspector_status' => 'approved', 'inspector_signature' => $actor->signature,
+                'inspector_comment' => $comment, 'inspector_at' => now(),
             ],
-            'pending_numbering' => $this->legacyNumberingUpdates($leave, $actor, $runningNumber),
             'pending_palad' => [
                 'workflow_status' => 'pending_nayok', 'palad_id' => $actor->id,
-                'palad_status' => 'approved', 'palad_signature' => $actor->signature, 'palad_at' => now(),
+                'palad_status' => 'approved', 'palad_signature' => $actor->signature,
+                'palad_comment' => $comment, 'palad_at' => now(),
             ],
             'pending_nayok' => [
                 'status' => 'APPROVED', 'workflow_status' => 'approved', 'nayok_id' => $actor->id,
-                'nayok_status' => 'approved', 'nayok_signature' => $actor->signature, 'nayok_at' => now(),
+                'nayok_status' => 'approved', 'nayok_signature' => $actor->signature,
+                'nayok_comment' => $comment, 'nayok_at' => now(),
             ],
             default => throw ValidationException::withMessages(['is_approved' => 'สถานะใบลาไม่รองรับการอนุมัติ']),
         };
@@ -330,28 +313,33 @@ class LeaveWorkflowService
         return $leave->fresh(['user', 'delegate']);
     }
 
-    private function legacyNumberingUpdates(LeaveRequest $leave, User $actor, ?int $number): array
+    private function skipLegacyNumberingStep(WorkflowInstance $workflow): void
     {
-        if (! $number || $number < 1) {
-            throw ValidationException::withMessages(['running_number' => 'กรุณารันเลขก่อนยืนยัน']);
+        $fresh = $workflow->fresh();
+        if ((int) $fresh->current_step !== 4) {
+            return;
         }
-        $now = now();
-        $fiscalYear = $now->month >= 10 ? $now->year + 1 : $now->year;
-        $scope = $leave->user?->department ?: 'ไม่ระบุสังกัด';
-        $formatted = "ลา/{$scope}/{$number}/".($fiscalYear + 543);
-        DocumentNumberAllocation::updateOrCreate(
-            ['leave_request_id' => $leave->id],
-            [
-                'number_type' => 'leave', 'scope' => $scope, 'fiscal_year' => $fiscalYear,
-                'running_number' => $number, 'formatted_number' => $formatted,
-                'allocated_by' => $actor->id,
-            ]
-        );
 
-        return [
-            'workflow_status' => 'pending_palad', 'leave_number' => $formatted,
-            'running_number' => $number, 'numbered_by' => $actor->id, 'numbered_at' => $now,
-        ];
+        DB::connection($fresh->getConnectionName())->transaction(function () use ($fresh) {
+            $locked = WorkflowInstance::withoutGlobalScopes()->whereKey($fresh->id)->lockForUpdate()->firstOrFail();
+            if ((int) $locked->current_step !== 4) {
+                return;
+            }
+            WorkflowStep::withoutGlobalScopes()
+                ->where('workflow_instance_id', $locked->id)
+                ->where('step_order', 4)
+                ->where('status', 'PENDING')
+                ->update(['status' => 'SKIPPED', 'comment' => 'ยกเลิกขั้นตอนลงเลขใบลา']);
+            $next = WorkflowStep::withoutGlobalScopes()
+                ->where('workflow_instance_id', $locked->id)
+                ->where('step_order', '>', 4)
+                ->where('status', 'PENDING')
+                ->orderBy('step_order')
+                ->first();
+            $locked->update($next
+                ? ['status' => 'IN_PROGRESS', 'current_step' => $next->step_order]
+                : ['status' => 'APPROVED', 'current_step' => null, 'completed_at' => now()]);
+        }, 3);
     }
 
     private function usesCanonicalWorkflow(LeaveRequest $leave): bool

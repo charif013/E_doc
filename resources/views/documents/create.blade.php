@@ -45,7 +45,7 @@
                 <li data-step-indicator="3"><span>3</span><strong>ตรวจสอบและบันทึก</strong></li>
             </ol>
         </nav>
-        <form action="{{ route('documents.store') }}" method="POST" id="docForm" enctype="multipart/form-data">
+        <form action="{{ route('documents.store') }}" method="POST" id="docForm" enctype="multipart/form-data" novalidate>
             @csrf
             
             <section class="wizard-step" data-step="1" aria-labelledby="step-one-title">
@@ -75,7 +75,7 @@
                     <div class="mb-2 d-flex align-items-baseline">
                         <span style="font-size: 20pt; font-weight: bold; margin-right: 12px; white-space: nowrap; flex-shrink: 0; color: #000;">ส่วนราชการ</span>
                         <input type="text" name="doc_from" class="dfv-input flex-grow-1 text-dark" 
-                               value="{{ auth()->user()->department }} องค์การบริหารส่วนตำบลพร่อน" required>
+                               value="{{ auth()->user()->department }} องค์การบริหารส่วนตำบลพร่อน" required data-required-label="ส่วนราชการ">
                     </div>
 
                     <div class="row mb-2 g-0">
@@ -85,20 +85,20 @@
                         </div>
                         <div class="col-6 d-flex align-items-baseline ps-2">
                             <span style="font-size: 20pt; font-weight: bold; margin-right: 12px; white-space: nowrap; flex-shrink: 0; color: #000;">วันที่</span>
-                            <input type="text" name="doc_date" id="doc_date" class="dfv-input flex-grow-1 fw-bold text-primary" placeholder="คลิกเพื่อเลือกวันที่" required>
+                            <input type="text" name="doc_date" id="doc_date" class="dfv-input flex-grow-1 fw-bold text-primary" placeholder="คลิกเพื่อเลือกวันที่" required data-required-label="วันที่">
                         </div>
                     </div>
 
                     <div class="mb-3 d-flex align-items-baseline">
                         <span style="font-size: 20pt; font-weight: bold; margin-right: 12px; white-space: nowrap; flex-shrink: 0; color: #000;">เรื่อง</span>
-                        <input type="text" name="title" class="dfv-input flex-grow-1 text-dark" placeholder="ระบุหัวข้อเรื่อง..." required>
+                        <input type="text" name="title" class="dfv-input flex-grow-1 text-dark" placeholder="ระบุหัวข้อเรื่อง..." required data-required-label="เรื่อง">
                     </div>
 
                     <div class="mb-3 d-flex align-items-baseline document-recipient-row">
                         <span style="font-size: 20pt; font-weight: bold; margin-right: 12px; white-space: nowrap; flex-shrink: 0; color: #000;">เรียน</span>
                         <div class="flex-grow-1">
                             {{-- 🌟 ระบบ Dropdown (Select2) สไตล์กระดาษ 🌟 --}}
-                            <select name="doc_to" id="doc_to" class="form-select select2-tags" required>
+                            <select name="doc_to" id="doc_to" class="form-select select2-tags" required data-required-label="ผู้รับ (เรียน)">
                                 <option value="">-- เลือกผู้รับ หรือพิมพ์ระบุเอง --</option>
                                 <optgroup label="ผู้บริหาร (ส่งขึ้นข้างบน)">
                                     <option value="นายกองค์การบริหารส่วนตำบล">นายกองค์การบริหารส่วนตำบล</option>
@@ -152,7 +152,7 @@
 
                     {{-- 🌟 เนื้อหาข้อความ (ช่องกรอก) --}}
                     <div class="mb-4">
-                        <textarea name="content" id="doc_content" class="form-control content-textarea" rows="14" placeholder="พิมพ์เนื้อหาบันทึกข้อความที่นี่..." required></textarea>
+                        <textarea name="content" id="doc_content" class="form-control content-textarea" rows="14" placeholder="พิมพ์เนื้อหาบันทึกข้อความที่นี่..." required data-required-label="เนื้อหาบันทึกข้อความ"></textarea>
                     </div>
 
                     {{-- 🌟 กล่องอัปโหลดไฟล์ --}}
@@ -256,6 +256,7 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+@include('partials.required-form-validation')
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
@@ -430,14 +431,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function validateCurrentStep() {
         const current = steps.find(step => Number(step.dataset.step) === currentStep);
-        const requiredFields = Array.from(current.querySelectorAll('[required]'));
-        const invalid = requiredFields.find(field => !field.checkValidity());
-        if (invalid) {
-            invalid.reportValidity();
-            invalid.focus();
-            return false;
-        }
-        return true;
+        return window.EdocRequiredValidation.validate(current);
     }
 
     function draftData() {
@@ -498,7 +492,13 @@ document.addEventListener('DOMContentLoaded', function () {
         if (validateCurrentStep()) showStep(Math.min(3, currentStep + 1));
     }));
     form.querySelectorAll('[data-prev-step]').forEach(button => button.addEventListener('click', () => showStep(Math.max(1, currentStep - 1))));
-    form.addEventListener('submit', () => localStorage.removeItem(storageKey));
+    form.addEventListener('submit', event => {
+        if (!window.EdocRequiredValidation.validate(form)) {
+            event.preventDefault();
+            return;
+        }
+        localStorage.removeItem(storageKey);
+    });
     restoreDraft();
     showStep(1);
 });

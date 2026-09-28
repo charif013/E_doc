@@ -27,6 +27,12 @@
             @foreach($displayRoutes as $index => $route)
                 @php
                     $isPresenter = (int) $route->step_order === 1;
+                    $routeActionType = strtoupper((string) ($route->action_type ?? ''));
+                    $isDocumentSigner = $document->doc_type === 'outgoing'
+                        && !$isPresenter
+                        && ($routeActionType === 'SIGNATURE' || $index === ($routeCount - 1));
+                    $isUploadedDocumentSigner = $isDocumentSigner
+                        && ($document->source_type ?? 'upload') === 'upload';
                     $isFinalReviewer = !$isPresenter && $index === ($routeCount - 1);
                     $routeStatus = strtolower($route->status instanceof \BackedEnum ? $route->status->value : (string) $route->status);
                     $isApproved = $routeStatus === 'approved';
@@ -41,7 +47,7 @@
                             {{ $route->step_order }}
                         </div>
                         <div class="small text-muted fw-bold mb-1">
-                            {{ $isPresenter ? 'ผู้นำเสนอเอกสาร' : 'ผู้พิจารณาลำดับที่ '.($route->step_order - 1) }}
+                            {{ $isPresenter ? 'ผู้นำเสนอเอกสาร' : ($isDocumentSigner ? 'ผู้ลงนามหนังสือ' : 'ผู้ตรวจ/ผู้พิจารณาลำดับที่ '.($route->step_order - 1)) }}
                         </div>
                         <div class="fw-bold text-dark">{{ $route->user->name ?? 'ไม่พบข้อมูลผู้ใช้' }}</div>
                         <div class="small text-muted mb-2">{{ $route->user->position ?? '-' }}</div>
@@ -51,13 +57,13 @@
                                 <img src="{{ getSigUrl($route->user->signature) }}" alt="ลายเซ็น" style="max-height:48px;max-width:150px;mix-blend-mode:multiply;">
                             @endif
                             <div class="badge bg-success rounded-pill mt-2">
-                                {{ $isPresenter ? 'ลงนามนำส่งแล้ว' : ($isFinalReviewer ? 'อนุมัติแล้ว' : 'พิจารณาแล้ว') }}
+                                {{ $isPresenter ? 'ลงนามนำส่งแล้ว' : ($isUploadedDocumentSigner ? 'ยืนยันผู้ลงนามแล้ว' : ($isDocumentSigner ? 'ลงนามหนังสือแล้ว' : ($isFinalReviewer ? 'อนุมัติแล้ว' : 'พิจารณาแล้ว'))) }}
                             </div>
                             @if($route->actioned_at)<div class="small text-muted mt-1">{{ $route->actioned_at->format('d/m/Y H:i') }}</div>@endif
                         @elseif($isRejected)
                             <div class="badge bg-danger rounded-pill mt-3">ตีกลับเอกสาร</div>
                         @elseif($isCurrent)
-                            <div class="badge bg-primary rounded-pill mt-3">{{ $isPresenter ? 'รอลงนามนำส่ง' : 'กำลังรอพิจารณา' }}</div>
+                            <div class="badge bg-primary rounded-pill mt-3">{{ $isPresenter ? 'รอลงนามนำส่ง' : ($isUploadedDocumentSigner ? 'กำลังรอยืนยันผู้ลงนาม' : ($isDocumentSigner ? 'กำลังรอลงนามหนังสือ' : 'กำลังรอพิจารณา')) }}</div>
                         @else
                             <div class="badge bg-secondary-subtle text-secondary rounded-pill mt-3"><i class="fas fa-lock me-1"></i>รอตามลำดับ</div>
                         @endif

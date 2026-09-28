@@ -10,6 +10,7 @@ class LeaveRequestPolicy
     public function view(User $user, LeaveRequest $leave): bool
     {
         return $user->hasRole('super-admin')
+            || ($user->hasRole('hr') && ! $leave->is_draft)
             || $leave->user_id === $user->id
             || $this->review($user, $leave)
             || in_array($user->id, array_filter([
@@ -34,7 +35,6 @@ class LeaveRequestPolicy
                 && $user->department === $leave->user?->department,
             'pending_palad' => $user->hasAnyRole(['palad', 'deputy-palad']),
             'pending_nayok' => $user->hasRole('executive'),
-            'pending_numbering' => $user->hasRole('saraban'),
             default => false,
         };
     }

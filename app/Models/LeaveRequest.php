@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -22,23 +23,24 @@ class LeaveRequest extends Model
     use HasFactory;
 
     protected $fillable = [
-        'user_id', 'leave_type_id', 'leave_type', 'start_date', 'end_date', 'total_days',
+        'user_id', 'leave_type_id', 'leave_type', 'start_date', 'end_date', 'total_days', 'is_draft',
+        'applicant_signature', 'submitted_at',
         'reason', 'contact_info', 'delegate_user_id', 'delegate_id',
         'status', 'reject_reason', 'workflow_status', 'delegate_status', 'delegate_decline_reason',
         'delegate_requested_at', 'delegate_responded_at', 'delegate_reminded_at', 'delegate_escalated_at',
         'leave_number', 'running_number', 'numbered_by', 'numbered_at',
         'supervisor_id', 'supervisor_signature', 'supervisor_approved_at',
-        'inspector_id', 'inspector_status', 'inspector_signature', 'inspector_at',
-        'head_id', 'head_status', 'head_signature', 'head_at',
-        'palad_id', 'palad_status', 'palad_signature', 'palad_at', 'palad_approved_at',
-        'nayok_id', 'nayok_status', 'nayok_signature', 'nayok_at', 'nayok_approved_at',
+        'inspector_id', 'inspector_status', 'inspector_signature', 'inspector_comment', 'inspector_at',
+        'head_id', 'head_status', 'head_signature', 'head_comment', 'head_at',
+        'palad_id', 'palad_status', 'palad_signature', 'palad_comment', 'palad_at', 'palad_approved_at',
+        'nayok_id', 'nayok_status', 'nayok_signature', 'nayok_comment', 'nayok_at', 'nayok_approved_at',
     ];
 
     protected $casts = [
-        'start_date' => 'date', 'end_date' => 'date', 'total_days' => 'decimal:2',
+        'start_date' => 'date', 'end_date' => 'date', 'total_days' => 'decimal:2', 'is_draft' => 'boolean',
         'delegate_requested_at' => 'datetime', 'delegate_responded_at' => 'datetime',
         'delegate_reminded_at' => 'datetime', 'delegate_escalated_at' => 'datetime',
-        'numbered_at' => 'datetime',
+        'numbered_at' => 'datetime', 'submitted_at' => 'datetime',
     ];
 
     public function user(): BelongsTo { return $this->belongsTo(User::class, 'user_id'); }
@@ -46,6 +48,7 @@ class LeaveRequest extends Model
     public function delegate(): BelongsTo { return $this->belongsTo(User::class, 'delegate_user_id'); }
     public function workflow(): HasOne { return $this->hasOne(WorkflowInstance::class, 'leave_request_id'); }
     public function numberAllocation(): HasOne { return $this->hasOne(NumberAllocation::class, 'leave_request_id'); }
+    public function attachments(): HasMany { return $this->hasMany(LeaveRequestAttachment::class, 'leave_request_id'); }
 
     protected static function booted(): void
     {
@@ -54,6 +57,7 @@ class LeaveRequest extends Model
         }
         static::created(function (LeaveRequest $leave) {
             if (config('edoc.v2.enabled')
+                && ! $leave->is_draft
                 && Schema::connection($leave->getConnectionName())->hasTable('workflow_instances')) {
                 app(LeaveWorkflowSynchronizer::class)->synchronize($leave);
             }
@@ -91,7 +95,9 @@ class LeaveRequest extends Model
     protected function status(): Attribute
     {
         return Attribute::get(function ($value) {
+            if ($this->is_draft) { return 'DRAFT'; }
             if (! $this->usesCanonicalWorkflow()) { return $value; }
+            if (! $this->workflow) { return strtoupper((string) $value) ?: 'PENDING'; }
             $status = strtoupper((string) $this->workflow?->status?->value);
 
             return in_array($status, ['APPROVED', 'REJECTED', 'CANCELED', 'COMPLETED'], true)
@@ -102,13 +108,14 @@ class LeaveRequest extends Model
     protected function workflowStatus(): Attribute
     {
         return Attribute::get(function ($value) {
+            if ($this->is_draft) { return 'draft'; }
             if (! $this->usesCanonicalWorkflow()) { return $value; }
             $workflow = $this->workflow;
             $terminal = strtolower((string) $workflow?->status?->value);
             if (in_array($terminal, ['approved', 'rejected', 'canceled', 'completed'], true)) {
                 return $terminal;
             }
-            if (! $workflow) { return null; }
+            if (! $workflow) { return $value; }
             if ((int) $workflow->current_step === 1) {
                 $lastAction = $this->evidenceForStep(1)?->action;
                 if ($lastAction === 'DECLINED') { return 'delegate_declined'; }
@@ -117,7 +124,7 @@ class LeaveRequest extends Model
 
             return match ((int) $workflow->current_step) {
                 1 => 'pending_delegate', 2 => 'pending_head', 3 => 'pending_inspector',
-                4 => 'pending_numbering', 5 => 'pending_palad', 6 => 'pending_nayok',
+                5 => 'pending_palad', 6 => 'pending_nayok',
                 default => null,
             };
         });
@@ -162,6 +169,10 @@ class LeaveRequest extends Model
     public function getSupervisorSignatureAttribute(): ?string { return $this->head_signature; }
     public function getPaladSignatureAttribute(): ?string { return $this->signatureForStep(5); }
     public function getNayokSignatureAttribute(): ?string { return $this->signatureForStep(6); }
+    public function getHeadCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(2)?->comment : $value; }
+    public function getInspectorCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(3)?->comment : $value; }
+    public function getPaladCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(5)?->comment : $value; }
+    public function getNayokCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(6)?->comment : $value; }
     public function getInspectorAttribute(): ?User { return $this->actorForStep(3); }
     public function getHeadAttribute(): ?User { return $this->actorForStep(2); }
     public function getSupervisorAttribute(): ?User { return $this->head; }
@@ -175,7 +186,7 @@ class LeaveRequest extends Model
         }
         $orders = collect((array) $stages)->map(fn ($stage) => match ($stage) {
             'pending_delegate', 'delegate_declined', 'delegate_escalated' => 1,
-            'pending_head' => 2, 'pending_inspector' => 3, 'pending_numbering' => 4,
+            'pending_head' => 2, 'pending_inspector' => 3,
             'pending_palad' => 5, 'pending_nayok' => 6, default => null,
         })->filter()->unique()->values();
 
@@ -208,9 +219,6 @@ class LeaveRequest extends Model
         if ($user->hasRole('hr')) {
             return $query->atWorkflowStage('pending_inspector');
         }
-        if ($user->hasRole('saraban')) {
-            return $query->atWorkflowStage('pending_numbering');
-        }
         if ($user->hasRole('head')) {
             return $query->atWorkflowStage('pending_head')
                 ->whereHas('user', fn (Builder $users) => $users
@@ -225,7 +233,7 @@ class LeaveRequest extends Model
         if ($user->hasRole('super-admin')) {
             return $query->atWorkflowStage([
                 'pending_head', 'pending_inspector', 'pending_palad',
-                'pending_nayok', 'pending_numbering',
+                'pending_nayok',
             ]);
         }
 

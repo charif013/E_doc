@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class User extends Authenticatable
 {
@@ -121,5 +122,10 @@ use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
                 }
             }
         });
+    }
+
+    public function documentRoutePresets(): HasMany
+    {
+        return $this->hasMany(DocumentRoutePreset::class);
     }
 }

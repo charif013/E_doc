@@ -16,6 +16,7 @@ class RoomBookingConcurrencyTest extends TestCase
 
     public function test_booking_form_exposes_guided_inputs_and_live_summary(): void
     {
+        /** @var User $user */
         $user = User::factory()->create();
         Room::create(['name' => 'ห้องใช้งานง่าย', 'status' => 'active', 'capacity' => 12]);
 
@@ -31,6 +32,7 @@ class RoomBookingConcurrencyTest extends TestCase
     public function test_overlapping_room_booking_is_rejected(): void
     {
         Queue::fake();
+        /** @var User $user */
         $user = User::factory()->create();
         $room = Room::create(['name' => 'ห้องทดสอบ', 'status' => 'active', 'capacity' => 10]);
         RoomBooking::create([
@@ -51,6 +53,7 @@ class RoomBookingConcurrencyTest extends TestCase
     public function test_booking_status_is_confirmed_and_cancellation_releases_the_room(): void
     {
         Queue::fake();
+        /** @var User $user */
         $user = User::factory()->create();
         $room = Room::create(['name' => 'ห้องสถานะ', 'status' => 'active', 'capacity' => 10]);
         $bookingData = [
@@ -91,6 +94,7 @@ class RoomBookingConcurrencyTest extends TestCase
     public function test_booking_changes_to_in_progress_and_completed_by_time_and_cannot_be_canceled_after_start(): void
     {
         Queue::fake();
+        /** @var User $user */
         $user = User::factory()->create();
         $room = Room::create(['name' => 'ห้องตามเวลา', 'status' => 'active', 'capacity' => 10]);
         $booking = RoomBooking::create([
@@ -110,7 +114,7 @@ class RoomBookingConcurrencyTest extends TestCase
             ->assertDontSee('action="'.route('bookings.destroy', $booking).'"', false);
         $this->actingAs($user)->delete(route('bookings.destroy', $booking))
             ->assertSessionHasErrors('booking');
-        $this->assertSame('APPROVED', $booking->fresh()->status);
+        $this->assertSame('APPROVED', $booking->refresh()->status);
 
         $this->travelTo('2026-09-09 13:01:00');
         $this->actingAs($user)->get(route('bookings.index'))
@@ -122,7 +126,9 @@ class RoomBookingConcurrencyTest extends TestCase
     public function test_invitee_can_respond_and_creator_can_see_the_response(): void
     {
         Queue::fake();
+        /** @var User $creator */
         $creator = User::factory()->create(['name' => 'ผู้เชิญทดสอบ']);
+        /** @var User $invitee */
         $invitee = User::factory()->create(['name' => 'ผู้เข้าร่วมทดสอบ']);
         $room = Room::create(['name' => 'ห้องตอบรับ', 'status' => 'active', 'capacity' => 10]);
         $booking = RoomBooking::create([
@@ -153,7 +159,7 @@ class RoomBookingConcurrencyTest extends TestCase
         $participant = DB::table('room_booking_user')
             ->where('room_booking_id', $booking->id)
             ->where('user_id', $invitee->id)
-            ->first();
+            ->firstOrFail();
         $this->assertSame('ACCEPTED', $participant->status);
         $this->assertNotNull($participant->responded_at);
 
@@ -176,7 +182,9 @@ class RoomBookingConcurrencyTest extends TestCase
     public function test_outsider_cannot_view_or_respond_to_a_meeting_invitation(): void
     {
         Queue::fake();
+        /** @var User $creator */
         $creator = User::factory()->create();
+        /** @var User $outsider */
         $outsider = User::factory()->create();
         $room = Room::create(['name' => 'ห้องสิทธิ์', 'status' => 'active', 'capacity' => 10]);
         $booking = RoomBooking::create([
@@ -197,6 +205,7 @@ class RoomBookingConcurrencyTest extends TestCase
 
     public function test_room_booking_cannot_be_deleted_instead_of_canceled(): void
     {
+        /** @var User $user */
         $user = User::factory()->create();
         $room = Room::create(['name' => 'ห้องเก็บประวัติ', 'status' => 'active', 'capacity' => 10]);
         $booking = RoomBooking::create([

@@ -11,8 +11,12 @@ use Illuminate\Support\Facades\Hash;
 use Carbon\Carbon;
 use App\Services\LeaveWorkflowService;
 use App\Services\NotificationDispatcher;
+use App\Services\DocumentFileStorage;
+use App\Services\V2\LeaveWorkflowSynchronizer;
 use App\Http\Requests\ReviewLeaveRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 class LeaveRequestController extends Controller
 {
@@ -22,7 +26,7 @@ class LeaveRequestController extends Controller
     public function create()
     {
         /** @var \App\Models\User $user */
-        $user = auth()->user();
+        $user = Auth::user();
         $currentYear = now()->year;
 
         // ดึงข้อมูลการลาที่เคยอนุมัติไปแล้วในปีนี้
@@ -104,19 +108,29 @@ class LeaveRequestController extends Controller
     {
         $leave = LeaveRequest::findOrFail($id);
         $this->authorize('cancel', $leave);
+        $wasDraft = $leave->is_draft;
 
         // 2. ป้องกันไม่ให้ยกเลิกใบลาที่พิจารณาจบไปแล้ว
         if (in_array($leave->status, ['APPROVED', 'REJECTED', 'CANCELED'])) {
             return back()->with('error', 'ไม่สามารถยกเลิกใบลาที่ถูกพิจารณาไปแล้ว หรือถูกยกเลิกไปแล้วได้');
         }
 
-        app(LeaveWorkflowService::class)->cancel($leave, auth()->user());
+        $canceledLeave = app(LeaveWorkflowService::class)->cancel($leave, Auth::user());
 
-        if ($leave->delegate) {
+        if ($wasDraft && $canceledLeave->is_draft) {
+            $canceledLeave->forceFill(['is_draft' => false])->save();
+        }
+
+        if (! $wasDraft && $leave->delegate) {
             app(NotificationDispatcher::class)->toUser(
                 $leave->delegate,
                 "❌ ใบลาที่มอบหมายให้คุณปฏิบัติงานแทนถูกยกเลิกแล้ว\nผู้ลา: " . ($leave->user?->name ?: '-') . "\nประเภท: {$leave->leave_type}"
             );
+        }
+
+        if ($wasDraft) {
+            return redirect()->route('leaves.create')
+                ->with('success', 'ยกเลิกฉบับร่างเรียบร้อยแล้ว');
         }
 
         return back()->with('success', 'ยกเลิกใบลาเรียบร้อยแล้ว');
@@ -127,9 +141,11 @@ class LeaveRequestController extends Controller
     // ==========================================
     public function index()
     {
-        $leaves = LeaveRequest::where('user_id', auth()->id())
-                    ->orderBy('created_at', 'desc')
-                    ->get();
+        $leaves = LeaveRequest::where('user_id', Auth::id())
+            ->orderByDesc('created_at')
+            ->get()
+            ->filter(fn (LeaveRequest $leave) => in_array($leave->status, ['APPROVED', 'CANCELED'], true))
+            ->values();
 
         return view('leaves.index', compact('leaves'));
     }
@@ -146,24 +162,112 @@ class LeaveRequestController extends Controller
             'end_date'     => 'required|date|after_or_equal:start_date',
             'total_days'   => 'required|numeric|min:0.5',
             'reason'       => 'required|string',
-            'contact_info' => 'required|string',
+            'contact_info' => ['nullable', 'string', 'max:200'],
             'delegate_id'  => 'nullable|exists:users,id', // เพิ่มตรวจสอบผู้รับมอบงาน
+            'attachments'   => ['nullable', 'array', 'max:5'],
+            'attachments.*' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
         ]);
 
-        $leave = LeaveRequest::create([
-            'user_id'      => Auth::id(),
-            'leave_type'   => $request->leave_type,
-            'start_date'   => $request->start_date,
-            'end_date'     => $request->end_date,
-            'total_days'   => $request->total_days,
-            'reason'       => $request->reason,
-            'contact_info' => $request->contact_info,
-            'delegate_user_id' => $request->delegate_id,
+        $storedPaths = [];
+        try {
+            $leave = DB::transaction(function () use ($request, &$storedPaths) {
+                $attributes = [
+                    'user_id'      => Auth::id(),
+                    'leave_type'   => $request->leave_type,
+                    'start_date'   => $request->start_date,
+                    'end_date'     => $request->end_date,
+                    'total_days'   => $request->total_days,
+                    'reason'       => $request->reason,
+                    'contact_info' => $request->contact_info,
+                    'delegate_id'   => $request->delegate_id,
+                    'is_draft'      => true,
+                ];
+                if (Schema::connection((new LeaveRequest)->getConnectionName())->hasColumn('leave_requests', 'workflow_status')) {
+                    $attributes['status'] = 'DRAFT';
+                    $attributes['workflow_status'] = 'draft';
+                }
+                $leave = LeaveRequest::create($attributes);
+
+                foreach ($request->file('attachments', []) as $file) {
+                    $path = app(DocumentFileStorage::class)->store($file, "leave_attachments/{$leave->id}");
+                    $storedPaths[] = $path;
+                    $leave->attachments()->create([
+                        'stored_path' => $path,
+                        'original_name' => mb_substr(basename(str_replace('\\', '/', $file->getClientOriginalName())), 0, 255),
+                        'mime_type' => $file->getMimeType() ?: 'application/octet-stream',
+                        'size_bytes' => $file->getSize(),
+                    ]);
+                }
+
+                return $leave;
+            }, 3);
+        } catch (Throwable $error) {
+            foreach ($storedPaths as $path) {
+                app(DocumentFileStorage::class)->delete($path);
+            }
+            throw $error;
+        }
+
+        return redirect()->route('leaves.draft', $leave->id)
+            ->with('success', 'บันทึกฉบับร่างแล้ว กรุณาตรวจสอบเอกสารก่อนยืนยันส่ง');
+    }
+
+    public function draft($id)
+    {
+        $leave = LeaveRequest::with(['user', 'delegate', 'attachments'])->findOrFail($id);
+        abort_unless($leave->user_id === Auth::id(), 403);
+        abort_unless($leave->is_draft, 404);
+
+        $usedLeaves = $this->approvedLeaveUsage((int) $leave->user_id, now()->year);
+
+        return view('leaves.draft', compact('leave', 'usedLeaves'));
+    }
+
+    public function submitDraft($id)
+    {
+        request()->validate([
+            'pin' => ['required', 'string', 'max:20'],
+        ], [
+            'pin.required' => 'กรุณากรอกรหัส PIN เพื่อยืนยันและลงลายเซ็น',
         ]);
+
+        /** @var User $submitter */
+        $submitter = Auth::user();
+        if (! Hash::check((string) request('pin'), (string) $submitter->pin)) {
+            return back()->withInput()->with('error', 'รหัส PIN ไม่ถูกต้อง กรุณาลองอีกครั้ง');
+        }
+        if (blank($submitter->signature)) {
+            return back()->with('error', 'กรุณาอัปโหลดลายเซ็นในหน้าโปรไฟล์ก่อนยืนยันส่งใบลา');
+        }
+
+        $leave = DB::transaction(function () use ($id, $submitter) {
+            $leave = LeaveRequest::whereKey($id)->lockForUpdate()->firstOrFail();
+            abort_unless($leave->user_id === Auth::id(), 403);
+            abort_unless($leave->is_draft, 409, 'ฉบับร่างนี้ถูกส่งแล้ว');
+
+            $attributes = [
+                'is_draft' => false,
+                'applicant_signature' => $submitter->signature,
+                'submitted_at' => now(),
+            ];
+            if (Schema::connection($leave->getConnectionName())->hasColumn('leave_requests', 'workflow_status')) {
+                $attributes['status'] = 'PENDING';
+                $attributes['workflow_status'] = $leave->delegate_id ? 'pending_delegate' : 'pending_head';
+            }
+            $leave->forceFill($attributes)->save();
+
+            if (config('edoc.v2.enabled')
+                && Schema::connection($leave->getConnectionName())->hasTable('workflow_instances')) {
+                app(LeaveWorkflowSynchronizer::class)->synchronize($leave);
+            }
+
+            return $leave->fresh(['user', 'delegate', 'workflow.steps']);
+        }, 3);
 
         $this->notifyNextLeaveStage($leave);
 
-        return redirect()->route('leaves.index')->with('success', 'ยื่นใบลาเรียบร้อยแล้ว ระบบกำลังเข้าสู่ขั้นตอนการอนุมัติ');
+        return redirect()->route('leaves.approve_list')
+            ->with('success', 'ยืนยันส่งใบลาเรียบร้อยแล้ว ระบบส่งต่อเข้าสู่ขั้นตอนพิจารณาแล้ว');
     }
 
     // ==========================================
@@ -176,7 +280,7 @@ class LeaveRequestController extends Controller
             'decline_reason' => ['required_if:action,decline', 'nullable', 'string', 'max:1000'],
         ]);
         $leave = LeaveRequest::findOrFail($id);
-        $user = auth()->user();
+        $user = Auth::user();
 
         app(LeaveWorkflowService::class)->respondToDelegation(
             $leave, $user, $data['action'], $data['decline_reason'] ?? null
@@ -193,7 +297,7 @@ class LeaveRequestController extends Controller
     public function reassignDelegate(Request $request, $id)
     {
         $data = $request->validate([
-            'delegate_id' => ['required', 'integer', 'exists:users,id', 'not_in:'.auth()->id()],
+            'delegate_id' => ['required', 'integer', 'exists:users,id', 'not_in:'.Auth::id()],
         ]);
         $leave = LeaveRequest::findOrFail($id);
         $delegate = User::findOrFail($data['delegate_id']);
@@ -209,11 +313,25 @@ class LeaveRequestController extends Controller
     public function approveList()
     {
         /** @var User $user */
-        $user = auth()->user();
-        $leaves = LeaveRequest::with('user')
-            ->pendingReviewFor($user)
-            ->orderBy('created_at', 'desc')
-            ->get();
+        $user = Auth::user();
+        if ($user->hasRole('hr')) {
+            $leaves = LeaveRequest::with(['user', 'workflow'])
+                ->where('is_draft', false)
+                ->orderByDesc('created_at')
+                ->get();
+        } else {
+            $reviewLeaves = LeaveRequest::with(['user', 'workflow'])
+                ->pendingReviewFor($user)
+                ->get();
+            $ownerLeaves = LeaveRequest::with(['user', 'workflow'])
+                ->where('user_id', $user->id)
+                ->get()
+                ->reject(fn (LeaveRequest $leave) => in_array($leave->status, ['APPROVED', 'CANCELED'], true));
+            $leaves = $reviewLeaves->merge($ownerLeaves)
+                ->unique('id')
+                ->sortByDesc('created_at')
+                ->values();
+        }
         return view('leaves.approve_list', compact('leaves'));
     }
 
@@ -223,13 +341,17 @@ class LeaveRequestController extends Controller
     public function show($id)
     {
         $leave = LeaveRequest::with([
-            'user', 'delegate', 'type', 'numberAllocation',
+            'user', 'delegate', 'type', 'numberAllocation', 'attachments',
             'workflow.steps.evidence.actor',
         ])->findOrFail($id);
         $this->authorize('view', $leave);
 
-        $delegateCandidates = $leave->user_id === auth()->id()
-            ? User::whereKeyNot(auth()->id())->orderBy('name')->get()
+        if ($leave->is_draft && $leave->user_id === Auth::id()) {
+            return redirect()->route('leaves.draft', $leave->id);
+        }
+
+        $delegateCandidates = $leave->user_id === Auth::id()
+            ? User::whereKeyNot(Auth::id())->orderBy('name')->get()
             : collect();
 
         $usedLeaves = $this->approvedLeaveUsage((int) $leave->user_id, now()->year);
@@ -242,6 +364,22 @@ class LeaveRequestController extends Controller
         ));
     }
 
+    public function downloadAttachment(int $id, int $attachment)
+    {
+        $leave = LeaveRequest::findOrFail($id);
+        $this->authorize('view', $leave);
+        $file = $leave->attachments()->findOrFail($attachment);
+
+        return app(DocumentFileStorage::class)->response(
+            $file->stored_path,
+            $file->original_name,
+            [
+                'X-Content-Type-Options' => 'nosniff',
+                'Content-Security-Policy' => "sandbox; default-src 'none'",
+            ]
+        );
+    }
+
     // ==========================================
     // 7. จัดการการกด อนุมัติ / ตีกลับ (ด้วยรหัส PIN)
     // ==========================================
@@ -250,7 +388,7 @@ class LeaveRequestController extends Controller
         $leave = LeaveRequest::findOrFail($id);
 
         /** @var User $user */
-        $user = auth()->user();
+        $user = Auth::user();
 
         $this->authorize('review', $leave);
 
@@ -265,13 +403,19 @@ class LeaveRequestController extends Controller
             return back()->with('error', 'รหัส PIN ไม่ถูกต้อง กรุณาลองอีกครั้ง');
         }
 
+        if (blank($user->signature)) {
+            return back()->with('error', 'กรุณาอัปโหลดลายเซ็นในหน้าโปรไฟล์ก่อนอนุมัติใบลา');
+        }
+
         app(LeaveWorkflowService::class)->approve(
             $leave,
             $user,
-            $request->filled('running_number') ? (int) $request->running_number : null
+            null,
+            $request->filled('reject_reason') ? trim((string) $request->reject_reason) : null
         );
 
-        return redirect()->route('leaves.approve_list')->with('success', 'ลงนามตรวจสอบ/อนุมัติใบลาเรียบร้อยแล้ว');
+        return redirect()->route('leaves.approve_list')
+            ->with('success', 'ลงนามตรวจสอบ/อนุมัติและส่งต่อเรียบร้อยแล้ว');
     }
 
     private function canReviewStage(User $user, LeaveRequest $leave): bool

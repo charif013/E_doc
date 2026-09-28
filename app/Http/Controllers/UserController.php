@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\User;
 use Spatie\Permission\Models\Role;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use App\Services\AuditLogger;
 
@@ -111,7 +112,7 @@ class UserController extends Controller
         $user = User::findOrFail($id);
         
         // ห้ามลบตัวเอง
-        if (auth()->id() == $user->id) {
+        if (Auth::id() == $user->id) {
             return response()->json(['message' => 'ไม่สามารถลบบัญชีของตัวเองได้'], 403);
         }
 

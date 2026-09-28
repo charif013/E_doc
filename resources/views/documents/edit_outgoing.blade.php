@@ -67,25 +67,15 @@
             </div>
         @endif
 
-        {{-- Step bar --}}
-        <div class="d-flex align-items-center justify-content-center mb-4 bg-white p-3 rounded-pill shadow-sm border">
-            <div class="d-flex align-items-center">
-                <div id="step1-icon" class="step-circle step-active">1</div>
-                <span id="step1-text" class="ms-2 fw-bold text-dark" style="font-size:14px;">แก้ไขข้อมูล</span>
-            </div>
-            <div style="width:60px; height:2px; background:#e2e8f0; margin:0 15px;"></div>
-            <div class="d-flex align-items-center">
-                <div id="step2-icon" class="step-circle step-inactive">2</div>
-                <span id="step2-text" class="ms-2 fw-bold text-muted" style="font-size:14px;">ตรวจสอบเอกสาร (Preview)</span>
-            </div>
-        </div>
-
         {{-- 🌟 จุดที่ 2: เปลี่ยนลิงก์ Action ของ Form เป็น UUID --}}
         <form action="{{ route('documents.update', $document->uuid ?? $document->id) }}" method="POST" enctype="multipart/form-data" id="outgoingForm">
             @csrf
             @method('PUT')
 
             <div id="step1">
+                @php
+                    $currentSource = old('document_source', $document->source_type ?: (str_contains(strip_tags((string) $document->content), 'อ้างอิงจากไฟล์แนบในระบบ') ? 'upload' : 'system'));
+                @endphp
                 
                 {{-- Section 1: เลขที่และวันที่ --}}
                 <div class="card border-0 mb-4 shadow-sm" style="border-radius:16px; border:1px solid #e4eaf0;">
@@ -95,10 +85,13 @@
                     <div class="card-body p-4 pt-0">
                         <div class="row g-3">
                             <div class="col-md-4">
-                                <label class="form-label small fw-bold text-muted mb-1">เลขที่หนังสือออก <span class="text-danger">*</span></label>
-                                <div class="input-group shadow-sm" style="border-radius: 8px; overflow: hidden;">
-                                    <input type="hidden" name="running_number" id="running_number" value="{{ old('running_number', $document->running_number) }}">
-                                    <input type="text" name="doc_number" id="doc_number" class="form-control border-0 bg-light" required value="{{ old('doc_number', $document->formatted_doc_number) }}">
+                                <label class="form-label small fw-bold text-muted mb-1">เลขที่หนังสือออก</label>
+                                <input type="hidden" name="running_number" id="running_number" value="{{ old('running_number', $document->running_number) }}">
+                                <div id="system-numbering-notice" class="py-2 text-muted border-bottom border-secondary border-opacity-50" style="display:{{ $currentSource === 'system' ? '' : 'none' }}; border-bottom-style:dotted !important;">
+                                    รอธุรการลงทะเบียนเลข
+                                </div>
+                                <div id="upload-numbering-fields" class="input-group shadow-sm" style="border-radius:8px; overflow:hidden; display:{{ $currentSource === 'upload' ? 'flex' : 'none' }};">
+                                    <input type="text" name="doc_number" id="doc_number" class="form-control border-0 bg-light" value="{{ old('doc_number', $document->formatted_doc_number) }}">
                                     <button type="button" onclick="autoDocNo()" class="btn btn-primary fw-bold px-3">รันเลข</button>
                                 </div>
                             </div>
@@ -151,12 +144,29 @@
                 </div>
 
                 {{-- Section 3: เนื้อหา --}}
+                @php
+                    $storedContent = old('content', $currentSource === 'system' ? (string) $document->content : '');
+                    $contentParts = preg_split('/\R\s*\R/', trim($storedContent), 3);
+                @endphp
                 <div class="card border-0 mb-4 shadow-sm" style="border-radius:16px; border:1px solid #e4eaf0;">
                     <div class="card-header bg-white py-3 border-bottom-0">
                         <h6 class="mb-0 fw-bold" style="color:var(--primary-dark);"><i class="fas fa-pen-nib text-primary me-2"></i>3. เนื้อหาและการลงนาม</h6>
                     </div>
                     <div class="card-body p-4 pt-0">
                         <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label small fw-bold text-muted mb-2">รูปแบบเอกสาร</label>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <input class="btn-check" type="radio" name="document_source" id="source_system" value="system" {{ $currentSource === 'system' ? 'checked' : '' }}>
+                                    <label class="btn btn-outline-primary rounded-pill px-4" for="source_system"><i class="fas fa-pen-to-square me-1"></i> จัดทำในระบบ</label>
+                                    <input class="btn-check" type="radio" name="document_source" id="source_upload" value="upload" {{ $currentSource === 'upload' ? 'checked' : '' }}>
+                                    <label class="btn btn-outline-secondary rounded-pill px-4" for="source_upload"><i class="fas fa-file-upload me-1"></i> ใช้ไฟล์ PDF</label>
+                                </div>
+                            </div>
+                            <div class="col-12 system-authoring-field">
+                                <label class="form-label small fw-bold text-muted mb-1">ที่อยู่ส่วนราชการ</label>
+                                <textarea name="sender_address" id="sender_address" class="form-control shadow-sm" rows="3">{{ old('sender_address', $document->sender_address ?: config('edoc.organization.outgoing_address')) }}</textarea>
+                            </div>
                             <div class="col-12">
                                 <label class="form-label small fw-bold text-muted mb-1">เรื่อง <span class="text-danger">*</span></label>
                                 <input type="text" name="title" id="title" class="form-control shadow-sm" required value="{{ old('title', $document->title) }}">
@@ -173,8 +183,30 @@
                                     <div id="addrList"></div>
                                 </div>
                             </div>
+
+                            <div class="col-12 system-authoring-field">
+                                <label class="form-label small fw-bold text-muted mb-1">ย่อหน้าที่ 1 — ความเป็นมา / เหตุผล <span class="text-danger">*</span></label>
+                                <textarea id="body_intro" class="form-control shadow-sm" rows="4">{{ old('body_intro', $contentParts[0] ?? '') }}</textarea>
+                            </div>
+                            <div class="col-12 system-authoring-field">
+                                <label class="form-label small fw-bold text-muted mb-1">ย่อหน้าที่ 2 — รายละเอียด</label>
+                                <textarea id="body_detail" class="form-control shadow-sm" rows="5">{{ old('body_detail', $contentParts[1] ?? '') }}</textarea>
+                            </div>
+                            <div class="col-12 system-authoring-field">
+                                <label class="form-label small fw-bold text-muted mb-1">ย่อหน้าที่ 3 — ข้อสรุป / สิ่งที่ขอให้ดำเนินการ</label>
+                                <textarea id="body_conclusion" class="form-control shadow-sm" rows="4">{{ old('body_conclusion', $contentParts[2] ?? '') }}</textarea>
+                                <input type="hidden" name="content" id="content" value="{{ $storedContent }}">
+                            </div>
+                            <div class="col-md-6 system-authoring-field">
+                                <label class="form-label small fw-bold text-muted mb-1">คำลงท้าย</label>
+                                <input type="text" name="closing_text" id="closing_text" class="form-control shadow-sm" value="{{ old('closing_text', $document->closing_text ?: 'ขอแสดงความนับถือ') }}">
+                            </div>
+                            <div class="col-md-6 system-authoring-field">
+                                <label class="form-label small fw-bold text-muted mb-1">ส่วนราชการเจ้าของเรื่อง / ช่องทางติดต่อ</label>
+                                <textarea name="contact_line" id="contact_line" class="form-control shadow-sm" rows="2">{{ old('contact_line', $document->contact_line) }}</textarea>
+                            </div>
                             
-                            <div class="col-12">
+                            <div class="col-12" id="upload-file-section">
                                 <label class="form-label small fw-bold text-muted mb-1">ผู้ลงนาม <span class="text-danger">*</span></label>
                                 <select name="signer_name" id="signer" class="form-select" required>
                                     <option value="" disabled>-- เลือกผู้ลงนาม --</option>
@@ -188,11 +220,12 @@
                                             }
                                             $fullNameWithPosition = $person->name . ' — ' . $position;
                                         @endphp
-                                        <option value="{{ $fullNameWithPosition }}" {{ old('signer_name', $document->signer_name) == $fullNameWithPosition ? 'selected' : '' }}>
+                                        <option value="{{ $fullNameWithPosition }}" data-user-id="{{ $person->id }}" {{ old('signer_name', $document->signer_name) == $fullNameWithPosition ? 'selected' : '' }}>
                                             {{ $fullNameWithPosition }}
                                         </option>
                                     @endforeach
                                 </select>
+                                <input type="hidden" name="signer_user_id" id="signer_user_id" value="{{ old('signer_user_id') }}">
                             </div>
                         </div>
                     </div>
@@ -245,7 +278,9 @@
                             <div class="col-md-6">
                                 @php
                                     $currentAtt = '';
-                                    if($document->content && str_starts_with($document->content, 'สิ่งที่ส่งมาด้วย: ')) {
+                                    if($document->attachment_description) {
+                                        $currentAtt = $document->attachment_description;
+                                    } elseif($document->content && str_starts_with($document->content, 'สิ่งที่ส่งมาด้วย: ')) {
                                         $currentAtt = str_replace('สิ่งที่ส่งมาด้วย: ', '', $document->content);
                                     }
                                 @endphp
@@ -291,8 +326,8 @@
                             <div class="col-10" id="prev_att"></div>
                         </div>
 
-                        <div class="text-center text-muted fst-italic p-4 mb-4 rounded-3" style="background: #f8fafc; border: 1px dashed #cbd5e1;">
-                            [ เนื้อความหนังสือ — อ้างอิงตามไฟล์ PDF ที่แนบในระบบ ]
+                        <div class="text-muted p-4 mb-4 rounded-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; white-space:pre-line;">
+                            <div id="prev_body" class="text-dark"></div>
                             <div id="prev_filename" class="mt-3 px-3 py-2 bg-white rounded-pill shadow-sm fw-bold text-primary d-inline-block" style="display:none; font-size:13px; border:1px solid #bae6fd;"></div>
                         </div>
 
@@ -406,14 +441,42 @@
         else { bSecret.classList.remove('d-none'); bSecret.innerText = '🔒 ' + secret; }
     }
 
+    function selectedDocumentSource() {
+        return document.querySelector('input[name="document_source"]:checked')?.value || 'system';
+    }
+
+    function syncContent() {
+        const paragraphs = ['body_intro', 'body_detail', 'body_conclusion']
+            .map(id => document.getElementById(id)?.value.trim() || '')
+            .filter(Boolean);
+        document.getElementById('content').value = paragraphs.join('\n\n');
+        return paragraphs.join('\n\n');
+    }
+
+    function toggleDocumentSource() {
+        const isSystem = selectedDocumentSource() === 'system';
+        document.querySelectorAll('.system-authoring-field').forEach(el => el.style.display = isSystem ? '' : 'none');
+        document.getElementById('upload-file-section').style.display = isSystem ? 'none' : '';
+        document.getElementById('system-numbering-notice').style.display = isSystem ? '' : 'none';
+        document.getElementById('upload-numbering-fields').style.display = isSystem ? 'none' : 'flex';
+        document.getElementById('doc_number').required = !isSystem;
+        if (isSystem) document.getElementById('running_number').value = '';
+    }
+
     function goToPreview() {
-        const docNo = document.getElementById('doc_number').value;
+        const source = selectedDocumentSource();
+        const content = syncContent();
+        const docNo = source === 'system' ? 'รอธุรการลงทะเบียนเลข' : document.getElementById('doc_number').value;
         const title = document.getElementById('title').value;
         const to = document.getElementById('doc_to').value;
         const signerSelect = document.getElementById('signer');
 
-        if(!docNo || !title || !to || !signerSelect.value) {
+        if((source !== 'system' && !docNo) || !title || !to || !signerSelect.value) {
             Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบถ้วน', text: 'กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน', confirmButtonColor: '#0284c7' });
+            return;
+        }
+        if(source === 'system' && !content) {
+            Swal.fire({ icon: 'warning', title: 'ยังไม่มีเนื้อหา', text: 'กรุณากรอกเนื้อหาหนังสืออย่างน้อย 1 ย่อหน้า', confirmButtonColor: '#0284c7' });
             return;
         }
 
@@ -444,7 +507,12 @@
         document.getElementById('lbl_prev_att').style.display = att ? 'block' : 'none';
 
         const file = document.getElementById('file').files[0];
-        if(file) {
+        document.getElementById('prev_body').innerText = source === 'system'
+            ? content
+            : 'เนื้อความหนังสืออ้างอิงตามไฟล์ PDF ที่แนบในระบบ';
+        if(source === 'system') {
+            document.getElementById('prev_filename').style.display = 'none';
+        } else if(file) {
             document.getElementById('prev_filename').style.display = 'inline-block';
             document.getElementById('prev_filename').innerHTML = '<i class="fas fa-file-pdf me-1"></i> ' + file.name;
         } else {
@@ -461,30 +529,25 @@
 
         document.getElementById('step1').style.display = 'none';
         document.getElementById('step2').style.display = 'block';
-        
-        document.getElementById('step1-icon').classList.replace('step-active', 'step-completed');
-        document.getElementById('step1-icon').innerHTML = '<i class="fas fa-check"></i>';
-        document.getElementById('step1-text').classList.replace('text-dark', 'text-success');
-
-        document.getElementById('step2-icon').classList.replace('step-inactive', 'step-active');
-        document.getElementById('step2-text').classList.remove('text-muted');
-        document.getElementById('step2-text').style.color = '#000';
     }
 
     function backToEdit() {
         document.getElementById('step2').style.display = 'none';
         document.getElementById('step1').style.display = 'block';
-
-        document.getElementById('step1-icon').classList.replace('step-completed', 'step-active');
-        document.getElementById('step1-icon').innerHTML = '1';
-        document.getElementById('step1-text').classList.replace('text-success', 'text-dark');
-
-        document.getElementById('step2-icon').classList.replace('step-active', 'step-inactive');
-        document.getElementById('step2-text').classList.add('text-muted');
     }
 
     document.addEventListener('DOMContentLoaded', function() {
+        const signerSelect = document.getElementById('signer');
+        const signerUserId = document.getElementById('signer_user_id');
+        const syncSignerUserId = () => {
+            signerUserId.value = signerSelect.selectedOptions[0]?.dataset.userId || '';
+        };
+        signerSelect.addEventListener('change', syncSignerUserId);
+        syncSignerUserId();
         updateBadges();
+        toggleDocumentSource();
+        document.querySelectorAll('input[name="document_source"]').forEach(input => input.addEventListener('change', toggleDocumentSource));
+        document.getElementById('outgoingForm').addEventListener('submit', syncContent);
         // 🌟 ถ้าระบบเห็นว่ามีไฟล์เดิมอยู่แล้ว ให้เปลี่ยนหน้าตากล่องอัปโหลด
         @if($document->attachment_path)
             const display = document.getElementById('file-display');

@@ -94,7 +94,7 @@ class AuthorizationPolicyTest extends TestCase
             ->assertOk()->assertJsonStructure(['next_number', 'formatted']);
     }
 
-    public function test_saraban_can_run_a_leave_number_from_the_leave_detail_page(): void
+    public function test_saraban_cannot_review_leave_after_hr_approval(): void
     {
         Role::create(['name' => 'officer']);
         Role::create(['name' => 'saraban']);
@@ -106,25 +106,13 @@ class AuthorizationPolicyTest extends TestCase
             'start_date' => now()->toDateString(),
             'end_date' => now()->toDateString(),
             'total_days' => 1,
-            'reason' => 'ทดสอบการรันเลข',
+            'reason' => 'ทดสอบตัดขั้นตอนลงเลข',
             'status' => 'PENDING',
-            'workflow_status' => 'pending_numbering',
+            'workflow_status' => 'pending_palad',
         ]);
 
-        $url = route('documents.api_next_number', ['type' => 'leave', 'leave_id' => $leave->id]);
-
-        $this->actingAs($saraban)->get(route('leaves.show', $leave))
-            ->assertOk()
-            ->assertSee((string) \Illuminate\Support\Js::from($url), false)
-            ->assertDontSee('amp;leave_id', false);
-
-        $this->actingAs($saraban)->getJson($url)
-            ->assertOk()
-            ->assertJson([
-                'next_number' => 1,
-                'formatted' => 'ลา/สำนักงานปลัด/1/'.(now()->year + 543),
-                'scope' => 'สำนักงานปลัด',
-            ]);
+        $this->assertFalse($saraban->can('review', $leave));
+        $this->actingAs($saraban)->get(route('leaves.show', $leave))->assertForbidden();
     }
 
     public function test_saraban_can_review_document_waiting_for_number_after_routes_are_completed(): void

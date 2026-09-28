@@ -58,9 +58,24 @@ class DataLifecycleService
         if (! $leave->trashed()) {
             throw new LogicException('A leave request must be soft deleted before it can be permanently deleted.');
         }
-        DB::connection($leave->getConnectionName())->transaction(fn () => $leave->forceDelete(), 3);
+        $paths = DB::connection($leave->getConnectionName())
+            ->table('leave_request_attachments')
+            ->where('leave_request_id', $leave->id)
+            ->whereNotNull('stored_path')
+            ->pluck('stored_path')->filter()->unique()->values();
+        $this->assertSafeRelativePaths($paths);
+        $staged = $this->stageFiles($paths);
 
-        return ['leave_requests' => 1];
+        try {
+            DB::connection($leave->getConnectionName())->transaction(fn () => $leave->forceDelete(), 3);
+        } catch (Throwable $error) {
+            $this->restoreStagedFiles($staged);
+            throw $error;
+        }
+
+        $this->deleteStagedFiles($staged);
+
+        return ['leave_requests' => 1, 'files' => $paths->count()];
     }
 
     public function purgeExpired(CarbonInterface $cutoff): array
@@ -77,6 +92,7 @@ class DataLifecycleService
         foreach ($leaveIds as $id) {
             $purged = $this->forceDeleteLeaveRequest((int) $id);
             $result['leave_requests'] += $purged['leave_requests'];
+            $result['files'] += $purged['files'];
         }
 
         return $result;

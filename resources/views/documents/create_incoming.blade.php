@@ -40,7 +40,7 @@
         </div>
     @endif
 
-    <form action="{{ route('documents.store_incoming') }}" method="POST" enctype="multipart/form-data" id="docForm">
+    <form action="{{ route('documents.store_incoming') }}" method="POST" enctype="multipart/form-data" id="docForm" novalidate>
         @csrf
 
         {{-- ========================================== --}}
@@ -66,7 +66,8 @@
 
             {{-- พื้นที่อัปโหลด --}}
             <div class="upload-area" id="upload_area">
-                <input type="file" name="file" id="file_input" accept=".pdf,.jpg,.jpeg,.png" data-file-preview="custom">
+                <input type="file" name="file" id="file_input" accept=".pdf,.jpg,.jpeg,.png" data-file-preview="custom"
+                       data-required-any="incoming-document" data-required-label="ไฟล์เอกสารต้นฉบับ หรือเอกสารจาก QR Code" data-validation-target="#upload_area">
                 <div class="upload-icon"><i class="fas fa-file-pdf"></i></div>
                 <div class="upload-text" id="upload_text_default">
                     ลากไฟล์ PDF/รูปภาพ มาวางที่นี่<br>หรือ <span>คลิกเพื่อเลือกไฟล์</span>
@@ -128,7 +129,8 @@
                 <div id="reader" class="bg-white border rounded-3 overflow-hidden shadow-sm"></div>
                 <div class="mt-2">
                     <label class="small fw-bold text-muted">ลิงก์ที่สแกนได้:</label>
-                    <input type="url" name="external_url" id="external_url" class="form-control form-control-sm" readonly>
+                    <input type="url" name="external_url" id="external_url" class="form-control form-control-sm" readonly
+                           data-required-any="incoming-document" data-required-label="ไฟล์เอกสารต้นฉบับ หรือเอกสารจาก QR Code">
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="stopScanner()">ปิดกล้อง</button>
             </div>
@@ -147,8 +149,8 @@
                     <div class="field-group">
                         <label>เลขที่รับ <span class="text-danger">*</span></label>
                         <div class="d-flex gap-2">
-                            <input type="hidden" name="running_number" id="running_number" value="{{ old('running_number') }}">
-                            <input type="text" name="receive_number" id="receive_number" required value="{{ old('receive_number') }}" class="flex-grow-1" placeholder="ยล 77301/1" readonly style="background: var(--paper);">
+                            <input type="hidden" name="running_number" id="running_number" value="{{ old('running_number') }}" required data-required-label="เลขที่รับ" data-validation-target="#receive_number">
+                            <input type="text" name="receive_number" id="receive_number" required value="{{ old('receive_number') }}" class="flex-grow-1" placeholder="ยล 77301/1" readonly style="background: var(--paper);" data-required-label="เลขที่รับ">
                             <button type="button" class="btn-run-no" onclick="autoReceiveNo()">รันเลข</button>
                         </div>
                     </div>
@@ -156,41 +158,41 @@
                 <div class="col-md-6">
                     <div class="field-group">
                         <label>วันที่รับเอกสาร <span class="text-danger">*</span></label>
-                        <input type="text" name="receive_date" class="thai-datepicker" value="{{ date('Y-m-d') }}" required>
+                        <input type="text" name="receive_date" class="thai-datepicker" value="{{ date('Y-m-d') }}" required data-required-label="วันที่รับเอกสาร">
                     </div>
                 </div>
 
                 <div class="col-md-6">
                     <div class="field-group">
                         <label>ที่ (เลขหนังสือต้นทาง) <span class="text-danger">*</span></label>
-                        <input type="text" name="doc_number" id="doc_number" value="{{ old('doc_number') }}" placeholder="เช่น กค 0405/ว 1234" required>
+                        <input type="text" name="doc_number" id="doc_number" value="{{ old('doc_number') }}" placeholder="เช่น กค 0405/ว 1234" required data-required-label="ที่ (เลขหนังสือต้นทาง)">
                     </div>
                 </div>
                 <div class="col-md-6">
                     <div class="field-group">
                         <label>ลงวันที่ (บนหนังสือ) <span class="text-danger">*</span></label>
-                        <input type="text" name="doc_date" id="doc_date" class="thai-datepicker" value="{{ old('doc_date') ?? date('Y-m-d') }}" required>
+                        <input type="text" name="doc_date" id="doc_date" class="thai-datepicker" value="{{ old('doc_date') ?? date('Y-m-d') }}" required data-required-label="ลงวันที่ (บนหนังสือ)">
                     </div>
                 </div>
 
                 <div class="col-12">
                     <div class="field-group">
                         <label>เรื่อง <span class="text-danger">*</span></label>
-                        <input type="text" name="title" id="title" value="{{ old('title') }}" placeholder="เรื่องของหนังสือ" required>
+                        <input type="text" name="title" id="title" value="{{ old('title') }}" placeholder="เรื่องของหนังสือ" required data-required-label="เรื่อง">
                     </div>
                 </div>
 
                 <div class="col-md-6">
                     <div class="field-group">
                         <label>จาก (หน่วยงาน/บุคคล) <span class="text-danger">*</span></label>
-                        <input type="text" name="doc_from" id="doc_from" value="{{ old('doc_from') }}" placeholder="เช่น กระทรวงมหาดไทย" required>
+                        <input type="text" name="doc_from" id="doc_from" value="{{ old('doc_from') }}" placeholder="เช่น กระทรวงมหาดไทย" required data-required-label="จาก (หน่วยงาน/บุคคล)">
                     </div>
                 </div>
 
                 <div class="col-md-6">
                     <div class="field-group">
                         <label>ประเภทหนังสือ <span class="text-danger">*</span></label>
-                        <select name="doc_type_category" required>
+                        <select name="doc_type_category" required data-required-label="ประเภทหนังสือ">
                             <option value="">-- เลือกประเภท --</option>
                             <option value="หนังสือภายนอก (กระดาษตราครุฑ)">หนังสือภายนอก (กระดาษตราครุฑ)</option>
                             <option value="หนังสือประทับตรา">หนังสือประทับตรา</option>
@@ -530,6 +532,8 @@
         overflow-y: auto;
     }
 </style>
+
+@include('partials.required-form-validation')
 @endsection
 
 @section('scripts')
@@ -1156,10 +1160,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!receiveNumber.value) autoReceiveNo();
 
     form.addEventListener('submit', async (event) => {
-        if (receiveNumber.value) return;
+        if (!receiveNumber.value) {
+            event.preventDefault();
+            if (await autoReceiveNo()) form.requestSubmit();
+            return;
+        }
 
-        event.preventDefault();
-        if (await autoReceiveNo()) form.requestSubmit();
+        if (!window.EdocRequiredValidation.validate(form)) event.preventDefault();
     });
 });
 
