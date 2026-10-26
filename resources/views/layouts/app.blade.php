@@ -1,3 +1,4 @@
+{{-- Layout: โครงหน้าหลัก เมนูนำทาง และทรัพยากรร่วมของระบบ --}}
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
@@ -517,26 +518,23 @@
             $isSuperAdmin = $menuUser->hasRole('super-admin');
             $canUseDocumentWorkspace = $isSuperAdmin
                 || $menuUser->hasAnyRole([
-                    'executive', 'palad', 'deputy-palad', 'head', 'saraban', 'officer',
-                    'finance', 'parcel', 'hr', 'analyst', 'engineer', 'education',
-                    'health', 'disaster', 'auditor', 'teacher',
+                    'executive', 'palad', 'head', 'saraban', 'officer', 'hr',
                 ]);
             $canViewExecutiveDashboard = $isSuperAdmin
-                || $menuUser->hasAnyRole(['executive', 'palad', 'deputy-palad', 'head', 'saraban']);
+                || $menuUser->hasAnyRole(['executive', 'palad', 'head', 'saraban']);
             // ทุกบทบาทในพื้นที่งานเอกสารสร้างบันทึกข้อความได้ตาม Route เดิม
-            // รวมถึงนายก ปลัด รองปลัด และหัวหน้าส่วน/หัวหน้าสำนักปลัด
+            // รวมถึงนายก ปลัด และหัวหน้าส่วน/หัวหน้าสำนักปลัด
             $canCreateInternalDocument = $canUseDocumentWorkspace;
             $canUploadIncomingDocument = $canUseDocumentWorkspace
                 && ($isSuperAdmin || $menuUser->can('receive_register'));
             $canUploadOutgoingDocument = $canUseDocumentWorkspace
                 && ($isSuperAdmin || $menuUser->can('send_register'));
-            $canViewDocumentRegistry = $isSuperAdmin
-                || $menuUser->hasRole('saraban');
+            $canViewDocumentRegistry = $menuUser->hasRole('saraban');
             $canReviewDocuments = $isSuperAdmin
-                || $menuUser->hasAnyRole(['executive', 'palad', 'deputy-palad', 'head', 'saraban'])
+                || $menuUser->hasAnyRole(['executive', 'palad', 'head', 'saraban'])
                 || ($reviewPendingCount ?? 0) > 0;
             $canReviewLeaves = $isSuperAdmin
-                || $menuUser->hasAnyRole(['executive', 'palad', 'deputy-palad', 'head', 'hr', 'saraban', 'officer']);
+                || $menuUser->hasAnyRole(['executive', 'palad', 'head', 'hr', 'saraban', 'officer']);
             $canManageHolidays = $isSuperAdmin || $menuUser->hasRole('palad');
             $canSeeSarabanSection = $canCreateInternalDocument
                 || $canUploadIncomingDocument
@@ -684,11 +682,6 @@
                 <span class="nav-text">จัดการห้องประชุม</span>
             </a>
 
-            <a href="{{ route('admin.audit_logs.index') }}" class="nav-link-item {{ request()->routeIs('admin.audit_logs.*') ? 'active' : '' }}">
-                <span class="nav-icon"><i class="fa-solid fa-shield-halved"></i></span>
-                <span class="nav-text">ประวัติการใช้งานระบบ</span>
-            </a>
-
             <a href="{{ route('holidays.index') }}" class="nav-link-item {{ request()->routeIs('holidays.*') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-calendar-days"></i></span>
                 <span class="nav-text">ตั้งค่าปฏิทินวันหยุด</span>
@@ -705,16 +698,6 @@
             </a>
         </div>
         @endif
-
-        @role('auditor')
-        <div class="sidebar-section" style="background: #f8fafc;">
-            <div class="sidebar-label" style="color: var(--primary);">การตรวจสอบระบบ</div>
-            <a href="{{ route('admin.audit_logs.index') }}" class="nav-link-item {{ request()->routeIs('admin.audit_logs.*') ? 'active' : '' }}">
-                <span class="nav-icon"><i class="fa-solid fa-shield-halved"></i></span>
-                <span class="nav-text">ประวัติการใช้งานระบบ</span>
-            </a>
-        </div>
-        @endrole
 
         {{-- 🌟 Logout --}}
         <div class="sidebar-footer">
@@ -775,12 +758,14 @@
 {{-- /app-wrapper --}}
 
 <script>
+    // หน้าที่: เปิดแถบนำทางด้านข้างบนหน้าจอขนาดเล็ก
     function openSidebar() {
         document.getElementById('sidebar').classList.add('open');
         document.getElementById('sidebarOverlay').classList.add('open');
         document.body.style.overflow = 'hidden';
     }
 
+    // หน้าที่: ปิดแถบนำทางด้านข้าง
     function closeSidebar() {
         document.getElementById('sidebar').classList.remove('open');
         document.getElementById('sidebarOverlay').classList.remove('open');
@@ -788,22 +773,27 @@
     }
 
     // ปิด sidebar เมื่อกดลิงก์บนมือถือและแท็บเล็ตแนวตั้ง
+    // หน้าที่: วนประมวลผลแต่ละรายการในชุดข้อมูล
     document.querySelectorAll('.nav-link-item').forEach(function (el) {
+        // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
         el.addEventListener('click', function () {
             if (window.innerWidth < 992) closeSidebar();
         });
     });
 
     // ปิดด้วย Escape และล้างสถานะเมื่อหมุนจอ/ขยายกลับเป็นเดสก์ท็อป
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') closeSidebar();
     });
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     window.addEventListener('resize', function () {
         if (window.innerWidth >= 992) closeSidebar();
     });
 
     // Keyboard support สำหรับ user-badge
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.querySelector('.user-badge')?.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') {
             window.location.href = '{{ route('profile.index') }}';
@@ -811,9 +801,11 @@
     });
 
     // Preview กลางสำหรับช่องแนบเอกสารทุกหน้า (หน้าที่มี Preview เฉพาะใช้ data-file-preview="custom")
+    // หน้าที่: เตรียมระบบแสดงตัวอย่างไฟล์แนบทุกช่องในหน้า
     (function initializeAttachmentPreviews() {
         const objectUrls = new WeakMap();
 
+        // หน้าที่: แปลงขนาดไฟล์เป็นข้อความที่อ่านง่าย
         function readableSize(bytes) {
             if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
             const units = ['B', 'KB', 'MB', 'GB'];
@@ -821,6 +813,7 @@
             return `${(bytes / Math.pow(1024, unit)).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
         }
 
+        // หน้าที่: ล้างตัวอย่างไฟล์และคืนทรัพยากรที่สร้างไว้
         function clearPreview(input) {
             const oldUrl = objectUrls.get(input);
             if (oldUrl) URL.revokeObjectURL(oldUrl);
@@ -828,6 +821,7 @@
             document.querySelector(`.file-attachment-preview[data-preview-for="${input.dataset.previewId}"]`)?.remove();
         }
 
+        // หน้าที่: สร้างตัวอย่างและรายละเอียดไฟล์ที่ผู้ใช้เลือก
         function renderPreview(input) {
             clearPreview(input);
             const file = input.files?.[0];

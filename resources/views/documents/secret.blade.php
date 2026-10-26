@@ -1,3 +1,8 @@
+{{-- View: หน้าแฟ้มรายการเอกสารลับ (ปัจจุบันปิดการใช้งาน) --}}
+{{--
+UNUSED VIEW (2026-10-05): This file is intentionally disabled.
+No controller renders "documents.secret" and no documents.secret route is registered.
+
 @extends('layouts.app')
 @section('title', 'แฟ้มเอกสารความลับ')
 
@@ -5,7 +10,7 @@
 <div class="container-fluid px-4 py-4">
     <div class="mx-auto" style="max-width: 1200px;">
 
-        {{-- 🌟 Header (โทนสีแดง) --}}
+        <!-- 🌟 Header (โทนสีแดง) -->
         <div class="d-flex justify-content-between align-items-center mb-4">
             <div>
                 <h4 class="fw-bold mb-1" style="color: #991b1b;">
@@ -15,7 +20,7 @@
             </div>
         </div>
 
-        {{-- 🌟 ตารางแสดงเอกสาร --}}
+        <!-- 🌟 ตารางแสดงเอกสาร -->
         <div class="card border-0 shadow-sm" style="border-radius: 12px; border-top: 5px solid #dc2626 !important; overflow: hidden;">
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0 text-nowrap">
@@ -48,7 +53,7 @@
                                 </td>
                                 <td><div class="text-muted small">{{ $doc->creator->department ?? '-' }}</div></td>
                                 <td class="text-center">
-                                    {{-- 🌟 จุดที่ 1: เปลี่ยนพารามิเตอร์ที่ส่งไปให้ JS เป็น UUID (ต้องใส่เครื่องหมายคำพูดครอบไว้ด้วยเพราะเป็น string) --}}
+                                    <!-- 🌟 จุดที่ 1: เปลี่ยนพารามิเตอร์ที่ส่งไปให้ JS เป็น UUID (ต้องใส่เครื่องหมายคำพูดครอบไว้ด้วยเพราะเป็น string) -->
                                     <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold shadow-sm" onclick="promptUnlock('{{ $doc->uuid ?? $doc->id }}')">
                                         <i class="fas fa-key me-1"></i> ปลดล็อกเพื่อดู
                                     </button>
@@ -73,6 +78,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+    // หน้าที่: ขอ PIN และปลดล็อกเอกสารลับ
     function promptUnlock(docId) {
         Swal.fire({
             title: 'เอกสารปกปิด',
@@ -142,3 +148,4 @@
     }
 </script>
 @endsection
+--}}

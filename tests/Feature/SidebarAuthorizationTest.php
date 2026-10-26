@@ -57,7 +57,7 @@ class SidebarAuthorizationTest extends TestCase
 
     public function test_approver_roles_keep_the_internal_memo_creation_menu(): void
     {
-        foreach (['executive', 'palad', 'deputy-palad', 'head'] as $roleName) {
+        foreach (['executive', 'palad', 'head'] as $roleName) {
             $user = $this->userWithRole($roleName);
 
             $this->actingAs($user)->get(route('home'))

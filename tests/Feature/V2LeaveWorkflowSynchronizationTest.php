@@ -25,7 +25,7 @@ class V2LeaveWorkflowSynchronizationTest extends TestCase
         config()->set('database.default', 'mysql_v2');
         DB::setDefaultConnection('mysql_v2');
         foreach (range(1, 6) as $id) { $this->seedV2User($id); }
-        foreach (['head', 'hr', 'saraban', 'palad', 'deputy-palad', 'executive'] as $name) {
+        foreach (['head', 'hr', 'saraban', 'palad', 'executive'] as $name) {
             Role::findOrCreate($name);
         }
         DB::connection('mysql_v2')->table('leave_types')->insert([

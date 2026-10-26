@@ -2,10 +2,10 @@
 
 namespace Tests\Feature;
 
-use App\Models\Document;
 use App\Models\AuditLog;
-use App\Models\User;
+use App\Models\Document;
 use App\Models\DocumentNumberAllocation;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
@@ -20,7 +20,7 @@ class OutgoingDocumentBuilderTest extends TestCase
     public function test_creator_can_build_an_outgoing_pdf_inside_the_system(): void
     {
         Storage::fake('documents');
-        foreach (['officer', 'executive', 'palad', 'deputy-palad', 'head'] as $role) {
+        foreach (['officer', 'executive', 'palad', 'head'] as $role) {
             Role::findOrCreate($role);
         }
         $creator = User::factory()->create([
@@ -110,7 +110,7 @@ class OutgoingDocumentBuilderTest extends TestCase
 
     public function test_upload_pdf_mode_hides_the_system_content_and_signature_section(): void
     {
-        foreach (['officer', 'executive', 'palad', 'deputy-palad', 'head'] as $role) {
+        foreach (['officer', 'executive', 'palad', 'head'] as $role) {
             Role::findOrCreate($role);
         }
         $creator = User::factory()->create()->assignRole('officer');
@@ -282,7 +282,7 @@ class OutgoingDocumentBuilderTest extends TestCase
         config()->set('edoc.v2.document_reads', false);
         config()->set('edoc.v2.write_enabled', false);
         Storage::fake('documents');
-        foreach (['saraban', 'officer', 'executive', 'palad', 'deputy-palad', 'head'] as $role) {
+        foreach (['saraban', 'officer', 'executive', 'palad', 'head'] as $role) {
             Role::findOrCreate($role);
         }
 

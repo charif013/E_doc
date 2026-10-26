@@ -1,3 +1,4 @@
+{{-- View: หน้าสร้างรายการจองห้องประชุม --}}
 @extends('layouts.app')
 
 @section('content')
@@ -104,15 +105,21 @@
 </div>
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     const holidays = @json($holidays->mapWithKeys(fn ($holiday) => [$holiday->holiday_date => $holiday->name]));
     const form = document.getElementById('bookingForm'), title = document.getElementById('title'), room = document.getElementById('room_id');
     const startInput = document.getElementById('start_time'), endInput = document.getElementById('end_time'), durationFeedback = document.getElementById('durationFeedback');
     let startPicker, endPicker;
+    // หน้าที่: ทำเครื่องหมายวันหยุดบนปฏิทินการจอง
     function holidayDay(dObj, dStr, fp, dayElem) { const key = fp.formatDate(dayElem.dateObj, 'Y-m-d'); if (holidays[key]) { dayElem.classList.add('booking-holiday'); dayElem.title = 'วันหยุด: ' + holidays[key]; } }
+    // หน้าที่: คืนประเภทการจองที่ผู้ใช้เลือก
     function selectedType() { return document.querySelector('input[name="booking_type"]:checked'); }
+    // หน้าที่: เติมเลขศูนย์ด้านหน้าให้ครบสองหลัก
     function pad(value) { return String(value).padStart(2, '0'); }
+    // หน้าที่: จัดรูปแบบวันเวลาเป็นรูปแบบไทยสำหรับแสดงผล
     function formatDate(date) { return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear() + 543} ${pad(date.getHours())}:${pad(date.getMinutes())}`; }
+    // หน้าที่: คำนวณและแสดงระยะเวลาการจอง
     function updateDuration() {
         const start = startPicker?.selectedDates[0], end = endPicker?.selectedDates[0];
         if (!start || !end) { durationFeedback.textContent = 'ยังไม่ได้เลือกเวลาครบ'; durationFeedback.className = 'duration-feedback ms-md-auto'; document.getElementById('summaryDate').textContent = 'ยังไม่ได้เลือกเวลา'; return; }
@@ -122,9 +129,12 @@ document.addEventListener('DOMContentLoaded', function () {
         durationFeedback.textContent = `ระยะเวลา ${duration}`; durationFeedback.className = 'duration-feedback duration-ok ms-md-auto'; document.getElementById('summaryDate').textContent = `${formatDate(start)} – ${pad(end.getHours())}:${pad(end.getMinutes())} น.`;
     }
     const options = {enableTime:true,time_24hr:true,locale:'th',dateFormat:'Y-m-d H:i',altInput:true,altFormat:'d/m/Y เวลา H:i น.',minuteIncrement:15,allowInput:true,minDate:'today',onDayCreate:holidayDay};
+    // หน้าที่: ซิงก์ข้อมูลเมื่อค่าของตัวเลือกวันที่เปลี่ยน
     startPicker = flatpickr(startInput, {...options, onChange:function(dates){ if(!dates.length)return; const start=dates[0]; endPicker.set('minDate',start); if(!endPicker.selectedDates[0]||endPicker.selectedDates[0]<=start)endPicker.setDate(new Date(start.getTime()+3600000),true); updateDuration(); }});
     endPicker = flatpickr(endInput, {...options, onChange:updateDuration});
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.querySelectorAll('.quick-duration').forEach(button => button.addEventListener('click', function(){ const start=startPicker.selectedDates[0]; if(!start){startPicker.open();return;} endPicker.setDate(new Date(start.getTime()+Number(this.dataset.minutes)*60000),true); }));
+    // หน้าที่: อัปเดตข้อมูลสรุปให้ตรงกับค่าปัจจุบันของแบบฟอร์ม
     function updateSummary() {
         document.getElementById('summaryTitle').textContent = title.value.trim() || 'ยังไม่ได้ระบุหัวข้อ';
         const type=selectedType(); document.getElementById('summaryType').textContent=type?.closest('label').querySelector('strong').textContent||'-';
@@ -133,9 +143,13 @@ document.addEventListener('DOMContentLoaded', function () {
         const meeting=type?.value==='meeting'; document.getElementById('invitees_section').hidden=!meeting; document.getElementById('summaryInviteeRow').hidden=!meeting;
     }
     title.addEventListener('input',updateSummary); room.addEventListener('change',updateSummary); document.querySelectorAll('input[name="booking_type"],.invitee-checkbox').forEach(input=>input.addEventListener('change',updateSummary));
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.getElementById('clearInvitees').addEventListener('click',function(){document.querySelectorAll('.invitee-checkbox').forEach(input=>input.checked=false);updateSummary();});
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.getElementById('inviteeSearch').addEventListener('input',function(){const keyword=this.value.trim().toLocaleLowerCase('th');document.querySelectorAll('.invitee-item').forEach(item=>item.hidden=!item.dataset.search.includes(keyword));});
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     form.addEventListener('submit',function(event){const start=startPicker.selectedDates[0],end=endPicker.selectedDates[0];if(!start||!end||end<=start){event.preventDefault();durationFeedback.textContent='กรุณาเลือกเวลาเริ่มและสิ้นสุดให้ถูกต้อง';durationFeedback.className='duration-feedback duration-error ms-md-auto';document.getElementById('timeSection').scrollIntoView({behavior:'smooth',block:'center'});return;}const submit=document.getElementById('submitBooking');submit.disabled=true;submit.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>กำลังตรวจสอบห้องว่าง...';});
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.querySelector('.content-area')?.addEventListener('scroll',function(){startPicker.close();endPicker.close();}); updateSummary(); updateDuration();
 });
 </script>

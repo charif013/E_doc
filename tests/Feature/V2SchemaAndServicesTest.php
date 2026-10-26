@@ -364,6 +364,72 @@ class V2SchemaAndServicesTest extends TestCase
         ], 'mysql_v2');
     }
 
+    public function test_uploaded_outgoing_cannot_be_approved_without_a_number_allocation(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        DB::connection('mysql_v2')->table('document_types')->insert([
+            'code' => 'OUTGOING', 'name' => 'Outgoing', 'direction' => 'OUTGOING',
+            'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $service = app(DocumentWriteService::class);
+        $document = $service->create([
+            'doc_type' => 'outgoing', 'document_source' => 'upload',
+            'doc_number' => 'ยล 77301/9', 'doc_date' => '2026-09-29',
+            'title' => 'Missing allocation', 'content' => 'Uploaded document',
+            'doc_to' => 'Destination', 'signer_user_id' => 2,
+        ], [2], 1);
+        $service->submit($document, User::findOrFail(1));
+
+        try {
+            $service->review($document->refresh(), User::findOrFail(2), true, 'Signed', null);
+            $this->fail('Approval without a canonical allocation should have failed.');
+        } catch (ValidationException $error) {
+            $this->assertArrayHasKey('document_number', $error->errors());
+        }
+
+        $this->assertSame('IN_REVIEW', $document->refresh()->status);
+        $this->assertDatabaseHas('workflow_steps', [
+            'workflow_instance_id' => $document->workflow()->value('id'),
+            'step_order' => 2,
+            'status' => 'PENDING',
+        ], 'mysql_v2');
+    }
+
+    public function test_editing_an_uploaded_outgoing_resynchronizes_its_allocation(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        DB::connection('mysql_v2')->table('document_types')->insert([
+            'code' => 'OUTGOING', 'name' => 'Outgoing', 'direction' => 'OUTGOING',
+            'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $service = app(DocumentWriteService::class);
+        $document = $service->create([
+            'doc_type' => 'outgoing', 'document_source' => 'upload',
+            'doc_number' => 'ยล 77301/๗', 'running_number' => 7,
+            'doc_date' => '2026-09-29', 'title' => 'Original',
+            'content' => 'Uploaded document', 'doc_to' => 'Destination',
+            'signer_user_id' => 2,
+        ], [2], 1);
+
+        $service->update($document, [
+            'document_source' => 'upload', 'doc_number' => 'ยล 77301/๘',
+            'running_number' => 8, 'doc_date' => '2026-09-29',
+            'title' => 'Updated', 'content' => 'Uploaded document',
+            'doc_to' => 'Destination', 'signer_user_id' => 2,
+        ], 1);
+
+        $this->assertDatabaseHas('number_allocations', [
+            'document_id' => $document->id,
+            'running_number' => 8,
+            'formatted_number' => 'ยล 77301/๘',
+        ], 'mysql_v2');
+        $this->assertSame('ยล 77301/๘', $document->refresh()->document_number);
+    }
+
     public function test_v2_system_outgoing_waits_for_numbering_after_the_signer_approves(): void
     {
         $this->seedV2User(1);
@@ -521,7 +587,7 @@ class V2SchemaAndServicesTest extends TestCase
         /** @var LegacyUser&MockInterface $actor */
         $actor = Mockery::mock(LegacyUser::class)->makePartial();
         $actor->forceFill(['id' => 1, 'department' => 'กองทดสอบ']);
-        $actor->shouldReceive('hasRole')->with('head')->andReturn(false);
+        $actor->shouldReceive('hasRole')->with('head')->andReturn(true);
 
         $service = app(DocumentWriteService::class);
         $service->assign($document, $actor, 'accept');
@@ -586,6 +652,71 @@ class V2SchemaAndServicesTest extends TestCase
             'status' => 'PENDING',
         ], 'mysql_v2');
         $this->assertCount(1, app(\App\Services\V2\DocumentReadService::class)->assignedDocuments($head));
+    }
+
+    public function test_v2_assignment_can_delegate_to_multiple_people_independently(): void
+    {
+        $db = DB::connection('mysql_v2');
+        $unitId = $db->table('organization_units')->insertGetId([
+            'unit_type' => 'DEPARTMENT', 'name' => 'กองทดสอบ', 'is_active' => true,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        foreach ([1, 2, 3, 4, 5, 6, 7] as $id) {
+            $this->seedV2User($id);
+        }
+        $db->table('users')->whereIn('id', [1, 2, 3, 4, 5, 6, 7])->update(['organization_unit_id' => $unitId]);
+        $this->seedV2Document();
+        $document = Document::findOrFail(1);
+        $document->update(['status' => 'APPROVED']);
+        $document->assignments()->create([
+            'assigned_unit_id' => $unitId, 'assigned_by' => 1,
+            'status' => 'PENDING', 'assigned_at' => now(),
+        ]);
+
+        /** @var LegacyUser&MockInterface $head */
+        $head = Mockery::mock(LegacyUser::class)->makePartial();
+        $head->forceFill(['id' => 1, 'department' => 'กองทดสอบ']);
+        $head->shouldReceive('hasRole')->with('head')->andReturn(true);
+
+        $service = app(DocumentWriteService::class);
+        $delegateIds = [2, 3, 4, 5, 6, 7];
+        $service->assign($document, $head, 'delegate', $delegateIds);
+
+        foreach ($delegateIds as $userId) {
+            $this->assertDatabaseHas('document_assignments', [
+                'document_id' => 1, 'assigned_user_id' => $userId,
+                'delegated_by' => 1, 'status' => 'PENDING',
+            ], 'mysql_v2');
+        }
+        $this->assertSame(6, $db->table('document_assignments')
+            ->where('document_id', 1)->whereIn('assigned_user_id', $delegateIds)->count());
+    }
+
+    public function test_v2_assignment_only_a_head_can_delegate_work(): void
+    {
+        $db = DB::connection('mysql_v2');
+        $unitId = $db->table('organization_units')->insertGetId([
+            'unit_type' => 'DEPARTMENT', 'name' => 'กองทดสอบ', 'is_active' => true,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        $db->table('users')->whereIn('id', [1, 2])->update(['organization_unit_id' => $unitId]);
+        $this->seedV2Document();
+        $document = Document::findOrFail(1);
+        $document->update(['status' => 'APPROVED']);
+        $document->assignments()->create([
+            'assigned_user_id' => 1, 'assigned_unit_id' => $unitId, 'assigned_by' => 1,
+            'status' => 'PENDING', 'assigned_at' => now(),
+        ]);
+
+        /** @var LegacyUser&MockInterface $officer */
+        $officer = Mockery::mock(LegacyUser::class)->makePartial();
+        $officer->forceFill(['id' => 1, 'department' => 'กองทดสอบ']);
+        $officer->shouldReceive('hasRole')->with('head')->andReturn(false);
+
+        $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        app(DocumentWriteService::class)->assign($document, $officer, 'delegate', [2]);
     }
 
     public function test_acknowledged_unit_assignment_leaves_the_dashboard_action_queue(): void

@@ -1,3 +1,4 @@
+{{-- View: หน้าสร้างและลงทะเบียนหนังสือรับเข้า --}}
 @php
     if (!isset($users)) {
         $users = \App\Models\User::where('id', '!=', auth()->id())->get();
@@ -551,6 +552,7 @@
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
 <script>
+// หน้าที่: ตั้งค่าช่องเลือกผู้รับตามเส้นทางด้วย Select2
 function initRoutingUsersSelect2() {
     if (typeof $ !== 'undefined' && $.fn.select2) {
         $('#routing_users').select2({
@@ -566,6 +568,7 @@ function initRoutingUsersSelect2() {
     }
 }
 
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function() {
 
     // 🌟 0. ตั้งค่า Dropdown เลือกผู้พิจารณา (Select2)
@@ -577,6 +580,7 @@ document.addEventListener('DOMContentLoaded', function() {
         altInput: true,
         altFormat: "d/m/Y",
         dateFormat: "Y-m-d",
+        // หน้าที่: จัดรูปแบบวันที่ของปฏิทินให้ตรงกับรูปแบบที่ร้องขอ
         formatDate: function(date, format, locale) {
             let d = ("0" + date.getDate()).slice(-2);
             let m = ("0" + (date.getMonth() + 1)).slice(-2);
@@ -608,6 +612,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const removeQrButton = document.getElementById('remove_qr_button');
     let previewObjectUrl = null;
 
+    // หน้าที่: ล้างข้อมูลเอกสารที่เลือกและคืนสถานะแบบฟอร์ม
     function clearSelectedDocument() {
         fileInput.value = '';
         document.getElementById('upload_text_default').style.display = 'block';
@@ -625,16 +630,19 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     changeDocumentButton.addEventListener('click', function() {
         fileInput.click();
     });
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     scanDocumentButton.addEventListener('click', function() {
         // ล้างค่าเดิมเพื่อให้สามารถถ่ายเอกสารฉบับเดิมซ้ำได้
         scanDocumentInput.value = '';
         scanDocumentInput.click();
     });
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     scanDocumentInput.addEventListener('change', async function() {
         if (!this.files || !this.files.length) return;
 
@@ -671,6 +679,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // หน้าที่: ค้นหา QR code จากรูปเอกสารที่แนบ
     async function detectQrFromDocumentImage(imageFile) {
         if (typeof Html5Qrcode === 'undefined') return false;
 
@@ -696,6 +705,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     scanQrImageInput.addEventListener('change', async function() {
         if (!this.files || !this.files.length) return;
         const imageFile = this.files[0];
@@ -729,6 +739,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // หน้าที่: แปลงรูปสแกนเป็นไฟล์ PDF สำหรับอัปโหลด
     async function convertScanToPdf(imageFile) {
         if (!window.jspdf || !window.jspdf.jsPDF) {
             throw new Error('PDF library is unavailable');
@@ -783,12 +794,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // หน้าที่: แปลงข้อมูลบน canvas เป็น Blob
     function canvasToBlob(canvas, type, quality) {
         return new Promise((resolve, reject) => {
             canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('ไม่สามารถประมวลผลภาพได้')), type, quality);
         });
     }
 
+    // หน้าที่: ย่อขนาดรูปภาพก่อนนำไปประมวลผล
     async function resizeImageFile(imageFile, maxSide, quality) {
         const imageUrl = URL.createObjectURL(imageFile);
         try {
@@ -817,6 +830,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     removeDocumentButton.addEventListener('click', clearSelectedDocument);
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     fileInput.addEventListener('change', function() {
         if (this.files && this.files.length > 0) {
             const file = this.files[0];
@@ -852,6 +866,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // หน้าที่: เปิดตัวอย่างเอกสารจาก URL ที่อ่านได้จาก QR code
     window.showQrDocumentPreview = function(url) {
         qrPreviewArea.innerHTML = '';
         qrPreviewArea.classList.remove('is-external-link');
@@ -892,6 +907,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     rescanQrButton.addEventListener('click', chooseQrScanSource);
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     removeQrButton.addEventListener('click', function() {
         externalUrlInput.value = '';
         qrPreviewCard.style.display = 'none';
@@ -903,6 +919,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 🌟 3. แจ้งเตือนสีแดง เมื่อเลือกชั้นความลับ
     const secretSelect = document.getElementById('doc_secret');
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     secretSelect.addEventListener('change', function() {
         if (this.value !== 'ไม่มีชั้นความลับ') {
             this.classList.add('secret-alert');
@@ -919,6 +936,7 @@ let html5QrCode;
 let qrScannerStarting = false;
 let qrResultHandling = false;
 
+// หน้าที่: คำนวณขนาดกรอบสำหรับสแกน QR code
 function getQrBoxSize(viewfinderWidth, viewfinderHeight) {
     // เว้นขอบรอบ QR เพื่อช่วยจับ quiet zone ของรหัสที่พิมพ์บนกระดาษ
     const shortestSide = Math.min(viewfinderWidth, viewfinderHeight);
@@ -926,6 +944,7 @@ function getQrBoxSize(viewfinderWidth, viewfinderHeight) {
     return { width: size, height: size };
 }
 
+// หน้าที่: ให้ผู้ใช้เลือกแหล่งรูปสำหรับสแกน QR code
 async function chooseQrScanSource() {
     const attachedFile = document.getElementById('file_input')?.files?.[0];
 
@@ -953,6 +972,7 @@ async function chooseQrScanSource() {
     }
 }
 
+// หน้าที่: ถอดรหัส QR code จากไฟล์รูปภาพ
 async function decodeQrImageFile(imageFile) {
     const scanner = new Html5Qrcode(
         'reader',
@@ -966,6 +986,7 @@ async function decodeQrImageFile(imageFile) {
     }
 }
 
+// หน้าที่: สแกน QR code จากไฟล์เอกสารที่แนบ
 async function scanQrFromAttachedFile(file) {
     if (typeof Html5Qrcode === 'undefined') {
         Swal.fire('เปิดตัวสแกนไม่ได้', 'ไม่สามารถโหลดระบบอ่าน QR Code กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่', 'error');
@@ -1033,6 +1054,7 @@ async function scanQrFromAttachedFile(file) {
     }
 }
 
+// หน้าที่: เปิดกล้องและเริ่มตัวสแกน QR code
 async function startScanner() {
     const qrArea = document.getElementById('qr_url_area');
     if (qrScannerStarting || (html5QrCode && html5QrCode.isScanning)) return;
@@ -1094,6 +1116,7 @@ async function startScanner() {
     }
 }
 
+// หน้าที่: ตรวจสอบและจัดการข้อความที่อ่านได้จาก QR code
 async function handleDecodedQr(decodedText, options = {}) {
     let documentUrl;
     try {
@@ -1119,6 +1142,7 @@ async function handleDecodedQr(decodedText, options = {}) {
     return true;
 }
 
+// หน้าที่: หยุดกล้องและคืนทรัพยากรของตัวสแกน
 async function stopScanner() {
     const scanner = html5QrCode;
     html5QrCode = null;
@@ -1135,6 +1159,7 @@ async function stopScanner() {
 // ==========================================
 // 🌟 5. รันเลขรับอัตโนมัติ
 // ==========================================
+// หน้าที่: ขอเลขรับเอกสารล่าสุดจากระบบอัตโนมัติ
 async function autoReceiveNo() {
     try {
         const res = await fetch("{{ route('documents.api_next_number') }}?type=incoming");
@@ -1173,6 +1198,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 // 🌟 6. ให้ AI ดึงข้อมูลจากไฟล์ที่แนบ
 // ==========================================
+// หน้าที่: ติดตามสถานะงานดึงข้อมูลจนเสร็จหรือหมดเวลา
 async function waitForExtractionTask(statusUrl) {
     const maxAttempts = 480; // สูงสุดประมาณ 16 นาที รองรับ OCR เอกสารขนาดใหญ่
 
@@ -1203,6 +1229,7 @@ async function waitForExtractionTask(statusUrl) {
     throw new Error('งาน OCR ใช้เวลานานเกินกำหนด กรุณาลองใหม่อีกครั้ง');
 }
 
+// หน้าที่: ส่งไฟล์แนบไปดึงข้อมูลและเติมลงแบบฟอร์ม
 async function extractFromAttached() {
     const fileInput = document.getElementById('file_input');
 

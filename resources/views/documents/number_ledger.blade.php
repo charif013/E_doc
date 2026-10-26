@@ -1,3 +1,4 @@
+{{-- View: หน้าสมุดคุมเลขหนังสือและเลขสารบรรณ --}}
 @extends('layouts.app')
 @section('title', 'สมุดคุมเลขสารบรรณ')
 
@@ -31,11 +32,10 @@
                     <option value="outgoing" {{ $type == 'outgoing' ? 'selected' : '' }}>📤 หนังสือส่งออก</option>
                     <option value="incoming" {{ $type == 'incoming' ? 'selected' : '' }}>📥 หนังสือรับเข้า</option>
                     <option value="internal" {{ $type == 'internal' ? 'selected' : '' }}>📝 บันทึกข้อความ</option>
-                    <option value="leave" {{ $type == 'leave' ? 'selected' : '' }}>🏖️ ทะเบียนใบลา</option>
                 </select>
 
-                {{-- บันทึกข้อความและทะเบียนใบลาแยกสมุดตามสำนัก/กอง --}}
-                @if(in_array($type, ['internal', 'leave']))
+                {{-- บันทึกข้อความแยกสมุดตามสำนัก/กอง --}}
+                @if($type === 'internal')
                 <select name="department" class="form-select form-select-sm shadow-sm text-primary fw-bold" onchange="this.form.submit()" style="width: 200px;">
                     @foreach($departments as $d)
                         <option value="{{ $d }}" {{ $dept == $d ? 'selected' : '' }}>{{ $d }}</option>
@@ -89,7 +89,7 @@
                         @endphp
 
                         <tr style="background: {{ $bgRow }}">
-                            <td class="fw-bold fs-5" style="color: {{ $status === 'ว่าง' ? '#cbd5e1' : 'var(--primary)' }}">{{ $toThaiDigits($num) }}</td>
+                            <td class="fw-bold fs-5" style="color: {{ $status === 'ว่าง' ? '#475569' : 'var(--primary)' }}">{{ $toThaiDigits($num) }}</td>
                             <td>
                                 @if($status === 'ว่าง')
                                     <span class="badge bg-secondary-subtle text-secondary rounded-pill px-3">ยังไม่ออกเลข</span>
@@ -104,20 +104,10 @@
                                 @endif
                             </td>
                             <td class="fw-bold text-dark">
-                                {{ $toThaiDigits($type === 'leave'
-                                    ? ($doc->leave_number ?? '-')
-                                    : ($type === 'incoming' ? ($doc->formatted_receive_number ?? '-') : ($doc->formatted_doc_number ?? '-'))) }}
+                                {{ $toThaiDigits($type === 'incoming' ? ($doc->formatted_receive_number ?? '-') : ($doc->formatted_doc_number ?? '-')) }}
                             </td>
                             <td class="text-start">
-                                @if($doc && $type === 'leave')
-                                    <a href="{{ route('leaves.show', $doc->id) }}" class="text-decoration-none text-success-emphasis fw-bold">
-                                        {{ $toThaiDigits($doc->leave_type) }} — {{ $toThaiDigits($doc->user->name ?? 'ไม่ทราบชื่อ') }}
-                                    </a>
-                                    <div class="small text-muted mt-1">
-                                        {{ $toThaiDigits(\Carbon\Carbon::parse($doc->start_date)->format('d/m/Y')) }} - {{ $toThaiDigits(\Carbon\Carbon::parse($doc->end_date)->format('d/m/Y')) }}
-                                        · ลงเลขโดย {{ $toThaiDigits($doc->numberedBy->name ?? 'ระบบ') }}
-                                    </div>
-                                @elseif($doc)
+                                @if($doc)
                                     @if($status === 'จองรออนุมัติ' || $status === 'จองเลขมือ')
                                         {{-- 🌟 ลิงก์ UUID --}}
                                         <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="text-warning-emphasis fw-bold text-decoration-none">{{ $toThaiDigits($doc->title) }}</a><br>
@@ -138,7 +128,7 @@
                                 @endif
                             </td>
                             <td>
-                                @if($status === 'ว่าง' && $type !== 'leave' && auth()->user()->hasAnyRole(['super-admin', 'palad', 'saraban']))
+                                @if($status === 'ว่าง' && auth()->user()->hasRole('saraban'))
                                     <form action="{{ route('documents.reserve_number_slot') }}" method="POST" class="m-0">
                                         @csrf
                                         <input type="hidden" name="type" value="{{ $type }}">
@@ -148,8 +138,6 @@
                                             <i class="fas fa-lock"></i> จองเลขนี้
                                         </button>
                                     </form>
-                                @elseif($status === 'ว่าง')
-                                    <button class="btn btn-light btn-sm text-muted rounded-pill" disabled>ออกเลขจากหน้าใบลา</button>
                                 @else
                                     <button class="btn btn-light btn-sm text-muted rounded-pill shadow-none" disabled>ถูกใช้งานแล้ว</button>
                                 @endif

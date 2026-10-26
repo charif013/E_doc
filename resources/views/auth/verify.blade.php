@@ -1,3 +1,8 @@
+{{-- View: หน้าแจ้งให้ผู้ใช้ยืนยันอีเมล (ปัจจุบันปิดการใช้งาน) --}}
+{{--
+UNUSED VIEW (2026-10-05): This file is intentionally disabled.
+Email-verification routes are not enabled in the current route configuration.
+
 @extends('layouts.app')
 
 @section('content')
@@ -26,3 +31,4 @@
     </div>
 </div>
 @endsection
+--}}

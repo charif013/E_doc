@@ -1,3 +1,4 @@
+{{-- View: หน้ากรอกรหัสเพื่อปลดล็อกเอกสารลับ --}}
 @extends('layouts.app')
 
 @section('title', 'ปลดล็อกเอกสารลับ')
@@ -46,6 +47,7 @@
 @section('scripts')
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function () {
         @if(session('error_pin'))
             Swal.fire({ icon: 'error', title: 'รหัสไม่ถูกต้อง', text: '{{ session("error_pin") }}', confirmButtonColor: '#ef4444' });

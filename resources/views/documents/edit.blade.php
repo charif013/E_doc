@@ -1,3 +1,4 @@
+{{-- View: หน้าแก้ไขบันทึกข้อความภายใน --}}
 @extends('layouts.app')
 @section('title', 'แก้ไขบันทึกข้อความ')
 
@@ -277,6 +278,7 @@
 
 {{-- 🌟 ส่วนของ JavaScript การทำงาน 🌟 --}}
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     
     // เริ่มต้นใช้งาน Select2 สำหรับช่อง เรียน
@@ -294,6 +296,7 @@ document.addEventListener('DOMContentLoaded', function () {
         altInput: true,
         altFormat: "d F Y",
         dateFormat: "Y-m-d",
+        // หน้าที่: จัดรูปแบบวันที่ของปฏิทินให้ตรงกับรูปแบบที่ร้องขอ
         formatDate: function(date, format, locale) {
             let d = date.getDate();
             let m = date.toLocaleString('th-TH', { month: 'long' });
@@ -309,6 +312,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // 🌟 ฟังก์ชันโหลดโครงสร้าง Template
+// หน้าที่: โหลดแม่แบบเนื้อหาตามประเภทที่ผู้ใช้เลือก
 function loadTemplate(type, event) {
     if(event) event.preventDefault(); 
     const textarea = document.getElementById('doc_content');

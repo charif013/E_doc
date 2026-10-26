@@ -2,16 +2,22 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\User;
-use Spatie\Permission\Models\Role;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\Rule;
 use App\Services\AuditLogger;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
+use Spatie\Permission\Models\Role;
 
 class UserController extends Controller
 {
+    private const EMPLOYMENT_TYPES = [
+        'local_employee' => 'พนักงานส่วนท้องถิ่น',
+        'contract_employee' => 'พนักงานจ้างตามภารกิจ',
+        'general_employee' => 'พนักงานจ้างทั่วไป',
+    ];
+
     // ── กำหนดรายชื่อตำแหน่งหน้าที่ทั้งหมดใน อบต.พร่อน ──
     protected $positions = [
         'แอดมิน', 'นักวิชาการคอมพิวเตอร์',
@@ -23,7 +29,7 @@ class UserController extends Controller
         'ผู้อำนวยการกองช่าง', 'นายช่างโยธา', 'ผช.นายช่างโยธา',
         'ผู้อำนวยการกองสาธารณสุขฯ', 'นักวิชาการสุขาภิบาล',
         'ผู้อำนวยการกองการศึกษาฯ', 'นักวิชาการศึกษา', 'ครู', 'ผช.ครูผู้ดูแลเด็ก', 'ผู้ดูแลเด็ก',
-        'นักวิชาการตรวจสอบภายใน'
+        'นักวิชาการตรวจสอบภายใน',
     ];
 
     public function index()
@@ -31,7 +37,9 @@ class UserController extends Controller
         // ดึงรายชื่อผู้ใช้ที่ยังไม่ถูกลบ พร้อมโหลด Role มาแสดง
         $users = User::with('roles')->get();
         $roles = Role::all();
-        return view('users.index', compact('users', 'roles'));
+        $employmentTypes = self::EMPLOYMENT_TYPES;
+
+        return view('users.index', compact('users', 'roles', 'employmentTypes'));
     }
 
     public function store(Request $request)
@@ -48,6 +56,9 @@ class UserController extends Controller
             'name' => 'required|string|max:255',
             'email' => ['required', 'email', Rule::unique('users')->whereNull('deleted_at')],
             'password' => 'required|string|min:6',
+            'employment_type' => ['required', Rule::in(array_keys(self::EMPLOYMENT_TYPES))],
+            'employment_started_at' => ['nullable', 'date', 'before_or_equal:today', 'required_if:employment_type,contract_employee'],
+            'vacation_eligible_at' => ['nullable', 'date', 'before_or_equal:today'],
             'department' => 'required|string',
             'division' => 'required|string',
             'position' => ['required', 'string', Rule::in($this->positions)],
@@ -59,6 +70,9 @@ class UserController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
+            'employment_type' => $request->employment_type,
+            'employment_started_at' => $request->employment_started_at,
+            'vacation_eligible_at' => $request->vacation_eligible_at,
             'department' => $request->department,
             'division' => $request->division,
             'position' => $request->position,
@@ -78,16 +92,22 @@ class UserController extends Controller
 
         $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email,' . $user->id,
+            'email' => 'required|email|unique:users,email,'.$user->id,
             'password' => 'nullable|string|min:6',
             'name_prefix' => 'required|in:นาย,นาง,นางสาว',
-            'role' => 'nullable|string'
+            'employment_type' => ['required', Rule::in(array_keys(self::EMPLOYMENT_TYPES))],
+            'employment_started_at' => ['nullable', 'date', 'before_or_equal:today', 'required_if:employment_type,contract_employee'],
+            'vacation_eligible_at' => ['nullable', 'date', 'before_or_equal:today'],
+            'role' => 'nullable|string',
         ]);
 
         $user->name = $request->name;
         $user->email = $request->email;
         $user->name_prefix = $request->name_prefix;
         $user->gender = $request->name_prefix === 'นาย' ? 'male' : 'female';
+        $user->employment_type = $request->employment_type;
+        $user->employment_started_at = $request->employment_started_at;
+        $user->vacation_eligible_at = $request->vacation_eligible_at;
 
         if ($request->filled('password')) {
             $user->password = Hash::make($request->password);
@@ -110,13 +130,14 @@ class UserController extends Controller
     public function destroy($id)
     {
         $user = User::findOrFail($id);
-        
+
         // ห้ามลบตัวเอง
         if (Auth::id() == $user->id) {
             return response()->json(['message' => 'ไม่สามารถลบบัญชีของตัวเองได้'], 403);
         }
 
         $user->delete(); // Soft Delete
+
         return response()->json(['message' => 'ระงับการใช้งานบัญชีเรียบร้อยแล้ว (ย้ายไปถังขยะ)']);
     }
 
@@ -127,9 +148,9 @@ class UserController extends Controller
     {
         // ค้นหา User จากใน "ถังขยะ (Trashed)"
         $user = User::onlyTrashed()->findOrFail($id);
-        
+
         // สั่งกู้คืนบัญชี
-        $user->restore(); 
+        $user->restore();
 
         return redirect()->route('users.index')->with('success', "กู้คืนบัญชีของ {$user->name} สำเร็จเรียบร้อยแล้ว");
     }
@@ -147,32 +168,10 @@ class UserController extends Controller
             $roles[] = 'executive';
         } elseif ($pos === 'ปลัด อบต.') {
             $roles[] = 'palad';
-        } elseif ($pos === 'รองปลัด อบต.') {
-            $roles[] = 'deputy-palad';
         } elseif (str_contains($pos, 'ผู้อำนวยการ') || $pos === 'หัวหน้าสำนักปลัด อบต.') {
             $roles[] = 'head';
-        } elseif (str_contains($pos, 'การเงิน') || str_contains($pos, 'จัดเก็บรายได้')) {
-            $roles[] = 'finance';
-        } elseif (str_contains($pos, 'พัสดุ')) {
-            $roles[] = 'parcel';
         } elseif ($pos === 'นักทรัพยากรบุคคล') {
             $roles[] = 'hr';
-        } elseif ($pos === 'นักวิเคราะห์นโยบายและแผน') {
-            $roles[] = 'analyst';
-        } elseif (str_contains($pos, 'ช่างโยธา')) {
-            $roles[] = 'engineer';
-        } elseif ($pos === 'นักวิชาการศึกษา') {
-            $roles[] = 'education';
-        } elseif ($pos === 'ครู') {
-            $roles[] = 'teacher';
-        } elseif (in_array($pos, ['ผช.ครูผู้ดูแลเด็ก', 'ผู้ดูแลเด็ก'])) {
-            $roles[] = 'childcare';
-        } elseif ($pos === 'นักวิชาการสุขาภิบาล') {
-            $roles[] = 'health';
-        } elseif (str_contains($pos, 'ป้องกันและบรรเทาสาธารณภัย')) {
-            $roles[] = 'disaster';
-        } elseif ($pos === 'นักวิชาการตรวจสอบภายใน') {
-            $roles[] = 'auditor';
         } elseif (in_array($pos, ['เจ้าพนักงานธุรการ', 'ผช.เจ้าพนักงานธุรการ'])) {
             $roles[] = ($user->department === 'สำนักงานปลัด') ? 'saraban' : 'officer';
         } elseif (in_array($pos, ['พนักงานขับรถยนต์', 'คนงาน', 'ภารโรง'])) {
@@ -191,10 +190,10 @@ class UserController extends Controller
     public function clearUserPin($id)
     {
         // ดึงข้อมูล User จากฐานข้อมูล (ใส่ \App\Models\User เพื่อป้องกันหาคลาสไม่เจอ)
-        $user = \App\Models\User::findOrFail($id);
+        $user = User::findOrFail($id);
 
         // เช็คความปลอดภัย: ถ้า User ไม่ได้กดขอมา แอดมินจะลบไม่ได้ (ป้องกันแอดมินลบเอง)
-        if (!$user->pin_reset_requested) {
+        if (! $user->pin_reset_requested) {
             return back()->with('error', 'ไม่สามารถล้างรหัสได้ เนื่องจากผู้ใช้ไม่ได้ส่งคำขอมา!');
         }
 

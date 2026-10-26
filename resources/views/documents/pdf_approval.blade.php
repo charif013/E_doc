@@ -1,3 +1,4 @@
+{{-- View: แม่แบบ PDF ใบแนบท้ายการอนุมัติเอกสาร --}}
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -46,7 +47,9 @@
 
     @php
         // 🌟 1. ดักจับฟังก์ชันแปลงเลขไทย
+        // หน้าที่: ประมวลผล callback ของส่วนนี้
         if (!function_exists('toThaiNum')) {
+            // หน้าที่: แปลงตัวเลขอารบิกเป็นเลขไทยสำหรับแสดงในเอกสาร
             function toThaiNum($string) {
                 if (!$string) return '';
                 $arabic = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -56,7 +59,9 @@
         }
 
         // 🌟 2. ดักจับ Path รูปภาพให้ DOMPDF หาไฟล์เจอแน่นอน 100%
+        // หน้าที่: ประมวลผล callback ของส่วนนี้
         if (!function_exists('getPdfSigPath')) {
+            // หน้าที่: แปลงที่อยู่ไฟล์ลายเซ็นสำหรับใช้สร้าง PDF
             function getPdfSigPath($path) {
                 if (empty($path)) return '';
                 if (str_starts_with($path, 'data:image')) return $path;

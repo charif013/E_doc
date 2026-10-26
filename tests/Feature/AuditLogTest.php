@@ -50,12 +50,12 @@ class AuditLogTest extends TestCase
         $log->update(['event' => 'tampered']);
     }
 
-    public function test_auditor_can_filter_the_activity_history_by_actor(): void
+    public function test_super_admin_can_filter_the_activity_history_by_actor(): void
     {
-        Role::create(['name' => 'auditor']);
-        /** @var User $auditor */
-        $auditor = User::factory()->create();
-        $auditor->assignRole('auditor');
+        Role::create(['name' => 'super-admin']);
+        /** @var User $admin */
+        $admin = User::factory()->create();
+        $admin->assignRole('super-admin');
         /** @var User $actor */
         $actor = User::factory()->create(['name' => 'ผู้ทดสอบประวัติ']);
 
@@ -68,7 +68,7 @@ class AuditLogTest extends TestCase
             'ip_address' => '127.0.0.1',
         ]);
 
-        $this->actingAs($auditor);
+        $this->actingAs($admin);
         $response = $this->get(route('admin.audit_logs.index', [
             'event' => 'document.test_viewed',
             'user_id' => $actor->id,

@@ -1,3 +1,4 @@
+{{-- View: หน้าปฏิทินและรายการจองห้องประชุม --}}
 @extends('layouts.app')
 
 @section('content')
@@ -182,6 +183,7 @@
     $userId = Auth::id();
     $isAdmin = Auth::user()->hasRole('super-admin');
 
+    // หน้าที่: เตรียมข้อมูลการจองที่ผู้ใช้มีสิทธิ์เห็นก่อนส่งไปยังปฏิทิน
     $safeBookings = $bookings->map(function($booking) use ($userId, $isAdmin) {
         $canSee = false;
         if ($booking->booking_type !== 'meeting' || $isAdmin) {
@@ -214,11 +216,13 @@
 
 {{-- 🌟 Script ควบคุมปฏิทิน --}}
 <script>
+  // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
   document.addEventListener('DOMContentLoaded', function() {
     var calendarEl = document.getElementById('calendar');
     var bookings = @json($safeBookings);
     var holidays = @json($holidays);
     
+    // หน้าที่: แปลงข้อมูลการจองเป็นรายการเหตุการณ์ของปฏิทิน
     var events = bookings.map(function(booking) {
         let eventColor = '#10b981'; 
         if(booking.booking_type === 'meeting') eventColor = '#3b82f6'; 
@@ -240,6 +244,7 @@
         };
     });
 
+    // หน้าที่: เพิ่มวันหยุดลงในรายการเหตุการณ์ของปฏิทิน
     holidays.forEach(function(holiday) {
         events.push({
             title: 'วันหยุด: ' + holiday.name,
@@ -267,6 +272,7 @@
         ? { center: 'listMonth,dayGridMonth,timeGridDay' }
         : false,
       events: events, 
+      // หน้าที่: เปิดรายละเอียดเมื่อผู้ใช้คลิกรายการบนปฏิทิน
       eventClick: function(info) {
           if (info.event.extendedProps.isHoliday) {
               alert('วันหยุด: ' + info.event.extendedProps.holidayName + '\nวันที่: ' + info.event.start.toLocaleDateString('th-TH'));

@@ -12,8 +12,8 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -43,12 +43,35 @@ class LeaveRequest extends Model
         'numbered_at' => 'datetime', 'submitted_at' => 'datetime',
     ];
 
-    public function user(): BelongsTo { return $this->belongsTo(User::class, 'user_id'); }
-    public function type(): BelongsTo { return $this->belongsTo(LeaveType::class, 'leave_type_id'); }
-    public function delegate(): BelongsTo { return $this->belongsTo(User::class, 'delegate_user_id'); }
-    public function workflow(): HasOne { return $this->hasOne(WorkflowInstance::class, 'leave_request_id'); }
-    public function numberAllocation(): HasOne { return $this->hasOne(NumberAllocation::class, 'leave_request_id'); }
-    public function attachments(): HasMany { return $this->hasMany(LeaveRequestAttachment::class, 'leave_request_id'); }
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function type(): BelongsTo
+    {
+        return $this->belongsTo(LeaveType::class, 'leave_type_id');
+    }
+
+    public function delegate(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'delegate_user_id');
+    }
+
+    public function workflow(): HasOne
+    {
+        return $this->hasOne(WorkflowInstance::class, 'leave_request_id');
+    }
+
+    public function numberAllocation(): HasOne
+    {
+        return $this->hasOne(NumberAllocation::class, 'leave_request_id');
+    }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(LeaveRequestAttachment::class, 'leave_request_id');
+    }
 
     protected static function booted(): void
     {
@@ -69,8 +92,12 @@ class LeaveRequest extends Model
         return Attribute::make(
             get: fn ($value) => $this->usesCanonicalWorkflow() ? $this->type?->name : $value,
             set: function (?string $name) {
-                if (! $name) { return []; }
-                if (! $this->usesCanonicalWorkflow()) { return $name; }
+                if (! $name) {
+                    return [];
+                }
+                if (! $this->usesCanonicalWorkflow()) {
+                    return $name;
+                }
                 $db = DB::connection($this->getConnectionName());
                 $type = $db->table('leave_types')->where('name', $name)->first();
                 $id = $type?->id ?: $db->table('leave_types')->insertGetId([
@@ -95,9 +122,15 @@ class LeaveRequest extends Model
     protected function status(): Attribute
     {
         return Attribute::get(function ($value) {
-            if ($this->is_draft) { return 'DRAFT'; }
-            if (! $this->usesCanonicalWorkflow()) { return $value; }
-            if (! $this->workflow) { return strtoupper((string) $value) ?: 'PENDING'; }
+            if ($this->is_draft) {
+                return 'DRAFT';
+            }
+            if (! $this->usesCanonicalWorkflow()) {
+                return $value;
+            }
+            if (! $this->workflow) {
+                return strtoupper((string) $value) ?: 'PENDING';
+            }
             $status = strtoupper((string) $this->workflow?->status?->value);
 
             return in_array($status, ['APPROVED', 'REJECTED', 'CANCELED', 'COMPLETED'], true)
@@ -108,18 +141,28 @@ class LeaveRequest extends Model
     protected function workflowStatus(): Attribute
     {
         return Attribute::get(function ($value) {
-            if ($this->is_draft) { return 'draft'; }
-            if (! $this->usesCanonicalWorkflow()) { return $value; }
+            if ($this->is_draft) {
+                return 'draft';
+            }
+            if (! $this->usesCanonicalWorkflow()) {
+                return $value;
+            }
             $workflow = $this->workflow;
             $terminal = strtolower((string) $workflow?->status?->value);
             if (in_array($terminal, ['approved', 'rejected', 'canceled', 'completed'], true)) {
                 return $terminal;
             }
-            if (! $workflow) { return $value; }
+            if (! $workflow) {
+                return $value;
+            }
             if ((int) $workflow->current_step === 1) {
                 $lastAction = $this->evidenceForStep(1)?->action;
-                if ($lastAction === 'DECLINED') { return 'delegate_declined'; }
-                if ($lastAction === 'ESCALATED') { return 'delegate_escalated'; }
+                if ($lastAction === 'DECLINED') {
+                    return 'delegate_declined';
+                }
+                if ($lastAction === 'ESCALATED') {
+                    return 'delegate_escalated';
+                }
             }
 
             return match ((int) $workflow->current_step) {
@@ -137,47 +180,205 @@ class LeaveRequest extends Model
         });
     }
 
-    protected function delegateDeclineReason(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['DECLINED'])?->comment : $v); }
-    protected function delegateRequestedAt(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->workflowStep(1)?->created_at : $v); }
-    protected function delegateRespondedAt(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['ACCEPTED', 'DECLINED'])?->acted_at : $v); }
-    protected function delegateRemindedAt(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['REMINDER_SENT'])?->acted_at : $v); }
-    protected function delegateEscalatedAt(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['ESCALATED'])?->acted_at : $v); }
-    protected function leaveNumber(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->numberAllocation?->formatted_number : $v); }
-    protected function runningNumber(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->numberAllocation?->running_number : $v); }
-    protected function numberedBy(): Attribute { return Attribute::get(fn () => ($id = $this->usesCanonicalWorkflow() ? $this->numberAllocation?->allocated_by : $this->attributes['numbered_by'] ?? null) ? User::find($id) : null); }
-    protected function numberedAt(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->numberAllocation?->allocated_at : $v); }
-    protected function rejectReason(): Attribute { return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->latestEvidence(['REJECTED'])?->comment : $v); }
+    protected function delegateDeclineReason(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['DECLINED'])?->comment : $v);
+    }
 
-    public function getInspectorIdAttribute(): ?int { return $this->actorIdForStep(3); }
-    public function getHeadIdAttribute(): ?int { return $this->actorIdForStep(2); }
-    public function getSupervisorIdAttribute(): ?int { return $this->head_id; }
-    public function getPaladIdAttribute(): ?int { return $this->actorIdForStep(5); }
-    public function getNayokIdAttribute(): ?int { return $this->actorIdForStep(6); }
-    public function getInspectorStatusAttribute(): ?string { return $this->legacyApprovalStatus(3); }
-    public function getHeadStatusAttribute(): ?string { return $this->legacyApprovalStatus(2); }
-    public function getPaladStatusAttribute(): ?string { return $this->legacyApprovalStatus(5); }
-    public function getNayokStatusAttribute(): ?string { return $this->legacyApprovalStatus(6); }
-    public function getInspectorAtAttribute($value): mixed { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(3)?->acted_at : $value; }
-    public function getHeadAtAttribute($value): mixed { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(2)?->acted_at : $value; }
-    public function getSupervisorApprovedAtAttribute(): mixed { return $this->head_at; }
-    public function getPaladAtAttribute($value): mixed { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(5)?->acted_at : $value; }
-    public function getPaladApprovedAtAttribute(): mixed { return $this->palad_at; }
-    public function getNayokAtAttribute($value): mixed { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(6)?->acted_at : $value; }
-    public function getNayokApprovedAtAttribute(): mixed { return $this->nayok_at; }
-    public function getInspectorSignatureAttribute(): ?string { return $this->signatureForStep(3); }
-    public function getHeadSignatureAttribute(): ?string { return $this->signatureForStep(2); }
-    public function getSupervisorSignatureAttribute(): ?string { return $this->head_signature; }
-    public function getPaladSignatureAttribute(): ?string { return $this->signatureForStep(5); }
-    public function getNayokSignatureAttribute(): ?string { return $this->signatureForStep(6); }
-    public function getHeadCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(2)?->comment : $value; }
-    public function getInspectorCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(3)?->comment : $value; }
-    public function getPaladCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(5)?->comment : $value; }
-    public function getNayokCommentAttribute($value): ?string { return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(6)?->comment : $value; }
-    public function getInspectorAttribute(): ?User { return $this->actorForStep(3); }
-    public function getHeadAttribute(): ?User { return $this->actorForStep(2); }
-    public function getSupervisorAttribute(): ?User { return $this->head; }
-    public function getPaladAttribute(): ?User { return $this->actorForStep(5); }
-    public function getNayokAttribute(): ?User { return $this->actorForStep(6); }
+    protected function delegateRequestedAt(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->workflowStep(1)?->created_at : $v);
+    }
+
+    protected function delegateRespondedAt(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['ACCEPTED', 'DECLINED'])?->acted_at : $v);
+    }
+
+    protected function delegateRemindedAt(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['REMINDER_SENT'])?->acted_at : $v);
+    }
+
+    protected function delegateEscalatedAt(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->evidenceForStep(1, ['ESCALATED'])?->acted_at : $v);
+    }
+
+    protected function leaveNumber(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->numberAllocation?->formatted_number : $v);
+    }
+
+    protected function runningNumber(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->numberAllocation?->running_number : $v);
+    }
+
+    protected function numberedBy(): Attribute
+    {
+        return Attribute::get(fn () => ($id = $this->usesCanonicalWorkflow() ? $this->numberAllocation?->allocated_by : $this->attributes['numbered_by'] ?? null) ? User::find($id) : null);
+    }
+
+    protected function numberedAt(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->numberAllocation?->allocated_at : $v);
+    }
+
+    protected function rejectReason(): Attribute
+    {
+        return Attribute::get(fn ($v) => $this->usesCanonicalWorkflow() ? $this->latestEvidence(['REJECTED'])?->comment : $v);
+    }
+
+    public function getInspectorIdAttribute(): ?int
+    {
+        return $this->actorIdForStep(3);
+    }
+
+    public function getHeadIdAttribute(): ?int
+    {
+        return $this->actorIdForStep(2);
+    }
+
+    public function getSupervisorIdAttribute(): ?int
+    {
+        return $this->head_id;
+    }
+
+    public function getPaladIdAttribute(): ?int
+    {
+        return $this->actorIdForStep(5);
+    }
+
+    public function getNayokIdAttribute(): ?int
+    {
+        return $this->actorIdForStep(6);
+    }
+
+    public function getInspectorStatusAttribute(): ?string
+    {
+        return $this->legacyApprovalStatus(3);
+    }
+
+    public function getHeadStatusAttribute(): ?string
+    {
+        return $this->legacyApprovalStatus(2);
+    }
+
+    public function getPaladStatusAttribute(): ?string
+    {
+        return $this->legacyApprovalStatus(5);
+    }
+
+    public function getNayokStatusAttribute(): ?string
+    {
+        return $this->legacyApprovalStatus(6);
+    }
+
+    public function getInspectorAtAttribute($value): mixed
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(3)?->acted_at : $value;
+    }
+
+    public function getHeadAtAttribute($value): mixed
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(2)?->acted_at : $value;
+    }
+
+    public function getSupervisorApprovedAtAttribute(): mixed
+    {
+        return $this->head_at;
+    }
+
+    public function getPaladAtAttribute($value): mixed
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(5)?->acted_at : $value;
+    }
+
+    public function getPaladApprovedAtAttribute(): mixed
+    {
+        return $this->palad_at;
+    }
+
+    public function getNayokAtAttribute($value): mixed
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(6)?->acted_at : $value;
+    }
+
+    public function getNayokApprovedAtAttribute(): mixed
+    {
+        return $this->nayok_at;
+    }
+
+    public function getInspectorSignatureAttribute(): ?string
+    {
+        return $this->signatureForStep(3);
+    }
+
+    public function getHeadSignatureAttribute(): ?string
+    {
+        return $this->signatureForStep(2);
+    }
+
+    public function getSupervisorSignatureAttribute(): ?string
+    {
+        return $this->head_signature;
+    }
+
+    public function getPaladSignatureAttribute(): ?string
+    {
+        return $this->signatureForStep(5);
+    }
+
+    public function getNayokSignatureAttribute(): ?string
+    {
+        return $this->signatureForStep(6);
+    }
+
+    public function getHeadCommentAttribute($value): ?string
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(2)?->comment : $value;
+    }
+
+    public function getInspectorCommentAttribute($value): ?string
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(3)?->comment : $value;
+    }
+
+    public function getPaladCommentAttribute($value): ?string
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(5)?->comment : $value;
+    }
+
+    public function getNayokCommentAttribute($value): ?string
+    {
+        return $this->usesCanonicalWorkflow() ? $this->evidenceForStep(6)?->comment : $value;
+    }
+
+    public function getInspectorAttribute(): ?User
+    {
+        return $this->actorForStep(3);
+    }
+
+    public function getHeadAttribute(): ?User
+    {
+        return $this->actorForStep(2);
+    }
+
+    public function getSupervisorAttribute(): ?User
+    {
+        return $this->head;
+    }
+
+    public function getPaladAttribute(): ?User
+    {
+        return $this->actorForStep(5);
+    }
+
+    public function getNayokAttribute(): ?User
+    {
+        return $this->actorForStep(6);
+    }
 
     public function scopeAtWorkflowStage(Builder $query, string|array $stages): Builder
     {
@@ -224,7 +425,7 @@ class LeaveRequest extends Model
                 ->whereHas('user', fn (Builder $users) => $users
                     ->where('department', $user->department));
         }
-        if ($user->hasAnyRole(['palad', 'deputy-palad'])) {
+        if ($user->hasRole('palad')) {
             return $query->atWorkflowStage('pending_palad');
         }
         if ($user->hasRole('executive')) {
@@ -250,7 +451,9 @@ class LeaveRequest extends Model
     {
         $query = WorkflowActionEvidence::where('resource_type', 'LEAVE')
             ->where('resource_id', $this->getKey())->where('step_order', $order);
-        if ($actions) { $query->whereIn('action', $actions); }
+        if ($actions) {
+            $query->whereIn('action', $actions);
+        }
 
         return $query->latest('acted_at')->latest('id')->first();
     }
@@ -265,17 +468,28 @@ class LeaveRequest extends Model
     {
         if (! $this->usesCanonicalWorkflow()) {
             $column = [2 => 'head_id', 3 => 'inspector_id', 5 => 'palad_id', 6 => 'nayok_id'][$order] ?? null;
+
             return $column ? ($this->attributes[$column] ?? null) : null;
         }
+
         return $this->evidenceForStep($order)?->actor_id;
     }
-    private function actorForStep(int $order): ?User { $id = $this->actorIdForStep($order); return $id ? User::find($id) : null; }
+
+    private function actorForStep(int $order): ?User
+    {
+        $id = $this->actorIdForStep($order);
+
+        return $id ? User::find($id) : null;
+    }
+
     private function legacyApprovalStatus(int $order): ?string
     {
         if (! $this->usesCanonicalWorkflow()) {
             $column = [2 => 'head_status', 3 => 'inspector_status', 5 => 'palad_status', 6 => 'nayok_status'][$order] ?? null;
+
             return $column ? ($this->attributes[$column] ?? null) : null;
         }
+
         return $this->evidenceForStep($order)?->action === 'APPROVED' ? 'approved' : null;
     }
 
@@ -283,11 +497,16 @@ class LeaveRequest extends Model
     {
         if (! $this->usesCanonicalWorkflow()) {
             $column = [2 => 'head_signature', 3 => 'inspector_signature', 5 => 'palad_signature', 6 => 'nayok_signature'][$order] ?? null;
+
             return $column ? ($this->attributes[$column] ?? null) : null;
         }
         $evidence = $this->evidenceForStep($order);
-        if (! $evidence) { return null; }
-        if ($evidence->signature_snapshot) { return $evidence->signature_snapshot; }
+        if (! $evidence) {
+            return null;
+        }
+        if ($evidence->signature_snapshot) {
+            return $evidence->signature_snapshot;
+        }
         if ($evidence->signature_path && Storage::disk('local')->exists($evidence->signature_path)) {
             return 'data:image/png;base64,'.base64_encode(Storage::disk('local')->get($evidence->signature_path));
         }

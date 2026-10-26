@@ -1,3 +1,4 @@
+{{-- View: หน้าใบเกษียนและเส้นทางหนังสือรับเข้าสำหรับพิมพ์ --}}
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -168,6 +169,7 @@
     </div>
     
     <script>
+    // หน้าที่: สั่งพิมพ์ใบเดินทางเมื่อหน้าโหลดเสร็จ
     window.onload = function() {
         const urlParams = new URLSearchParams(window.location.search);
         const isPreview = urlParams.has('preview');

@@ -1,3 +1,8 @@
+{{-- View: หน้าแสดงรายละเอียดเอกสารที่อัปโหลด (ปัจจุบันปิดการใช้งาน) --}}
+{{--
+UNUSED VIEW (2026-10-05): This file is intentionally disabled.
+No controller or dynamic view mapping renders "documents.show_upload".
+
 @extends('layouts.app')
 @section('title', 'รายละเอียดเอกสาร')
 
@@ -23,13 +28,13 @@
         $isReviewer = (
             ($user->hasRole('saraban') && in_array($document->status, ['WAITING_ADMIN', 'WAITING_NUMBERING'])) ||
             ($user->hasRole('head')      && $document->status === 'WAITING_SUPERVISOR') ||
-            ($user->hasAnyRole(['palad', 'deputy-palad']) && $document->status === 'WAITING_PALAD') ||
+            ($user->hasRole('palad') && $document->status === 'WAITING_PALAD') ||
             ($user->hasRole('executive') && $document->status === 'WAITING_NAYOK')
         );
     @endphp
 
     <div class="row g-4">
-        {{-- 📄 คอลัมน์ซ้าย: แสดงไฟล์ PDF --}}
+        <!-- 📄 คอลัมน์ซ้าย: แสดงไฟล์ PDF -->
         <div class="col-xl-7">
             <div class="card border-0 shadow-sm mb-4" style="border-radius: 16px;">
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
@@ -39,7 +44,7 @@
                     <div class="row g-3">
                         <div class="col-md-6">
                             <div class="text-muted small fw-bold mb-1">วันที่บนเอกสาร</div>
-                            {{-- 🌟 แสดงวันที่ไทย (ชื่อเดือนเต็ม) --}}
+                            <!-- 🌟 แสดงวันที่ไทย (ชื่อเดือนเต็ม) -->
                             <div class="text-dark fw-bold">{{ $document->doc_date ? \Carbon\Carbon::parse($document->doc_date)->addYears(543)->locale('th')->translatedFormat('d F Y') : '-' }}</div>
                         </div>
                         <div class="col-md-6">
@@ -53,12 +58,12 @@
             <div class="mb-3 d-flex justify-content-between align-items-center">
                 <h6 class="fw-bold mb-0"><i class="fas fa-file-pdf me-2 text-danger"></i>เอกสารแนบต้นฉบับ</h6>
                 <div>
-                    {{-- ปุ่มดูต้นฉบับ --}}
+                    <!-- ปุ่มดูต้นฉบับ -->
                     <a href="{{ route('documents.file', [$document->uuid ?? $document->id, 'main']) }}" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold me-2 bg-white">
                         <i class="fas fa-file-alt me-1"></i>ดูต้นฉบับ
                     </a>
                     
-                    {{-- 🌟 จุดที่ 1: เปลี่ยนลิงก์ดาวน์โหลดเป็น UUID --}}
+                    <!-- 🌟 จุดที่ 1: เปลี่ยนลิงก์ดาวน์โหลดเป็น UUID -->
                     @if($document->creator_signature)
                     <a href="{{ route('documents.download_signed', $document->uuid ?? $document->id) }}" target="_blank" class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-sm">
                         <i class="fas fa-download me-1"></i>โหลดฉบับลงลายมือชื่อ (PDF)
@@ -74,7 +79,7 @@
             </div>
         </div>
 
-        {{-- ✍️ คอลัมน์ขวา: การพิจารณาและเกษียนหนังสือ --}}
+        <!-- ✍️ คอลัมน์ขวา: การพิจารณาและเกษียนหนังสือ -->
         <div class="col-xl-5">
             @include('documents.partials.review_box')
 
@@ -84,7 +89,7 @@
                 </div>
                 <div class="card-body p-4">
                     
-                    {{-- 1. ผู้เสนอ --}}
+                    <!-- 1. ผู้เสนอ -->
                     <div class="d-flex mb-4">
                         <div class="me-3">
                             <div class="bg-success text-white rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 40px; height: 40px;"><i class="fas fa-user"></i></div>
@@ -95,12 +100,12 @@
                                 <div class="mt-2"><img src="{{ $document->creator_signature }}" style="max-height: 45px; mix-blend-mode: multiply;"></div>
                             @endif
                             <div class="mt-2 text-primary fw-bold">{{ $document->creator->name ?? '-' }}</div>
-                            {{-- 🌟 แสดงวันที่ไทย (ชื่อเดือนย่อ + เวลา) --}}
+                            <!-- 🌟 แสดงวันที่ไทย (ชื่อเดือนย่อ + เวลา) -->
                             <div class="small text-muted">{{ $document->created_at ? \Carbon\Carbon::parse($document->created_at)->addYears(543)->locale('th')->translatedFormat('d พ.ค. Y H:i น.') : '-' }}</div>
                         </div>
                     </div>
 
-                    {{-- 2. หัวหน้า --}}
+                    <!-- 2. หัวหน้า -->
                     @if($document->supervisor_signature || in_array($document->status, ['WAITING_SUPERVISOR', 'WAITING_PALAD', 'WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED', 'REJECTED']))
                     <div class="d-flex mb-4">
                         <div class="me-3">
@@ -112,7 +117,7 @@
                                 <div class="mt-2 p-2 bg-light rounded text-dark fw-bold" style="font-size: 14px; white-space: pre-wrap; border-left: 3px solid #1e3a8a;">{{ $document->supervisor_comment ?? 'ทราบ / เพื่อโปรดพิจารณา' }}</div>
                                 <div class="mt-2"><img src="{{ $document->supervisor_signature }}" style="max-height: 45px; mix-blend-mode: multiply;"></div>
                                 <div class="mt-1 small fw-bold text-primary">{{ $document->supervisor->name ?? '-' }}</div>
-                                {{-- 🌟 แสดงวันที่ไทย --}}
+                                <!-- 🌟 แสดงวันที่ไทย -->
                                 <div class="small text-muted">{{ $document->supervisor_approved_at ? \Carbon\Carbon::parse($document->supervisor_approved_at)->addYears(543)->locale('th')->translatedFormat('d พ.ค. Y H:i น.') : '-' }}</div>
                             @else
                                 <div class="small text-warning mt-1"><i class="fas fa-hourglass-half me-1"></i>กำลังรอการพิจารณา...</div>
@@ -121,7 +126,7 @@
                     </div>
                     @endif
 
-                    {{-- 3. ปลัด --}}
+                    <!-- 3. ปลัด -->
                     @if($document->palad_signature || in_array($document->status, ['WAITING_PALAD', 'WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED']))
                     <div class="d-flex mb-4">
                         <div class="me-3">
@@ -133,7 +138,7 @@
                                 <div class="mt-2 p-2 bg-light rounded text-dark fw-bold" style="font-size: 14px; white-space: pre-wrap; border-left: 3px solid #1e3a8a;">{{ $document->palad_comment ?? 'ทราบ / เพื่อโปรดพิจารณา' }}</div>
                                 <div class="mt-2"><img src="{{ $document->palad_signature }}" style="max-height: 45px; mix-blend-mode: multiply;"></div>
                                 <div class="mt-1 small fw-bold text-primary">{{ $document->palad->name ?? '-' }}</div>
-                                {{-- 🌟 แสดงวันที่ไทย --}}
+                                <!-- 🌟 แสดงวันที่ไทย -->
                                 <div class="small text-muted">{{ $document->palad_approved_at ? \Carbon\Carbon::parse($document->palad_approved_at)->addYears(543)->locale('th')->translatedFormat('d พ.ค. Y H:i น.') : '-' }}</div>
                             @else
                                 <div class="small text-warning mt-1"><i class="fas fa-hourglass-half me-1"></i>กำลังรอการพิจารณา...</div>
@@ -142,7 +147,7 @@
                     </div>
                     @endif
 
-                    {{-- 4. นายก --}}
+                    <!-- 4. นายก -->
                     @if($document->nayok_signature || in_array($document->status, ['WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED']))
                     <div class="d-flex mb-2">
                         <div class="me-3">
@@ -154,7 +159,7 @@
                                 <div class="mt-2 p-2 bg-light rounded text-dark fw-bold" style="font-size: 14px; white-space: pre-wrap; border-left: 3px solid #1e3a8a;">{{ $document->nayok_comment ?? 'อนุมัติ / สั่งการ' }}</div>
                                 <div class="mt-2"><img src="{{ $document->nayok_signature }}" style="max-height: 45px; mix-blend-mode: multiply;"></div>
                                 <div class="mt-1 small fw-bold text-primary">{{ $document->nayok->name ?? '-' }}</div>
-                                {{-- 🌟 แสดงวันที่ไทย --}}
+                                <!-- 🌟 แสดงวันที่ไทย -->
                                 <div class="small text-muted">{{ $document->nayok_approved_at ? \Carbon\Carbon::parse($document->nayok_approved_at)->addYears(543)->locale('th')->translatedFormat('d พ.ค. Y H:i น.') : '-' }}</div>
                             @else
                                 <div class="small text-warning mt-1"><i class="fas fa-hourglass-half me-1"></i>กำลังรอการพิจารณา...</div>
@@ -166,7 +171,7 @@
                 </div>
             </div>
 
-            {{-- ✏️ Draft Edit (กล่องเซ็นส่งเรื่อง) --}}
+            <!-- ✏️ Draft Edit (กล่องเซ็นส่งเรื่อง) -->
             @if(($document->status === 'DRAFT' || $document->status === 'REJECTED') && $document->created_by === auth()->id())
             <div class="text-center mt-4 p-4 rounded-3 shadow-sm" style="background:var(--primary-light);border:1px solid var(--primary-border);">
                 <div class="mx-auto mb-3 rounded-circle d-flex align-items-center justify-content-center text-white shadow-sm" style="width:55px;height:55px;background:var(--primary);font-size:22px;">
@@ -176,12 +181,12 @@
                 <p class="mb-4" style="font-size:14px;color:var(--primary);">กรอกรหัส PIN 6 หลักเพื่อประทับลายเซ็นและส่งให้ผู้บริหาร</p>
                 
                 <div class="d-flex justify-content-center align-items-center flex-wrap gap-3">
-                    {{-- 🌟 จุดที่ 2: เปลี่ยนลิงก์ปุ่มแก้ไขเป็น UUID --}}
+                    <!-- 🌟 จุดที่ 2: เปลี่ยนลิงก์ปุ่มแก้ไขเป็น UUID -->
                     <a href="{{ route('documents.edit', $document->uuid ?? $document->id) }}" class="btn rounded-pill fw-bold px-4 shadow-sm" style="background:#fef08a; border:2px solid #fde047; color:#854d0e; padding:10px 22px; font-size:14px;">
                         <i class="fas fa-edit me-2"></i>แก้ไขข้อมูล
                     </a>
                     
-                    {{-- 🌟 จุดที่ 3: เปลี่ยนลิงก์ Action ของฟอร์มลบเป็น UUID --}}
+                    <!-- 🌟 จุดที่ 3: เปลี่ยนลิงก์ Action ของฟอร์มลบเป็น UUID -->
                     <form action="{{ route('documents.destroy', $document->uuid ?? $document->id) }}" method="POST">
                         @csrf @method('DELETE')
                         <button type="submit" class="btn rounded-pill fw-bold px-4 bg-white" style="border:2px solid #fca5a5;color:#dc2626;padding:10px 22px;font-size:14px;"
@@ -190,7 +195,7 @@
                         </button>
                     </form>
                     
-                    {{-- 🌟 จุดที่ 4: เปลี่ยนลิงก์ Action ของฟอร์มลงนามเป็น UUID --}}
+                    <!-- 🌟 จุดที่ 4: เปลี่ยนลิงก์ Action ของฟอร์มลงนามเป็น UUID -->
                     <form action="{{ route('documents.sign', $document->uuid ?? $document->id) }}" method="POST" class="d-flex align-items-center gap-2 flex-wrap ms-md-3">
                         @csrf
                         <input type="password" name="pin" maxlength="6" placeholder="• • • • • •" required autocomplete="off"
@@ -207,7 +212,7 @@
     </div>
 </div>
 
-{{-- 🌟 นำเข้า Flatpickr (ปฏิทินภาษาไทย) 🌟 --}}
+<!-- 🌟 นำเข้า Flatpickr (ปฏิทินภาษาไทย) 🌟 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
@@ -220,6 +225,7 @@
 </style>
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     // ตั้งค่าปฏิทินให้เป็นภาษาไทย และใช้ พ.ศ. สำหรับ input (ถ้ามี)
     if(document.getElementById('doc_date')) {
@@ -229,6 +235,7 @@ document.addEventListener('DOMContentLoaded', function () {
             altFormat: "d F Y",
             dateFormat: "Y-m-d",
             defaultDate: "today",
+            // หน้าที่: จัดรูปแบบวันที่ของปฏิทินให้ตรงกับรูปแบบที่ร้องขอ
             formatDate: function(date, format, locale) {
                 let d = date.getDate();
                 let m = date.toLocaleString('th-TH', { month: 'long' });
@@ -247,3 +254,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 @endsection
+--}}

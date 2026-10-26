@@ -12,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 class DocumentNumberingService
 {
+    public function __construct(private FiscalYearService $fiscalYears) {}
+
     public function allocate(
         Document $document,
         User $actor,
@@ -88,12 +90,12 @@ class DocumentNumberingService
 
     public function fiscalYear(CarbonInterface $date): int
     {
-        return $date->month >= 10 ? $date->year + 1 : $date->year;
+        return $this->fiscalYears->year($date);
     }
 
     public function fiscalRange(int $year): array
     {
-        return [($year - 1).'-10-01 00:00:00', $year.'-09-30 23:59:59'];
+        return $this->fiscalYears->range($year);
     }
 
     private function scope(Document $document): string

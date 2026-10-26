@@ -1,3 +1,4 @@
+{{-- View: หน้าแสดงรายละเอียดและพิจารณาใบลา --}}
 @extends('layouts.app')
 @section('title', 'พิจารณาใบลา')
 @section('content')
@@ -12,7 +13,7 @@
         $canApprove = true; $actionTitle = 'ความเห็นหัวหน้าส่วนราชการ'; $approveText = 'เห็นควรอนุญาตและส่งต่อ';
     } elseif ($leave->workflow_status === 'pending_inspector' && $user->hasRole('hr')) {
         $canApprove = true; $actionTitle = 'งานบุคคลตรวจสอบสิทธิ์และวันลา'; $approveText = 'ตรวจสอบแล้วและส่งต่อ';
-    } elseif ($leave->workflow_status === 'pending_palad' && $user->hasAnyRole(['palad', 'deputy-palad'])) {
+    } elseif ($leave->workflow_status === 'pending_palad' && $user->hasRole('palad')) {
         $canApprove = true; $actionTitle = 'ความเห็นปลัด อบต.'; $approveText = 'เห็นควรอนุญาตและส่งต่อ';
     } elseif ($leave->workflow_status === 'pending_nayok' && $user->hasRole('executive')) {
         $canApprove = true; $actionTitle = 'คำสั่งนายก อบต.'; $approveText = 'อนุญาตการลา';
@@ -114,5 +115,7 @@
 @media(max-width:760px){.review-toolbar{align-items:flex-start;flex-direction:column}.leave-paper{min-height:0;padding:2rem 1rem;font-size:15pt}.paper-meta{width:100%}.identity-line{grid-template-columns:auto 1fr;margin-left:0}.date-row{grid-template-columns:auto 1fr}.paper-lower-grid{grid-template-columns:1fr}.attachment-card-title{align-items:flex-start;flex-direction:column}}
 @media print{.leave-review-document-page{padding:0;background:#fff}.review-toolbar,.review-alert,.attachment-panel,.review-action-panel{display:none!important}.leave-paper{width:210mm;min-height:297mm;border:0;box-shadow:none}}
 </style>
-<script>function requireReason(){const input=document.getElementById('reject_reason');if(!input||input.value.trim())return true;if(window.Swal){Swal.fire({icon:'warning',title:'กรุณาระบุเหตุผล',text:'ต้องระบุเหตุผลเมื่อเลือกไม่อนุญาต',confirmButtonColor:'#164f51'});}else{alert('กรุณาระบุเหตุผล');}input.focus();return false;}</script>
+<script>
+// หน้าที่: บังคับให้ระบุเหตุผลเมื่อไม่อนุญาตคำขอลา
+function requireReason(){const input=document.getElementById('reject_reason');if(!input||input.value.trim())return true;if(window.Swal){Swal.fire({icon:'warning',title:'กรุณาระบุเหตุผล',text:'ต้องระบุเหตุผลเมื่อเลือกไม่อนุญาต',confirmButtonColor:'#164f51'});}else{alert('กรุณาระบุเหตุผล');}input.focus();return false;}</script>
 @endsection

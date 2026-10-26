@@ -2,6 +2,7 @@
 
 namespace App\Services\V2;
 
+use App\Services\FiscalYearService;
 use App\Models\V2\Document;
 use Carbon\CarbonInterface;
 use Illuminate\Database\QueryException;
@@ -13,6 +14,7 @@ class DocumentNumberingService
     public function __construct(
         private V2WriteGuard $guard,
         private NumberAllocationService $allocations,
+        private FiscalYearService $fiscalYears,
     ) {}
 
     public function allocate(Document $document, int $actorId, int $runningNumber, string $formattedNumber, string $scope): Document
@@ -49,6 +51,6 @@ class DocumentNumberingService
 
     public function fiscalYear(CarbonInterface $date): int
     {
-        return $date->month >= 10 ? $date->year + 1 : $date->year;
+        return $this->fiscalYears->year($date);
     }
 }

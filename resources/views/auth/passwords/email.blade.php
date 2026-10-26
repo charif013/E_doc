@@ -1,3 +1,4 @@
+{{-- View: หน้าขอลิงก์สำหรับรีเซ็ตรหัสผ่าน --}}
 @extends('layouts.app')
 
 @section('content')

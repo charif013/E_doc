@@ -1,3 +1,4 @@
+{{-- View: หน้าประวัติและสถานะใบลาของผู้ใช้ --}}
 @extends('layouts.app')
 
 @section('content')
@@ -147,6 +148,7 @@
 {{-- 🌟 นำเข้า SweetAlert2 สำหรับแจ้งเตือนก่อนกดยกเลิก --}}
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+    // หน้าที่: ขอคำยืนยันก่อนยกเลิกรายการลา
     function confirmCancel(id) {
         Swal.fire({
             title: 'ยืนยันการยกเลิกใบลา?',

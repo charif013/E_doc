@@ -1,3 +1,4 @@
+{{-- View: หน้าจัดการบัญชีผู้ใช้งานและบทบาทในระบบ --}}
 @extends('layouts.app')
 
 @section('title', 'จัดการผู้ใช้งานระบบ')
@@ -55,6 +56,7 @@
                             <div class="small fw-bold text-primary">{{ $user->department ?? '-' }}</div>
                             <div class="small text-secondary">{{ $user->division ? '> '.$user->division : '' }}</div>
                             <div class="small text-muted italic">ตำแหน่ง: {{ $user->position ?? 'ไม่ระบุ' }}</div>
+                            <div class="small text-muted">ประเภทการจ้าง: {{ $employmentTypes[$user->employment_type] ?? 'ยังไม่ระบุ' }}</div>
                         </td>
                         <td class="text-center">
                             @foreach($user->roles as $role)
@@ -119,11 +121,6 @@
 
                                          <div class="text-start">
                                              <div class="mb-3">
-                                                 <label class="form-label fw-bold">ชื่อ-นามสกุล <span class="text-danger">*</span></label>
-                                                 <input type="text" name="name" class="form-control border-2" value="{{ $user->name }}" required maxlength="255">
-                                             </div>
-
-                                             <div class="mb-3">
                                                  <label class="form-label fw-bold">คำนำหน้าชื่อ <span class="text-danger">*</span></label>
                                                  @php $currentPrefix = $user->name_prefix ?: ($user->gender === 'male' ? 'นาย' : 'นางสาว'); @endphp
                                                  <select name="name_prefix" class="form-select border-2" required>
@@ -133,6 +130,31 @@
                                                  </select>
                                              </div>
 
+                                             <div class="mb-3">
+                                                 <label class="form-label fw-bold">ชื่อ-นามสกุล <span class="text-danger">*</span></label>
+                                                 <input type="text" name="name" class="form-control border-2" value="{{ $user->name }}" required maxlength="255">
+                                             </div>
+
+                                             <div class="mb-3">
+                                                 <label class="form-label fw-bold">ประเภทการจ้าง <span class="text-danger">*</span></label>
+                                                 <select name="employment_type" class="form-select border-2" required>
+                                                     @foreach($employmentTypes as $value => $label)
+                                                         <option value="{{ $value }}" {{ $user->employment_type === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                                     @endforeach
+                                                 </select>
+                                             </div>
+
+                                             <div class="row">
+                                                 <div class="col-md-6 mb-3">
+                                                     <label class="form-label fw-bold">วันเริ่มจ้าง <span class="text-muted fw-normal">(จำเป็นสำหรับจ้างตามภารกิจ)</span></label>
+                                                     <input type="date" name="employment_started_at" class="form-control" value="{{ optional($user->employment_started_at)->format('Y-m-d') }}">
+                                                 </div>
+                                                 <div class="col-md-6 mb-3">
+                                                     <label class="form-label fw-bold">วันที่ผ่านประเมิน 6 เดือน <span class="text-muted fw-normal">(ถ้ามี)</span></label>
+                                                     <input type="date" name="vacation_eligible_at" class="form-control" value="{{ optional($user->vacation_eligible_at)->format('Y-m-d') }}">
+                                                 </div>
+                                             </div>
+
                                             <div class="mb-2">
                                                 <label class="form-label fw-bold text-primary">กำหนดสิทธิ์ (Role) ในระบบ e-Doc:</label>
                                                 <select name="role" class="form-select form-select-lg border-primary shadow-sm" required>
@@ -140,24 +162,15 @@
                                                         <option value="super-admin" {{ $user->hasRole('super-admin') ? 'selected' : '' }}>🛡️ Super Admin (แอดมินสูงสุด)</option>
                                                         <option value="executive" {{ $user->hasRole('executive') ? 'selected' : '' }}>👑 Executive (นายก อบต.)</option>
                                                         <option value="palad" {{ $user->hasRole('palad') ? 'selected' : '' }}>⭐ Palad (ปลัด อบต.)</option>
-                                                        <option value="deputy-palad" {{ $user->hasRole('deputy-palad') ? 'selected' : '' }}>🌟 Deputy Palad (รองปลัด อบต.)</option>
                                                     </optgroup>
                                                     <optgroup label="-- งานสายตรง --">
                                                         <option value="saraban" {{ $user->hasRole('saraban') ? 'selected' : '' }}>📧 Saraban (สารบรรณกลาง)</option>
                                                         <option value="head" {{ $user->hasRole('head') ? 'selected' : '' }}>💼 Head (ผอ.กอง / หน.สำนัก)</option>
-                                                        <option value="officer" {{ $user->hasRole('officer') ? 'selected' : '' }}>📝 Officer (เจ้าหน้าที่ธุรการ/ทั่วไป)</option>
-                                                    </optgroup>
-                                                    <optgroup label="-- งานเฉพาะทาง --">
-                                                        <option value="finance" {{ $user->hasRole('finance') ? 'selected' : '' }}>💰 Finance (การเงิน/บัญชี)</option>
-                                                        <option value="parcel" {{ $user->hasRole('parcel') ? 'selected' : '' }}>📦 Parcel (พัสดุ)</option>
                                                         <option value="hr" {{ $user->hasRole('hr') ? 'selected' : '' }}>👤 HR (บุคลากร)</option>
-                                                        <option value="engineer" {{ $user->hasRole('engineer') ? 'selected' : '' }}>🏗️ Engineer (ช่าง)</option>
-                                                        <option value="auditor" {{ $user->hasRole('auditor') ? 'selected' : '' }}>🔎 Auditor (ตรวจสอบภายใน)</option>
                                                     </optgroup>
                                                     <optgroup label="-- บุคลากรอื่น ๆ --">
-                                                        <option value="teacher" {{ $user->hasRole('teacher') ? 'selected' : '' }}>👩‍🏫 Teacher (ครู/นักวิชาการ)</option>
+                                                        <option value="officer" {{ $user->hasRole('officer') ? 'selected' : '' }}>👤 Officer (ผู้ใช้งานทั่วไป)</option>
                                                         <option value="worker" {{ $user->hasRole('worker') ? 'selected' : '' }}>🔧 Worker (พนักงานจ้าง/คนงาน)</option>
-                                                        <option value="viewer" {{ $user->hasRole('viewer') ? 'selected' : '' }}>👁️ Viewer (อ่านอย่างเดียว)</option>
                                                     </optgroup>
                                                 </select>
                                             </div>
@@ -187,15 +200,11 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
 
-      <form action="{{ route('users.store') }}" method="POST">
+      <form action="{{ route('users.store') }}" method="POST" autocomplete="off">
         @csrf
         <div class="modal-body p-4">
             <h6 class="fw-bold text-primary border-bottom pb-2 mb-3"><i class="fas fa-info-circle me-1"></i> ข้อมูลพื้นฐาน</h6>
             <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label small fw-bold">ชื่อ-นามสกุล <span class="text-danger">*</span></label>
-                    <input type="text" name="name" class="form-control" placeholder="ระบุชื่อภาษาไทย" value="{{ old('name') }}" required>
-                </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label small fw-bold">คำนำหน้าชื่อ <span class="text-danger">*</span></label>
                     <select name="name_prefix" class="form-select" required>
@@ -205,16 +214,47 @@
                         <option value="นางสาว" {{ old('name_prefix') === 'นางสาว' ? 'selected' : '' }}>นางสาว</option>
                     </select>
                 </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">ชื่อ-นามสกุล <span class="text-danger">*</span></label>
+                    <input type="text" name="name" class="form-control" placeholder="ระบุชื่อภาษาไทย" value="{{ old('name') }}" required>
+                </div>
             </div>
             
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label small fw-bold">อีเมล <span class="text-danger">*</span></label>
-                    <input type="email" name="email" class="form-control" placeholder="example@edoc.com" value="{{ old('email') }}" required>
+                    <input type="email" name="email" class="form-control" placeholder="Admin@gmail.com" value="{{ old('email') }}" autocomplete="off" required>
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label small fw-bold">รหัสผ่านเริ่มต้น <span class="text-danger">*</span></label>
-                    <input type="password" name="password" class="form-control" placeholder="อย่างน้อย 8 ตัวอักษร" required>
+                    <div class="input-group">
+                        <input type="password" name="password" id="initial-password" class="form-control" placeholder="Admin123" autocomplete="new-password" data-lpignore="true" required>
+                        <button type="button" class="btn btn-outline-secondary toggle-password" aria-label="แสดงรหัสผ่าน" aria-controls="initial-password" aria-pressed="false">
+                            <i class="fas fa-eye" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">ประเภทการจ้าง <span class="text-danger">*</span></label>
+                    <select name="employment_type" class="form-select" required>
+                        <option value="">-- เลือกประเภทการจ้าง --</option>
+                        @foreach($employmentTypes as $value => $label)
+                            <option value="{{ $value }}" {{ old('employment_type') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">วันเริ่มจ้าง <span class="text-muted fw-normal">(จำเป็นสำหรับจ้างตามภารกิจ)</span></label>
+                    <input type="date" name="employment_started_at" class="form-control" value="{{ old('employment_started_at') }}">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label small fw-bold">วันที่ผ่านประเมิน 6 เดือน <span class="text-muted fw-normal">(พนักงานจ้างตามภารกิจ)</span></label>
+                    <input type="date" name="vacation_eligible_at" class="form-control" value="{{ old('vacation_eligible_at') }}">
                 </div>
             </div>
 
@@ -308,8 +348,22 @@
         }
     };
 
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     $(document).ready(function() {
+        $('.toggle-password').on('click', function() {
+            const passwordField = $('#initial-password');
+            const isHidden = passwordField.attr('type') === 'password';
+
+            passwordField.attr('type', isHidden ? 'text' : 'password');
+            $(this)
+                .attr('aria-label', isHidden ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน')
+                .attr('aria-pressed', isHidden)
+                .find('i')
+                .toggleClass('fa-eye fa-eye-slash');
+        });
+
         // จัดการ Dropdown สำนัก/กอง
+        // หน้าที่: อัปเดตตัวเลือกที่เกี่ยวข้องเมื่อค่าเปลี่ยน
         $('#department').change(function() {
             let dept = $(this).val();
             let divisionSelect = $('#division');
@@ -319,6 +373,7 @@
             positionSelect.empty().append('<option value="">-- เลือกตำแหน่ง --</option>').prop('disabled', true);
 
             if(dept && orgData[dept]) {
+                // หน้าที่: วนสร้างตัวเลือกจากข้อมูลโครงสร้างองค์กร
                 $.each(orgData[dept], function(division, positions) {
                     divisionSelect.append(`<option value="${division}">${division}</option>`);
                 });
@@ -327,6 +382,7 @@
         });
 
         // จัดการ Dropdown ฝ่าย -> ตำแหน่ง
+        // หน้าที่: อัปเดตตัวเลือกที่เกี่ยวข้องเมื่อค่าเปลี่ยน
         $('#division').change(function() {
             let dept = $('#department').val();
             let div = $(this).val();
@@ -335,6 +391,7 @@
             positionSelect.empty().append('<option value="">-- เลือกตำแหน่ง --</option>').prop('disabled', true);
 
             if(dept && div && orgData[dept][div]) {
+                // หน้าที่: วนสร้างตัวเลือกจากข้อมูลโครงสร้างองค์กร
                 $.each(orgData[dept][div], function(index, pos) {
                     positionSelect.append(`<option value="${pos}">${pos}</option>`);
                 });
@@ -343,6 +400,7 @@
         });
 
         // ปุ่มลบ
+        // หน้าที่: จัดการการคลิกและดำเนินการกับรายการที่เลือก
         $(document).on('click', '.btn-delete-user', function() {
             let id = $(this).data('id');
             Swal.fire({

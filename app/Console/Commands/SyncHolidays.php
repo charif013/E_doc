@@ -48,7 +48,10 @@ class SyncHolidays extends Command
                 'key' => $apiKey,
                 'timeMin' => $timeMin,
                 'timeMax' => $timeMax,
-                'singleEvents' => true,
+                // Google Calendar accepts the literal strings "true" and "false" for
+                // query booleans. Laravel serializes a PHP boolean as "1", which the
+                // Calendar API rejects with HTTP 400 (Invalid boolean value).
+                'singleEvents' => 'true',
                 'orderBy' => 'startTime',
             ]);
         } catch (Throwable $exception) {

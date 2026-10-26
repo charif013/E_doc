@@ -1,3 +1,8 @@
+{{-- View: หน้าสมัครสมาชิกใหม่ (ปัจจุบันปิดการใช้งาน) --}}
+{{--
+UNUSED VIEW (2026-10-05): This file is intentionally disabled.
+Public registration is disabled by Auth::routes(['register' => false]).
+
 @extends('layouts.app')
 
 @section('content')
@@ -75,3 +80,4 @@
     </div>
 </div>
 @endsection
+--}}

@@ -1,10 +1,13 @@
+{{-- View: หน้าแก้ไขข้อมูลหนังสือส่งออก --}}
 @extends('layouts.app')
 @section('title', 'แก้ไขหนังสือส่งออก')
 
 @section('content')
 {{-- 🌟 ส่วนประกาศฟังก์ชันภายในเพื่อป้องกัน Error: Call to undefined function --}}
 @php
+    // หน้าที่: ประมวลผล callback ของส่วนนี้
     if (!function_exists('toThaiNum')) {
+        // หน้าที่: แปลงตัวเลขอารบิกเป็นเลขไทยสำหรับแสดงในเอกสาร
         function toThaiNum($string) {
             if (!$string) return '';
             $arabic = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -215,7 +218,7 @@
                                             $position = $person->position;
                                             if (empty($position)) {
                                                 if ($person->hasRole('executive')) $position = 'นายกองค์การบริหารส่วนตำบลพร่อน';
-                                                elseif ($person->hasRole('palad') || $person->hasRole('deputy-palad')) $position = 'ปลัดองค์การบริหารส่วนตำบลพร่อน ปฏิบัติราชการแทน';
+                                                elseif ($person->hasRole('palad')) $position = 'ปลัดองค์การบริหารส่วนตำบลพร่อน ปฏิบัติราชการแทน';
                                                 else $position = 'หัวหน้าสำนักปลัด รักษาราชการแทน';
                                             }
                                             $fullNameWithPosition = $person->name . ' — ' . $position;
@@ -367,6 +370,7 @@
         { name:"หัวหน้าส่วนราชการทุกส่วน", org:"ส่วนราชการภายใน" }
     ];
 
+    // หน้าที่: กรองและแสดงรายการหน่วยงานปลายทาง
     function renderAddrList(filter = "") {
         const list = document.getElementById('addrList');
         list.innerHTML = "";
@@ -382,6 +386,7 @@
             div.className = 'popup-item';
             div.innerHTML = `<div style="font-size:13px;font-weight:700;color:var(--text-primary);">${a.name}</div>
                              <div style="font-size:12px;color:var(--text-secondary);"><i class="fas fa-building text-muted me-1"></i>${a.org}</div>`;
+            // หน้าที่: เลือกหน่วยงานจากรายการและปิดกล่องตัวเลือก
             div.onclick = function() {
                 document.getElementById('doc_to').value = a.name;
                 document.getElementById('addrBookPopup').style.display = 'none';
@@ -391,18 +396,22 @@
     }
     renderAddrList();
 
+    // หน้าที่: กรองรายชื่อหน่วยงานตามคำค้นหา
     function filterAddr() { renderAddrList(document.getElementById('addrSearch').value); }
 
+    // หน้าที่: สลับการแสดงกล่องตัวเลือกที่ระบุ
     function togglePopup(id) {
         const el = document.getElementById(id);
         el.style.display = el.style.display === 'block' ? 'none' : 'block';
     }
     
+    // หน้าที่: นำข้อความอ้างอิงที่เลือกไปใส่ในแบบฟอร์ม
     function selectRef(text) {
         document.getElementById('reference_doc').value = text;
         document.getElementById('refPopup').style.display = 'none';
     }
 
+    // หน้าที่: ขอและเติมเลขเอกสารจากระบบอัตโนมัติ
     async function autoDocNo() {
         try {
             const res = await fetch("{{ route('documents.api_next_number') }}?type=outgoing");
@@ -415,6 +424,7 @@
         }
     }
 
+    // หน้าที่: ตรวจไฟล์ที่เลือกและอัปเดตส่วนแสดงชื่อไฟล์
     function handleFileChange(input) {
         const display = document.getElementById('file-display');
         const dropzone = document.getElementById('dropzone');
@@ -429,6 +439,7 @@
         }
     }
 
+    // หน้าที่: อัปเดตป้ายชั้นความเร็วและชั้นความลับ
     function updateBadges() {
         const speed = document.getElementById('doc_speed').value;
         const secret = document.getElementById('doc_secret').value;
@@ -441,10 +452,12 @@
         else { bSecret.classList.remove('d-none'); bSecret.innerText = '🔒 ' + secret; }
     }
 
+    // หน้าที่: คืนแหล่งข้อมูลเอกสารที่เลือกอยู่
     function selectedDocumentSource() {
         return document.querySelector('input[name="document_source"]:checked')?.value || 'system';
     }
 
+    // หน้าที่: ซิงก์เนื้อหาจากตัวแก้ไขไปยังช่องที่ใช้ส่งแบบฟอร์ม
     function syncContent() {
         const paragraphs = ['body_intro', 'body_detail', 'body_conclusion']
             .map(id => document.getElementById(id)?.value.trim() || '')
@@ -453,6 +466,7 @@
         return paragraphs.join('\n\n');
     }
 
+    // หน้าที่: สลับช่องข้อมูลตามแหล่งเอกสารที่เลือก
     function toggleDocumentSource() {
         const isSystem = selectedDocumentSource() === 'system';
         document.querySelectorAll('.system-authoring-field').forEach(el => el.style.display = isSystem ? '' : 'none');
@@ -463,6 +477,7 @@
         if (isSystem) document.getElementById('running_number').value = '';
     }
 
+    // หน้าที่: ตรวจข้อมูลและเปิดขั้นตอนตัวอย่างเอกสาร
     function goToPreview() {
         const source = selectedDocumentSource();
         const content = syncContent();
@@ -531,11 +546,13 @@
         document.getElementById('step2').style.display = 'block';
     }
 
+    // หน้าที่: กลับจากหน้าตัวอย่างไปยังแบบฟอร์มแก้ไข
     function backToEdit() {
         document.getElementById('step2').style.display = 'none';
         document.getElementById('step1').style.display = 'block';
     }
 
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function() {
         const signerSelect = document.getElementById('signer');
         const signerUserId = document.getElementById('signer_user_id');
@@ -560,6 +577,7 @@
         @endif
     });
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.addEventListener('click', function(e) {
         if(!e.target.closest('#addrBookPopup') && !e.target.closest('button[onclick*="addrBookPopup"]')) {
             document.getElementById('addrBookPopup').style.display = 'none';

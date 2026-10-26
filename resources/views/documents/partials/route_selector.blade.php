@@ -1,3 +1,4 @@
+{{-- Partial: ส่วนเลือกผู้พิจารณาและกำหนดลำดับเส้นทางเอกสาร --}}
 @php
     $selectedRoutes = old('routing_users', []);
     $routeUsersByDepartment = $users
@@ -69,6 +70,37 @@
     </div>
 </div>
 
+{{-- ใช้ Bootstrap modal แทน browser prompt เพื่อให้หน้าตาและการใช้งานสอดคล้องกับระบบ --}}
+<div class="modal fade route-preset-name-modal" tabindex="-1" aria-labelledby="route-preset-name-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg overflow-hidden" style="border-radius: 18px;">
+            <div class="modal-header border-0 bg-primary bg-opacity-10 px-4 pt-4 pb-3">
+                <div>
+                    <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary text-white mb-2" style="width: 42px; height: 42px;">
+                        <i class="fas fa-bookmark"></i>
+                    </div>
+                    <h5 class="modal-title fw-bold text-dark mb-1" id="route-preset-name-modal-title">บันทึกเส้นทางประจำ</h5>
+                    <p class="text-muted small mb-0">ตั้งชื่อเพื่อเรียกใช้เส้นทางนี้ได้สะดวกภายหลัง</p>
+                </div>
+                <button type="button" class="btn-close align-self-start" data-bs-dismiss="modal" aria-label="ปิด"></button>
+            </div>
+            <div class="modal-body px-4 py-4">
+                <label class="form-label fw-semibold" for="route-preset-name-input">ชื่อเส้นทาง <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-lg route-preset-name-input" id="route-preset-name-input"
+                       placeholder="เช่น เสนอปลัดและนายก" maxlength="80" autocomplete="off">
+                <div class="form-text mt-2"><i class="fas fa-lightbulb text-warning me-1"></i>เลือกชื่อที่สื่อถึงลำดับผู้พิจารณา</div>
+                <div class="invalid-feedback route-preset-name-error">กรุณาระบุชื่อเส้นทางประจำ</div>
+            </div>
+            <div class="modal-footer border-0 bg-light px-4 py-3">
+                <button type="button" class="btn btn-light border rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+                <button type="button" class="btn btn-primary rounded-pill px-4 route-preset-name-submit">
+                    <i class="fas fa-bookmark me-1"></i>บันทึกเส้นทาง
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @once
 @push('scripts')
 <script>
@@ -82,6 +114,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const savePresetButton = container.querySelector('.save-route-preset');
         const deletePresetButton = container.querySelector('.delete-route-preset');
         const presetStatus = container.querySelector('.route-preset-status');
+        const nameModalElement = container.nextElementSibling;
+        const nameInput = nameModalElement.querySelector('.route-preset-name-input');
+        const nameSubmitButton = nameModalElement.querySelector('.route-preset-name-submit');
+        const nameError = nameModalElement.querySelector('.route-preset-name-error');
+        const nameModal = bootstrap.Modal.getOrCreateInstance(nameModalElement);
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
         const presetList = JSON.parse(container.dataset.presets || '[]');
         const presets = new Map(presetList.map(preset => [String(preset.id), preset]));
@@ -257,10 +294,40 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const suggestedName = presets.get(presetSelect.value)?.name || '';
-            const name = window.prompt('ตั้งชื่อเส้นทางประจำ เช่น “เสนอปลัดและนายก”', suggestedName)?.trim();
-            if (!name) return;
+            nameInput.value = suggestedName;
+            nameInput.classList.remove('is-invalid');
+            nameError.textContent = 'กรุณาระบุชื่อเส้นทางประจำ';
+            nameModal.show();
+        });
+
+        nameModalElement.addEventListener('shown.bs.modal', () => {
+            nameInput.focus();
+            nameInput.select();
+        });
+
+        nameInput.addEventListener('input', () => nameInput.classList.remove('is-invalid'));
+        nameInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                nameSubmitButton.click();
+            }
+        });
+
+        nameSubmitButton.addEventListener('click', async () => {
+            const name = nameInput.value.trim();
+            if (!name) {
+                nameInput.classList.add('is-invalid');
+                nameInput.focus();
+                return;
+            }
+
+            const routeUserIds = [...rows.querySelectorAll('.route-user')]
+                .filter(select => select.closest('.route-row')?.dataset.routeRole !== 'signer')
+                .map(select => select.value)
+                .filter(Boolean);
 
             savePresetButton.disabled = true;
+            nameSubmitButton.disabled = true;
             try {
                 const response = await fetch(container.dataset.storeUrl, {
                     method: 'POST',
@@ -272,15 +339,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify({ name, route_user_ids: routeUserIds }),
                 });
                 const result = await response.json();
-                if (!response.ok) throw new Error(result.message || 'บันทึกเส้นทางประจำไม่สำเร็จ');
+                if (!response.ok) throw new Error(result.errors?.name?.[0] || result.message || 'บันทึกเส้นทางประจำไม่สำเร็จ');
 
                 presets.set(String(result.preset.id), result.preset);
                 renderPresetOptions(result.preset.id);
                 showPresetStatus(result.message);
+                nameModal.hide();
             } catch (error) {
-                showPresetStatus(error.message || 'บันทึกเส้นทางประจำไม่สำเร็จ', true);
+                const message = error.message || 'บันทึกเส้นทางประจำไม่สำเร็จ';
+                nameError.textContent = message;
+                nameInput.classList.add('is-invalid');
             } finally {
                 savePresetButton.disabled = false;
+                nameSubmitButton.disabled = false;
             }
         });
 

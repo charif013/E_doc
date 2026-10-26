@@ -1,3 +1,4 @@
+{{-- Partial: กล่องพิจารณาและอนุมัติสำหรับหนังสือส่งออก --}}
 {{-- 🌟 สำหรับ: หนังสือส่งออก (Outgoing) โดยเฉพาะ --}}
 @php
     $user = auth()->user();
@@ -101,6 +102,7 @@
 
 @if($isSarabanNumbering)
 <script>
+    // หน้าที่: ขอและเติมเลขเอกสารจากระบบอัตโนมัติ
     async function autoDocNo() {
         try {
             const docType = '{{ $document->doc_type }}'; 

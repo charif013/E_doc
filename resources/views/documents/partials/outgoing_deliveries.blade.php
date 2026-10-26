@@ -1,3 +1,4 @@
+{{-- Partial: แสดงและจัดการข้อมูลการจัดส่งหนังสือส่งออก --}}
 @php
     $deliveryStatuses = [
         'PENDING' => ['รอส่ง', 'bg-secondary-subtle text-secondary'],

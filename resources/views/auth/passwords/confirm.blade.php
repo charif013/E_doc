@@ -1,3 +1,4 @@
+ {{-- View: หน้ายืนยันรหัสผ่านก่อนทำรายการสำคัญ --}}
 @extends('layouts.app')
 
 @section('content')

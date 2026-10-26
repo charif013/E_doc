@@ -1,3 +1,4 @@
+{{-- Partial: แสดงลำดับเส้นทางและสถานะการพิจารณาเอกสาร --}}
 @php
     // แสดงเส้นทางครบตั้งแต่ผู้นำเสนอ (ลำดับที่ 1) ไปจนถึงผู้พิจารณาคนสุดท้าย
     $displayRoutes = $document->routes
@@ -12,7 +13,7 @@
     };
 @endphp
 
-@if($routeCount > 0)
+@if($document->doc_type !== 'internal' && $routeCount > 0)
 <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius: 16px;">
     <div class="card-body p-4">
         <div class="d-flex align-items-center justify-content-between gap-2 mb-3 pb-2 border-bottom">

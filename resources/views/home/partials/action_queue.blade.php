@@ -1,15 +1,18 @@
+{{-- Partial: วิดเจ็ตแสดงงานเอกสารและใบลาที่รอผู้ใช้ดำเนินการ --}}
 @if($documentTasks->isNotEmpty() || $leaveTasks->isNotEmpty())
 <section class="card dashboard-panel dashboard-action-widget mb-4" aria-labelledby="dashboard-action-title">
     <div class="card-body p-4">
-        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
-            <div class="d-flex align-items-center gap-3">
+        <div class="dashboard-action-heading mb-3">
+            <div class="dashboard-action-heading__title">
                 <span class="panel-title-icon panel-title-icon--action"><i class="fas fa-inbox" aria-hidden="true"></i></span>
-                <div>
+                <div class="dashboard-action-heading__copy">
                     <h5 id="dashboard-action-title" class="fw-bold text-dark mb-0">งานที่ต้องดำเนินการ</h5>
                     <span class="small text-muted">เฉพาะรายการที่ถึงคิวของคุณ</span>
                 </div>
             </div>
-            <span class="dashboard-action-total">{{ $documentTasks->count() + $leaveTasks->count() }}</span>
+            <span class="dashboard-action-total" aria-label="งานที่รอดำเนินการทั้งหมด {{ $documentTasks->count() + $leaveTasks->count() }} รายการ">
+                {{ $documentTasks->count() + $leaveTasks->count() }}
+            </span>
         </div>
 
         @if($documentTasks->isNotEmpty())

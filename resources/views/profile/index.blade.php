@@ -1,3 +1,4 @@
+{{-- View: หน้าโปรไฟล์และการตั้งค่าบัญชีผู้ใช้ --}}
 @extends('layouts.app')
 @section('title', 'โปรไฟล์และการตั้งค่า')
 
@@ -297,6 +298,7 @@
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
 
     // ===== Signature Pad =====
@@ -304,6 +306,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var signaturePad = canvas ? new SignaturePad(canvas, { backgroundColor: 'rgb(255, 255, 255)' }) : null;
 
     if (signaturePad) {
+        // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
         document.getElementById('clear-signature').addEventListener('click', function () {
             signaturePad.clear();
         });
@@ -316,11 +319,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ===== Upload =====
     var uploadedBase64 = '';
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.getElementById('signature-upload')?.addEventListener('change', function(e){
         var file = e.target.files[0];
         if (!file) return;
 
         var reader = new FileReader();
+        // หน้าที่: แสดงตัวอย่างลายเซ็นหลังอ่านไฟล์เสร็จ
         reader.onload = function(event){
             uploadedBase64 = event.target.result;
             document.getElementById('upload-preview-img').src = uploadedBase64;
@@ -330,6 +335,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // ===== Save =====
+    // หน้าที่: ตรวจสอบและส่งข้อมูลลายเซ็นที่ผู้ใช้เลือก
     window.saveSignature = function(){
         var hidden = document.getElementById('signature64');
 
@@ -362,6 +368,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ===== Toggle View/Edit =====
+// หน้าที่: สลับระหว่างโหมดแสดงผลกับโหมดแก้ไขโปรไฟล์
 function toggleEdit(showEdit) {
     const edit = document.getElementById('editSection');
     const view = document.getElementById('viewSection');
@@ -375,6 +382,7 @@ function toggleEdit(showEdit) {
 }
 
 // ===== Confirm Delete Signature =====
+// หน้าที่: ขอคำยืนยันก่อนลบลายเซ็น
 function confirmDeleteSig() {
     Swal.fire({
         title: 'ยืนยันการลบลายเซ็น?',
@@ -393,6 +401,7 @@ function confirmDeleteSig() {
 }
 
 // 🌟 ฟังก์ชันยืนยันส่งคำขอล้างรหัส PIN 🌟
+// หน้าที่: ขอคำยืนยันก่อนส่งคำขอรีเซ็ต PIN
 function confirmPinResetRequest() {
     Swal.fire({
         title: 'ยืนยันการส่งคำขอ?',

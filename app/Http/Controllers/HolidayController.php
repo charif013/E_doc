@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Holiday;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 
 class HolidayController extends Controller
 {
@@ -56,8 +57,18 @@ class HolidayController extends Controller
             $year = $request->input('year', now()->year);
             
             // สั่งรัน php artisan holidays:sync ผ่านโค้ด
-            Artisan::call('holidays:sync', ['year' => $year]);
-            
+            $exitCode = Artisan::call('holidays:sync', ['year' => $year]);
+
+            if ($exitCode !== 0) {
+                Log::warning('Holiday sync failed', [
+                    'year' => $year,
+                    'exit_code' => $exitCode,
+                    'output' => Artisan::output(),
+                ]);
+
+                return back()->with('error', 'ซิงค์ข้อมูลวันหยุดไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า Google Calendar API หรือลองใหม่อีกครั้ง');
+            }
+
             return back()->with('success', 'ซิงค์ข้อมูลวันหยุดจาก Google Calendar ปี ' . $year . ' สำเร็จแล้ว!');
         } catch (\Exception $e) {
             return back()->with('error', 'เกิดข้อผิดพลาดในการเชื่อมต่อ API: ' . $e->getMessage());

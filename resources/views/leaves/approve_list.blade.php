@@ -1,3 +1,4 @@
+{{-- View: หน้ารายการใบลาที่รอพิจารณาและอนุมัติ --}}
 @extends('layouts.app')
 
 @section('title', 'พิจารณาใบลา')
@@ -5,10 +6,13 @@
 @section('content')
 @php
     $currentUser = auth()->user();
+    $isAdminOverview = $currentUser->hasRole('super-admin');
     $isHrOverview = $currentUser->hasRole('hr');
-    $leavePageTitle = $isHrOverview ? 'ความคืบหน้าการอนุมัติใบลา' : 'รายการใบลาที่รออนุมัติ';
+    $isOverview = $isHrOverview || $isAdminOverview;
+    $leavePageTitle = $isOverview ? 'ความคืบหน้าการอนุมัติใบลา' : 'รายการใบลาที่รออนุมัติ';
     $leavePageDescription = match (true) {
         $isHrOverview => 'ติดตามใบลาที่ส่งเข้าระบบทั้งหมด และดำเนินการเมื่อถึงขั้นงานบุคคล',
+        $isAdminOverview => 'ติดตามใบลาทั้งหมดในระบบ (ดูข้อมูลได้อย่างเดียว ไม่สามารถอนุมัติได้)',
         default => 'แสดงเฉพาะใบลาที่ถึงลำดับพิจารณาของคุณแล้ว',
     };
     $leaveStatuses = [
@@ -60,8 +64,8 @@
             <div class="review-queue-summary__copy">
                 <span class="review-queue-summary__icon"><i class="fas fa-clipboard-check" aria-hidden="true"></i></span>
                 <div>
-                    <h2 id="leave-queue-title">{{ $isHrOverview ? 'ใบลาทั้งหมดในระบบ' : 'ใบลาที่ต้องติดตามหรือดำเนินการ' }}</h2>
-                    <p>{{ $leaves->count() > 0 ? 'เรียงจากใบลาที่ส่งเข้ามาล่าสุด' : ($isHrOverview ? 'ยังไม่มีใบลาที่ส่งเข้าระบบ' : 'ขณะนี้ไม่มีใบลาค้างในลำดับของคุณ') }}</p>
+                    <h2 id="leave-queue-title">{{ $isOverview ? 'ใบลาทั้งหมดในระบบ' : 'ใบลาที่ต้องติดตามหรือดำเนินการ' }}</h2>
+                    <p>{{ $leaves->count() > 0 ? 'เรียงจากใบลาที่ส่งเข้ามาล่าสุด' : ($isOverview ? 'ยังไม่มีใบลาที่ส่งเข้าระบบ' : 'ขณะนี้ไม่มีใบลาค้างในลำดับของคุณ') }}</p>
                 </div>
             </div>
             <span class="review-queue-count"><strong>{{ number_format($leaves->count()) }}</strong> รายการ</span>
@@ -105,7 +109,7 @@
                         <span class="review-queue-status review-queue-status--{{ $leaveStatus[0] }}">{{ $leaveStatus[1] }}</span>
                     </div>
                     <a href="{{ route('leaves.show', $leave->id) }}" class="review-queue-item__action {{ !$leaveCanAct ? 'review-queue-item__action--secondary' : '' }}">
-                        <i class="fas {{ $leaveCanAct ? 'fa-pen-nib' : ($leaveIsDraft ? 'fa-file-lines' : 'fa-chart-line') }} me-1" aria-hidden="true"></i>{{ $leaveCanAct ? ($currentUser->hasRole('hr') ? 'ตรวจสอบสิทธิ์' : 'พิจารณา') : ($leaveIsDraft ? 'ตรวจฉบับร่าง' : (($isHrOverview || $leaveIsOwned) ? 'ดูความคืบหน้า' : 'ดูรายละเอียด')) }}
+                        <i class="fas {{ $leaveCanAct ? 'fa-pen-nib' : ($leaveIsDraft ? 'fa-file-lines' : 'fa-chart-line') }} me-1" aria-hidden="true"></i>{{ $leaveCanAct ? ($currentUser->hasRole('hr') ? 'ตรวจสอบสิทธิ์' : 'พิจารณา') : ($leaveIsDraft ? 'ตรวจฉบับร่าง' : (($isOverview || $leaveIsOwned) ? 'ดูความคืบหน้า' : 'ดูรายละเอียด')) }}
                     </a>
                 </article>
             @empty

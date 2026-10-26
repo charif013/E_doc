@@ -1,3 +1,4 @@
+{{-- View: หน้าสมุดทะเบียนและจัดการเลขสารบรรณ --}}
 @extends('layouts.app')
 @section('title', 'สมุดทะเบียนคุมเลขสารบรรณ')
 
@@ -411,10 +412,13 @@
 </div>
 
 <script>
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function() {
         const filterTab = document.getElementById('registryFilterTab');
 
+        // หน้าที่: วนประมวลผลแต่ละรายการในชุดข้อมูล
         document.querySelectorAll('#registryTabs [data-bs-toggle="pill"]').forEach(function(tabButton) {
+            // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
             tabButton.addEventListener('shown.bs.tab', function(event) {
                 const tabName = event.target.dataset.bsTarget.replace('#', '');
                 filterTab.value = tabName;
@@ -425,7 +429,9 @@
             });
         });
 
+        // หน้าที่: วนประมวลผลแต่ละรายการในชุดข้อมูล
         document.querySelectorAll('[data-registry-tab]').forEach(function(summaryButton) {
+            // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
             summaryButton.addEventListener('click', function() {
                 const target = document.getElementById(`${summaryButton.dataset.registryTab}-tab`);
                 if (!target) return;
@@ -434,6 +440,7 @@
             });
         });
 
+        // หน้าที่: โหลดเลขจากสมุดคุมมาแสดงในฟอร์มออกเลข
         async function loadLedgerNumber(form) {
             const button = form.querySelector('.js-load-ledger-number');
             const numberInput = form.querySelector('.js-document-number');
@@ -469,9 +476,12 @@
             }
         }
 
+        // หน้าที่: วนประมวลผลแต่ละรายการในชุดข้อมูล
         document.querySelectorAll('.js-numbering-form').forEach(function(form) {
             const modal = form.closest('.modal');
+            // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
             modal.addEventListener('show.bs.modal', function() { loadLedgerNumber(form); });
+            // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
             form.querySelector('.js-load-ledger-number').addEventListener('click', function() { loadLedgerNumber(form); });
         });
 

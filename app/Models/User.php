@@ -4,20 +4,19 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
-use Spatie\Permission\Traits\HasRoles;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Laravel\Sanctum\HasApiTokens;
+use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
-
-use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
+    use HasApiTokens, HasFactory, HasRoles, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -27,15 +26,18 @@ use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
     protected $fillable = [
         'name',
         'name_prefix',
+        'employment_type',
+        'employment_started_at',
+        'vacation_eligible_at',
         'email',
         'password',
-        'department', 
+        'department',
         'division',
         'work_unit',
         'position',
-        'pin',         
+        'pin',
         'signature',
-        'gender',   
+        'gender',
         'line_id',
         'line_friend_status',
         'line_connected_at',
@@ -59,6 +61,8 @@ use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'employment_started_at' => 'date',
+        'vacation_eligible_at' => 'date',
         'password' => 'hashed',
         'line_friend_status' => 'boolean',
         'line_connected_at' => 'datetime',
@@ -78,7 +82,9 @@ use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
             $parentId = null;
             foreach ([['DEPARTMENT', $user->department], ['DIVISION', $user->division], ['WORK_UNIT', $user->work_unit]] as [$type, $name]) {
                 $name = trim((string) $name);
-                if ($name === '') { continue; }
+                if ($name === '') {
+                    continue;
+                }
                 $unit = $db->table('organization_units')->where([
                     'parent_id' => $parentId, 'unit_type' => $type, 'name' => $name,
                 ])->first();
@@ -87,7 +93,9 @@ use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
                         'parent_id' => $parentId, 'unit_type' => $type, 'name' => $name,
                         'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
                     ]);
-                } else { $parentId = $unit->id; }
+                } else {
+                    $parentId = $unit->id;
+                }
             }
 
             $positionId = null;

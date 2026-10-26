@@ -1,3 +1,4 @@
+{{-- View: หน้าแสดงรายละเอียดการจองห้องประชุม --}}
 @extends('layouts.app')
 
 @section('content')

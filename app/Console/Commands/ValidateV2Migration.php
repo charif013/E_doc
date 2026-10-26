@@ -96,6 +96,24 @@ class ValidateV2Migration extends Command
         $this->add($checks, $blocking, 'V2 allocations with no or multiple resources',
             $target->table('number_allocations')
                 ->whereRaw('(document_id IS NULL) = (leave_request_id IS NULL)')->count(), 0);
+        $this->add($checks, $blocking, 'V2 confirmed documents without a canonical allocation',
+            $target->table('documents as documents')
+                ->leftJoin('number_allocations as allocations', 'allocations.document_id', '=', 'documents.id')
+                ->whereNull('documents.deleted_at')
+                ->whereNotNull('documents.document_number')
+                ->where(function ($query) {
+                    $query->where('documents.number_status', 'CONFIRMED')
+                        ->orWhere('documents.status', 'COMPLETED');
+                })
+                ->whereNull('allocations.id')
+                ->count(), 0);
+        $this->add($checks, $blocking, 'V2 outgoing allocations that disagree with the document number',
+            $target->table('documents as documents')
+                ->join('document_types as types', 'types.id', '=', 'documents.document_type_id')
+                ->join('number_allocations as allocations', 'allocations.document_id', '=', 'documents.id')
+                ->where('types.code', 'OUTGOING')
+                ->whereColumn('documents.document_number', '!=', 'allocations.formatted_number')
+                ->count(), 0);
         $this->add($checks, $blocking, 'V2 workflow instances with no or multiple resources',
             $target->table('workflow_instances')
                 ->whereRaw('(document_id IS NULL) = (leave_request_id IS NULL)')->count(), 0);

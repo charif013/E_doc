@@ -1,3 +1,4 @@
+{{-- View: หน้าแสดงรายละเอียดบันทึกข้อความภายใน --}}
 @extends('layouts.app')
 @section('title', 'รายละเอียดบันทึกข้อความภายใน')
 
@@ -9,7 +10,7 @@
         $isReviewer = (isset($canApprove) && $canApprove) || (
             ($user->hasRole('saraban') && in_array($document->status, ['WAITING_ADMIN', 'WAITING_NUMBERING'])) || 
             ($user->hasRole('head') && $document->status === 'WAITING_SUPERVISOR') || 
-            ($user->hasAnyRole(['palad', 'deputy-palad']) && $document->status === 'WAITING_PALAD') || 
+            ($user->hasRole('palad') && $document->status === 'WAITING_PALAD') ||
             ($user->hasRole('executive') && $document->status === 'WAITING_NAYOK')
         );
         
@@ -43,7 +44,9 @@
             ['label'=>'นายก อบต.',           'sig'=>$document->nayok_signature,      'name'=>$document->nayok->name ?? '-',      'pos'=>$document->nayok->position ?? 'นายก อบต.',   'at'=>$document->nayok_approved_at ? \Carbon\Carbon::parse($document->nayok_approved_at)->format('d/m/Y H:i') : null, 'icon'=>'fa-star'],
         ];
 
+        // หน้าที่: ประมวลผล callback ของส่วนนี้
         if (!function_exists('getSigUrl')) { 
+            // หน้าที่: สร้าง URL สำหรับแสดงรูปภาพลายเซ็น
             function getSigUrl($path) { 
                 if (empty($path)) return ''; 
                 $path = trim($path); 
@@ -247,6 +250,7 @@
 @section('scripts')
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+    // หน้าที่: ขอและตรวจสอบ PIN ก่อนลงลายเซ็น
     function promptSignaturePin() {
         Swal.fire({
             title: 'ยืนยันการส่งเรื่อง',
@@ -285,6 +289,7 @@
         });
     }
 
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function () {
         @if(session('error_signature'))
             Swal.fire({ icon: 'warning', title: 'ลายเซ็นไม่พร้อม', text: '{{ session("error_signature") }}', confirmButtonText: 'ไปหน้าตั้งค่า', confirmButtonColor: '#0284c7' }).then(r => { if (r.isConfirmed) window.location.href = "{{ route('profile.index') }}"; });

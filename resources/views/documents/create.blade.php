@@ -1,3 +1,4 @@
+{{-- View: หน้าสร้างบันทึกข้อความภายใน --}}
 @extends('layouts.app')
 @section('title', 'สร้างบันทึกข้อความ')
 
@@ -362,6 +363,7 @@
 </style>
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     
     // เริ่มต้นใช้งาน Select2 สำหรับช่อง เรียน
@@ -379,6 +381,7 @@ document.addEventListener('DOMContentLoaded', function () {
         altFormat: "d F Y", 
         dateFormat: "Y-m-d", 
         defaultDate: "today",
+        // หน้าที่: จัดรูปแบบวันที่ของปฏิทินให้ตรงกับรูปแบบที่ร้องขอ
         formatDate: function(date, format, locale) {
             let d = date.getDate();
             let m = date.toLocaleString('th-TH', { month: 'long' });
@@ -395,6 +398,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // 🌟 ลูกเล่นแจ้งเตือนสายตา (UI) หากเลือกชั้นความลับ "ลับ" ขึ้นไป
     const secretSelect = document.getElementById('doc_secret');
     if (secretSelect) {
+        // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
         secretSelect.addEventListener('change', function() {
             if (this.value !== 'ไม่มีชั้นความลับ') {
                 this.classList.remove('text-dark');
@@ -407,6 +411,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('docForm');
     const steps = Array.from(form.querySelectorAll('.wizard-step'));
@@ -415,6 +420,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let currentStep = 1;
     let saveTimer;
 
+    // หน้าที่: แสดงขั้นตอนที่เลือกในแบบฟอร์มหลายขั้น
     function showStep(stepNumber) {
         currentStep = stepNumber;
         steps.forEach(step => { step.hidden = Number(step.dataset.step) !== stepNumber; });
@@ -429,11 +435,13 @@ document.addEventListener('DOMContentLoaded', function () {
         document.querySelector('.draft-stepper').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    // หน้าที่: ตรวจสอบข้อมูลที่จำเป็นของขั้นตอนปัจจุบัน
     function validateCurrentStep() {
         const current = steps.find(step => Number(step.dataset.step) === currentStep);
         return window.EdocRequiredValidation.validate(current);
     }
 
+    // หน้าที่: รวบรวมค่าจากแบบฟอร์มสำหรับบันทึกร่างในเครื่อง
     function draftData() {
         const data = {};
         form.querySelectorAll('input:not([type="file"]):not([type="hidden"]), textarea, select').forEach(field => {
@@ -444,6 +452,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return data;
     }
 
+    // หน้าที่: บันทึกข้อมูลร่างของแบบฟอร์มไว้ในเบราว์เซอร์
     function saveDraft() {
         try {
             localStorage.setItem(storageKey, JSON.stringify({ savedAt: Date.now(), values: draftData() }));
@@ -452,6 +461,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // หน้าที่: กู้คืนข้อมูลร่างจากเบราว์เซอร์กลับเข้าแบบฟอร์ม
     function restoreDraft() {
         try {
             const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
@@ -467,9 +477,12 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (_) { /* ข้ามข้อมูลร่างที่อ่านไม่ได้ */ }
     }
 
+    // หน้าที่: อัปเดตข้อมูลสรุปให้ตรงกับค่าปัจจุบันของแบบฟอร์ม
     function updateSummary() {
         const get = name => form.elements[name]?.value?.trim() || '—';
-        const reviewerCount = form.querySelectorAll('[name^="reviewer_ids"]').length;
+        // route selector ปัจจุบันส่งค่าเป็น routing_users[] (ชื่อ reviewer_ids เป็นของฟอร์มเดิม)
+        const reviewerCount = [...form.querySelectorAll('select[name="routing_users[]"]')]
+            .filter(select => select.value.trim() !== '').length;
         document.getElementById('draftSummary').innerHTML = `
             <div><small>เรื่อง</small><strong>${escapeHtml(get('title'))}</strong></div>
             <div><small>เรียน</small><strong>${escapeHtml(get('doc_to'))}</strong></div>
@@ -477,6 +490,7 @@ document.addEventListener('DOMContentLoaded', function () {
             <div><small>การจัดชั้น</small><strong>${escapeHtml(get('doc_speed'))} · ${escapeHtml(get('doc_secret'))}</strong></div>`;
     }
 
+    // หน้าที่: แปลงอักขระพิเศษก่อนนำข้อความไปแสดงเป็น HTML
     function escapeHtml(value) {
         const div = document.createElement('div');
         div.textContent = value;
@@ -503,6 +517,7 @@ document.addEventListener('DOMContentLoaded', function () {
     showStep(1);
 });
 
+// หน้าที่: โหลดแม่แบบเนื้อหาตามประเภทที่ผู้ใช้เลือก
 function loadTemplate(type, event) {
     if (event) {
         event.preventDefault();
@@ -539,6 +554,7 @@ function loadTemplate(type, event) {
     }
 }
 
+// หน้าที่: ส่งหัวข้อให้ AI ช่วยร่างเนื้อหาเอกสาร
 async function askAI(previousTopic = '') {
     const { value: topic } = await Swal.fire({
         title: '✨ ให้ AI ช่วยร่างบันทึกข้อความ',

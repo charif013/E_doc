@@ -106,4 +106,23 @@ class RegistryUxTest extends TestCase
                 'formatted' => 'ยล ๗๗๓๐๑/๙',
             ]);
     }
+
+    public function test_leave_requests_cannot_be_numbered_or_opened_in_the_number_ledger(): void
+    {
+        Role::findOrCreate('saraban');
+        $saraban = User::factory()->create()->assignRole('saraban');
+
+        $this->actingAs($saraban)
+            ->get(route('documents.number_ledger', ['type' => 'leave']))
+            ->assertUnprocessable();
+
+        $this->actingAs($saraban)
+            ->getJson(route('documents.api_next_number', ['type' => 'leave']))
+            ->assertUnprocessable();
+
+        $this->actingAs($saraban)
+            ->get(route('documents.number_ledger'))
+            ->assertOk()
+            ->assertDontSee('ทะเบียนใบลา');
+    }
 }

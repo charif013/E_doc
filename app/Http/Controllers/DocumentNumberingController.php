@@ -4,23 +4,23 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\AssignDocumentNumberRequest;
 use App\Models\Document;
-use App\Models\LeaveRequest;
 use App\Models\User;
+use App\Models\V2\Document as V2Document;
+use App\Models\V2\NumberSequence as V2NumberSequence;
+use App\Models\V2\User as V2User;
+use App\Services\DocumentFileStorage;
 use App\Services\DocumentNumberingService;
 use App\Services\V2\DocumentNumberingService as V2DocumentNumberingService;
 use App\Services\V2\DocumentReadService as V2DocumentReadService;
 use App\Services\V2\DocumentWriteService as V2DocumentWriteService;
 use App\Services\V2\OutgoingPdfSigner as V2OutgoingPdfSigner;
-use App\Services\DocumentFileStorage;
-use App\Models\V2\Document as V2Document;
-use App\Models\V2\NumberSequence as V2NumberSequence;
-use App\Models\V2\User as V2User;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Validation\ValidationException;
 
 class DocumentNumberingController extends Controller
 {
@@ -36,11 +36,7 @@ class DocumentNumberingController extends Controller
     public function ledger(Request $request)
     {
         $type = $request->input('type', 'outgoing');
-        abort_unless(in_array($type, ['incoming', 'outgoing', 'internal', 'leave'], true), 422);
-
-        if ($type === 'leave' && config('edoc.v2.document_reads')) {
-            return $this->v2LeaveLedger($request);
-        }
+        abort_unless(in_array($type, ['incoming', 'outgoing', 'internal'], true), 422);
 
         if (config('edoc.v2.document_reads')) {
             return $this->v2Ledger($request, $type);
@@ -68,7 +64,7 @@ class DocumentNumberingController extends Controller
             $document = $usedNumbers->get($number);
             $status = 'ว่าง';
             if ($document) {
-                $status = $type === 'leave' || $document->status === 'APPROVED'
+                $status = $document->status === 'APPROVED'
                     ? 'ออกเลขแล้ว'
                     : match ($document->status) {
                         'CANCELED' => 'ยกเลิก',
@@ -88,9 +84,9 @@ class DocumentNumberingController extends Controller
     public function next(Request $request)
     {
         $type = $request->input('type', 'outgoing');
-        abort_unless(in_array($type, ['incoming', 'outgoing', 'internal', 'leave'], true), 422);
+        abort_unless(in_array($type, ['incoming', 'outgoing', 'internal'], true), 422);
 
-        if (config('edoc.v2.document_reads') && $type !== 'leave') {
+        if (config('edoc.v2.document_reads')) {
             $documentId = trim((string) $request->input('document'));
             if ($documentId !== '') {
                 $document = $this->v2Documents->find($documentId);
@@ -114,52 +110,23 @@ class DocumentNumberingController extends Controller
             ]);
         }
 
-        if ($type === 'leave' && config('edoc.v2.document_reads')) {
-            $leave = LeaveRequest::with('user')->findOrFail($request->integer('leave_id'));
-            $this->authorize('view', $leave);
-            $scope = $leave->user?->department ?: 'ไม่ระบุสังกัด';
-            $year = $this->v2Numbering->fiscalYear(now());
-            $max = V2NumberSequence::where([
-                'number_type' => 'leave', 'scope' => $scope, 'fiscal_year' => $year,
-            ])->value('last_number') ?? 0;
-            $number = (int) $max + 1;
-
-            return response()->json([
-                'next_number' => $number,
-                'formatted' => $this->toThaiDigits('ลา/'.$scope.'/'.$number.'/'.($year + 543)),
-                'fiscal_year' => $year,
-                'scope' => $scope,
-            ]);
-        }
-
         $fiscalYear = $this->numbering->fiscalYear(now());
         [$start, $end] = $this->numbering->fiscalRange($fiscalYear);
 
-        if ($type === 'leave') {
-            $leave = LeaveRequest::with('user')->findOrFail($request->integer('leave_id'));
-            $this->authorize('view', $leave);
-            $department = $leave->user?->department ?: 'ไม่ระบุสังกัด';
-            $max = LeaveRequest::whereBetween('numbered_at', [$start, $end])
-                ->whereHas('user', fn ($users) => $users->where('department', $department))
-                ->max('running_number') ?? 0;
-        } else {
-            $query = Document::where('doc_type', $type)->whereBetween('created_at', [$start, $end]);
-            if ($type === 'internal') {
-                $department = $request->user()->department;
-                $query->whereHas('creator', fn ($users) => $users->where('department', $department));
-            }
-            $max = $query->max('running_number') ?? 0;
+        $query = Document::where('doc_type', $type)->whereBetween('created_at', [$start, $end]);
+        if ($type === 'internal') {
+            $department = $request->user()->department;
+            $query->whereHas('creator', fn ($users) => $users->where('department', $department));
         }
+        $max = $query->max('running_number') ?? 0;
 
         $number = (int) $max + 1;
-        $formatted = $type === 'leave'
-            ? 'ลา/'.$department.'/'.$number.'/'.($fiscalYear + 543)
-            : 'ยล 77301/'.$number;
+        $formatted = 'ยล 77301/'.$number;
 
         return response()->json([
             'next_number' => $number,
             'formatted' => $this->toThaiDigits($formatted),
-            'scope' => $type === 'leave' ? $department : 'organization',
+            'scope' => $type === 'internal' ? $department : 'organization',
         ]);
     }
 
@@ -173,6 +140,7 @@ class DocumentNumberingController extends Controller
 
         if (config('edoc.v2.document_reads')) {
             $this->v2Writes->reserveSlot($data['type'], $request->user()->id, (int) $data['running_number'], $data['doc_number']);
+
             return back()->with('success', 'จองเลขเอกสารใน V2 เรียบร้อยแล้ว');
         }
 
@@ -215,6 +183,7 @@ class DocumentNumberingController extends Controller
             $incomingDocuments = (clone $base)->whereHas('type', fn ($types) => $types->where('code', 'INCOMING'))
                 ->whereNotNull('receive_number')->latest('updated_at')->get();
             $summary = ['pending' => $pendingDocuments->count(), 'outgoing' => $outgoingDocuments->count(), 'incoming' => $incomingDocuments->count()];
+
             return view('documents.registry', compact('pendingDocuments', 'outgoingDocuments', 'incomingDocuments', 'summary', 'year', 'search'));
         }
         $year = $request->input('year', date('Y'));
@@ -268,6 +237,7 @@ class DocumentNumberingController extends Controller
                     return back()->with('error', 'ออกเลขเรียบร้อยแล้ว แต่สร้าง PDF ฉบับสมบูรณ์ไม่สำเร็จ กรุณาแจ้งผู้ดูแลระบบ');
                 }
             }
+
             return back()->with('success', 'ลงทะเบียนเลขเอกสารและจัดทำฉบับสมบูรณ์เรียบร้อยแล้ว');
         }
         $document = Document::whereIdentifier($id)->firstOrFail();
@@ -296,20 +266,23 @@ class DocumentNumberingController extends Controller
     {
         if (config('edoc.v2.document_reads')) {
             $document = $this->v2Documents->find($id);
-            abort_unless($request->user()->can('update', $document) || $request->user()->can('number', $document), 403);
+            $this->authorize('number', $document);
             $formatted = (string) $request->input('doc_number');
             $running = $request->integer('running_number') ?: $this->numberFromFormatted($formatted);
-            if (! $running) { throw \Illuminate\Validation\ValidationException::withMessages(['running_number' => 'กรุณารันเลขก่อนจอง']); }
+            if (! $running) {
+                throw ValidationException::withMessages(['running_number' => 'กรุณารันเลขก่อนจอง']);
+            }
             $this->v2Writes->allocateNumber($document, $request->user()->id, $running, $formatted, false);
+
             return back()->with('success', 'จองเลขเอกสารใน V2 เรียบร้อยแล้ว');
         }
         $document = Document::whereIdentifier($id)->firstOrFail();
-        abort_unless($request->user()->can('update', $document) || $request->user()->can('number', $document), 403);
+        $this->authorize('number', $document);
 
         $formatted = (string) $request->input('doc_number');
         $running = $request->integer('running_number') ?: $this->numberFromFormatted($formatted);
         if (! $running) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'running_number' => 'กรุณารันเลขก่อนจองเลขเอกสาร',
             ]);
         }
@@ -391,50 +364,6 @@ class DocumentNumberingController extends Controller
             $ledger[$number] = ['status' => $document ? ($document->status === 'CANCELED' ? 'ยกเลิก' : 'ออกเลขแล้ว') : 'ว่าง', 'doc' => $document];
         }
         $departments = V2User::with('organizationUnit.parent')->get()->pluck('department')->filter()->unique()->values();
-        $dept = $department;
-        return view('documents.number_ledger', compact('ledger', 'type', 'year', 'maxNumber', 'dept', 'departments'));
-    }
-
-    private function v2LeaveLedger(Request $request)
-    {
-        $type = 'leave';
-        $department = $request->input('department', $request->user()->department);
-        $year = (int) $request->input('year', $this->v2Numbering->fiscalYear(now()));
-        $db = DB::connection(config('edoc.v2.connection', 'mysql_v2'));
-        $allocations = $db->table('number_allocations as allocations')
-            ->join('number_sequences as sequences', 'sequences.id', '=', 'allocations.sequence_id')
-            ->join('leave_requests as leaves', 'leaves.id', '=', 'allocations.leave_request_id')
-            ->join('users', 'users.id', '=', 'leaves.user_id')
-            ->where('sequences.number_type', 'leave')
-            ->where('sequences.fiscal_year', $year)
-            ->when($department, fn ($query) => $query->where('sequences.scope', $department))
-            ->orderBy('allocations.running_number')
-            ->get([
-                'allocations.leave_request_id', 'allocations.running_number',
-                'allocations.formatted_number', 'allocations.allocated_by', 'allocations.allocated_at',
-            ]);
-        $models = LeaveRequest::with(['user', 'numberAllocation'])
-            ->whereIn('id', $allocations->pluck('leave_request_id'))->get()->keyBy('id');
-        $documents = $allocations->map(function ($allocation) use ($models) {
-            $leave = $models->get($allocation->leave_request_id);
-            if (! $leave) {
-                return null;
-            }
-            $leave->setAttribute('running_number', $allocation->running_number);
-            $leave->setAttribute('leave_number', $allocation->formatted_number);
-            $leave->setAttribute('numbered_by', $allocation->allocated_by);
-            $leave->setAttribute('numbered_at', $allocation->allocated_at);
-
-            return $leave;
-        })->filter()->values();
-        $usedNumbers = $documents->keyBy('running_number');
-        $maxNumber = (int) ($allocations->max('running_number') ?? 0);
-        $ledger = [];
-        for ($number = 1; $number <= max(50, $maxNumber + 20); $number++) {
-            $document = $usedNumbers->get($number);
-            $ledger[$number] = ['status' => $document ? 'ออกเลขแล้ว' : 'ว่าง', 'doc' => $document];
-        }
-        $departments = User::select('department')->distinct()->pluck('department')->filter();
         $dept = $department;
 
         return view('documents.number_ledger', compact('ledger', 'type', 'year', 'maxNumber', 'dept', 'departments'));

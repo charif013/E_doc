@@ -1,3 +1,4 @@
+{{-- View: หน้าจัดการวันหยุดราชการและวันหยุดพิเศษ --}}
 @extends('layouts.app')
 
 @section('title', 'จัดการวันหยุดราชการ / วันหยุดพิเศษ')
@@ -126,6 +127,7 @@
 <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     // ตั้งค่า Flatpickr เป็นภาษาไทย และแปลง พ.ศ. ให้สวยงามตอนโชว์
     flatpickr("#holiday_date", {
@@ -133,6 +135,7 @@ document.addEventListener('DOMContentLoaded', function () {
         altInput: true,
         altFormat: "d/m/Y",
         dateFormat: "Y-m-d",
+        // หน้าที่: จัดรูปแบบวันที่ของปฏิทินให้ตรงกับรูปแบบที่ร้องขอ
         formatDate: function(date, format, locale) {
             let d = ("0" + date.getDate()).slice(-2);
             let m = ("0" + (date.getMonth() + 1)).slice(-2);
@@ -148,6 +151,7 @@ document.addEventListener('DOMContentLoaded', function () {
 {{-- 🌟 Script สำหรับ SweetAlert2 🌟 --}}
 <script>
     // 1. ฟังก์ชันป็อปอัปยืนยันการลบ
+    // หน้าที่: ขอคำยืนยันก่อนส่งฟอร์มลบข้อมูล
     function confirmDelete(form) {
         Swal.fire({
             title: 'ยืนยันการลบวันหยุด?',
@@ -172,6 +176,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // 2. ป็อปอัปแจ้งเตือนครอบจักรวาล (ลบสำเร็จ, เพิ่มสำเร็จ, กรอกข้อมูลผิด)
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function() {
         
         @if(session('success'))

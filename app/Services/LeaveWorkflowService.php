@@ -82,6 +82,7 @@ class LeaveWorkflowService
                 'delegate_responded_at' => null, 'delegate_reminded_at' => null,
                 'delegate_escalated_at' => null, 'workflow_status' => 'pending_delegate',
             ]);
+
             return $leave->fresh(['user', 'delegate']);
         }
 
@@ -117,10 +118,12 @@ class LeaveWorkflowService
                 $attributes += ['status' => 'CANCELED', 'workflow_status' => 'canceled'];
             }
             $leave->forceFill($attributes)->save();
+
             return $leave->fresh();
         }
         if (! $this->usesCanonicalWorkflow($leave)) {
             $leave->update(['status' => 'CANCELED', 'workflow_status' => 'canceled']);
+
             return $leave->fresh();
         }
         DB::connection($leave->getConnectionName())->transaction(function () use ($leave, $actor) {
@@ -145,6 +148,7 @@ class LeaveWorkflowService
                 'status' => 'REJECTED', 'workflow_status' => 'rejected',
                 'reject_reason' => "[{$actor->position}] : {$reason}",
             ]);
+
             return $leave->fresh(['user', 'delegate']);
         }
         $workflow = $this->lockedWorkflow($leave, $actor);
@@ -187,13 +191,17 @@ class LeaveWorkflowService
             $updates = $action === 'ESCALATED'
                 ? ['workflow_status' => 'delegate_escalated', 'delegate_escalated_at' => now()]
                 : ['delegate_reminded_at' => now()];
+
             return (bool) LeaveRequest::whereKey($leave->id)
                 ->where('workflow_status', 'pending_delegate')->update($updates);
         }
+
         return DB::connection($leave->getConnectionName())->transaction(function () use ($leave, $action) {
             $workflow = WorkflowInstance::withoutGlobalScopes()->where('leave_request_id', $leave->id)
                 ->lockForUpdate()->firstOrFail();
-            if ((int) $workflow->current_step !== 1 || $workflow->status->value !== 'IN_PROGRESS') { return false; }
+            if ((int) $workflow->current_step !== 1 || $workflow->status->value !== 'IN_PROGRESS') {
+                return false;
+            }
             $step = $this->currentStep($workflow);
             $this->appendEvidence($workflow, $step, null, $action);
             if ($action === 'ESCALATED') {
@@ -212,7 +220,7 @@ class LeaveWorkflowService
             'pending_delegate' => collect([$leave->delegate]),
             'pending_head' => $this->line->usersWithRoles('head', $leave->user?->department),
             'pending_inspector' => $this->line->usersWithRoles('hr'),
-            'pending_palad' => $this->line->usersWithRoles(['palad', 'deputy-palad']),
+            'pending_palad' => $this->line->usersWithRoles('palad'),
             'pending_nayok' => $this->line->usersWithRoles('executive'),
             default => collect(),
         };
@@ -234,7 +242,9 @@ class LeaveWorkflowService
             abort(403, 'ใบลานี้ถูกดำเนินการไปแล้วหรือไม่อยู่ในคิวของคุณ');
         }
         $workflow = WorkflowInstance::withoutGlobalScopes()->where('leave_request_id', $leave->id)->firstOrFail();
-        if ($requiredStep && (int) $workflow->current_step !== $requiredStep) { abort(403); }
+        if ($requiredStep && (int) $workflow->current_step !== $requiredStep) {
+            abort(403);
+        }
 
         return $workflow;
     }

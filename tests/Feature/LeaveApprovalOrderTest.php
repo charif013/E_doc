@@ -18,7 +18,7 @@ class LeaveApprovalOrderTest extends TestCase
     {
         parent::setUp();
 
-        foreach (['head', 'hr', 'saraban', 'palad', 'deputy-palad', 'executive'] as $role) {
+        foreach (['head', 'hr', 'saraban', 'palad', 'executive'] as $role) {
             Role::findOrCreate($role);
         }
     }

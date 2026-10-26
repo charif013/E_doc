@@ -1,3 +1,8 @@
+{{-- View: หน้าเริ่มต้นมาตรฐานของ Laravel (ปัจจุบันปิดการใช้งาน) --}}
+{{--
+UNUSED VIEW (2026-10-05): This file is intentionally disabled.
+The root route redirects directly to /login and no code renders the "welcome" view.
+
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
     <head>
@@ -131,3 +136,4 @@
         </div>
     </body>
 </html>
+--}}

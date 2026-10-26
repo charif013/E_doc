@@ -1,3 +1,4 @@
+{{-- View: หน้าหลักและแดชบอร์ดการทำงานของผู้ใช้ --}}
 @extends('layouts.app')
 
 @section('content')
@@ -369,17 +370,46 @@
     .dashboard-clear-state__icon { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; color: #fff; background: #10b981; border-radius: 50%; }
     .dashboard-clear-state > div:last-child { display: flex; flex-direction: column; }
     .dashboard-clear-state span { color: #4b7166; font-size: .82rem; }
+    .dashboard-action-widget .card-body { padding: 1.25rem !important; }
+    .dashboard-action-heading {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: .65rem;
+    }
+    .dashboard-action-heading__title {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        gap: .75rem;
+    }
+    .dashboard-action-heading__copy { min-width: 0; }
+    .dashboard-action-heading__copy h5 {
+        font-size: clamp(.95rem, 1.35vw, 1.1rem);
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+    .dashboard-action-heading__copy .small {
+        display: block;
+        margin-top: .12rem;
+        font-size: .74rem;
+        line-height: 1.4;
+    }
     .dashboard-action-total {
-        display: inline-grid;
+        display: grid;
         place-items: center;
-        min-width: 34px;
-        height: 34px;
-        padding: 0 .65rem;
+        min-width: 40px;
+        height: 40px;
+        padding: 0 .55rem;
+        flex: 0 0 auto;
         color: #fff;
-        background: var(--primary);
+        background: linear-gradient(145deg, #0ea5e9, #0369a1);
+        border: 2px solid #fff;
         border-radius: 999px;
-        font-size: .82rem;
+        box-shadow: 0 0 0 3px #e0f2fe, 0 6px 14px rgba(3, 105, 161, .2);
+        font-size: .9rem;
         font-weight: 800;
+        line-height: 1;
     }
     .panel-title-icon--action { color: #9a6700; background: #fef3c7; }
     .sidebar-queue-group {
@@ -503,6 +533,7 @@
         .dashboard-stat .card-body { padding: .9rem; }
         .dashboard-stat__value { font-size: 1.65rem; }
         .dashboard-stat__meta { min-height: 2.1em; }
+        .dashboard-action-heading__copy h5 { font-size: clamp(.9rem, 4.6vw, 1.05rem); }
         .sidebar-queue-item__end { align-items: flex-end; flex-direction: column-reverse; }
         .queue-status { max-width: 125px; text-align: center; white-space: normal; }
         .recent-documents-card {

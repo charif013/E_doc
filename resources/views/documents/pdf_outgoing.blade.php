@@ -1,3 +1,4 @@
+{{-- View: แม่แบบ PDF สำหรับหนังสือส่งออก --}}
 <!DOCTYPE html>
 <html lang="th">
 <head>

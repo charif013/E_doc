@@ -1,3 +1,4 @@
+{{-- View: หน้าสร้างและยื่นแบบฟอร์มใบลา --}}
 @extends('layouts.app')
 
 @section('title', 'ยื่นแบบฟอร์มใบลา')
@@ -9,7 +10,7 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h4 class="fw-bold mb-0 page-title">ระบบการลาออนไลน์</h4>
-            <small class="text-muted">ปีงบประมาณ {{ now()->year + 543 }}</small>
+            <small class="text-muted">ปีงบประมาณ {{ $fiscalYear + 543 }}</small>
         </div>
         <div class="d-flex align-items-center gap-3">
             <span class="text-muted fw-bold">{{ now()->locale('th')->translatedFormat('d M Y') }}</span>
@@ -227,20 +228,25 @@
                         <div class="col-6">
                             <div class="stat-item p-3 rounded-3 text-center border">
                                 <div class="small text-muted mb-1 stat-type-label">{{ $type }}</div>
-                                <h4 class="fw-bold mb-0 {{ $data['remaining'] <= 0 ? 'text-danger' : 'text-teal' }}">
-                                    {{ $data['remaining'] }}<span class="fs-6 fw-normal"> วัน</span>
-                                </h4>
-                                <div class="progress mt-2 mx-auto" style="height:5px; width:80%;">
-                                    <div class="progress-bar {{ $data['percent'] >= 100 ? 'bg-danger' : 'bg-teal' }}"
-                                         role="progressbar"
-                                         style="width:{{ min($data['percent'], 100) }}%;"
-                                         aria-valuenow="{{ $data['percent'] }}"
-                                         aria-valuemin="0" aria-valuemax="100">
+                                @if($data['quota_enforced'])
+                                    <h4 class="fw-bold mb-0 {{ $data['remaining'] <= 0 ? 'text-danger' : 'text-teal' }}">
+                                        {{ $data['remaining'] }}<span class="fs-6 fw-normal"> วัน</span>
+                                    </h4>
+                                    <div class="progress mt-2 mx-auto" style="height:5px; width:80%;">
+                                        <div class="progress-bar {{ $data['percent'] >= 100 ? 'bg-danger' : 'bg-teal' }}"
+                                             role="progressbar"
+                                             style="width:{{ min($data['percent'], 100) }}%;"
+                                             aria-valuenow="{{ $data['percent'] }}"
+                                             aria-valuemin="0" aria-valuemax="100">
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="text-muted mt-1" style="font-size:0.7rem;">
-                                    ใช้ไป {{ $data['used'] }}/{{ $data['limit'] }}
-                                </div>
+                                    <div class="text-muted mt-1" style="font-size:0.7rem;">
+                                        ใช้ไป {{ $data['used'] }}/{{ $data['limit'] }}
+                                    </div>
+                                @else
+                                    <div class="fw-bold text-warning-emphasis small py-2">ตามระยะเวลาที่ได้รับอนุมัติ</div>
+                                    <div class="text-muted" style="font-size:0.7rem;">ไม่มีโควตารายปี</div>
+                                @endif
                             </div>
                         </div>
                         @endforeach
@@ -278,6 +284,7 @@
 @include('partials.required-form-validation')
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
 
     // ─── ข้อมูลจาก PHP ───────────────────────────────────────────────────────
@@ -319,11 +326,13 @@ document.addEventListener('DOMContentLoaded', function () {
     if (reasonTextarea.value.length > 0) {
         reasonCount.textContent = reasonTextarea.value.length; // อัปเดตตอนโหลดหน้า (ถ้ามีค่า old)
     }
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     reasonTextarea.addEventListener('input', function () {
         reasonCount.textContent = this.value.length;
     });
 
     // ─── Flatpickr helper: ระบายสีวันหยุดบนปฏิทิน ──────────────────────────
+    // หน้าที่: ทำเครื่องหมายวันหยุดและวันสุดสัปดาห์บนปฏิทินลา
     function markHolidays(dObj, dStr, fp, dayElem) {
         const date      = dayElem.dateObj;
         const dayOfWeek = date.getDay();
@@ -364,6 +373,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // ล็อคปฏิทินจนกว่าจะเลือกประเภทการลา
     setCalendarLocked(true);
 
+    // หน้าที่: ล็อกหรือปลดล็อกช่องเลือกวันที่ลา
     function setCalendarLocked(locked) {
         [fpStart, fpEnd].forEach(fp => {
             fp.set('clickOpens', !locked);
@@ -373,9 +383,20 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ─── แสดง badge สิทธิ์คงเหลือ ───────────────────────────────────────────
+    // หน้าที่: แสดงยอดวันลาคงเหลือของประเภทที่เลือก
     function showCurrentBalance(type) {
         const data = leaveBalances[type];
         if (!data) { balanceShow.style.display = 'none'; return; }
+
+        if (!data.quota_enforced) {
+            balanceShow.innerHTML = `
+                <span class="badge bg-warning-subtle text-warning-emphasis px-3 py-2 rounded-pill fs-6 shadow-sm">
+                    <i class="fas fa-info-circle me-1"></i>
+                    ${type}: ตามระยะเวลาที่ได้รับอนุมัติ (ไม่มีโควตารายปี)
+                </span>`;
+            balanceShow.style.display = 'block';
+            return;
+        }
 
         const isOk  = data.remaining > 0;
         const icon  = isOk ? 'fa-check-circle' : 'fa-times-circle';
@@ -391,6 +412,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ─── เลือกประเภทการลา ────────────────────────────────────────────────────
     leaveTypeRadios.forEach(radio => {
+        // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
         radio.addEventListener('change', function () {
             selectedLeaveType = this.value;
 
@@ -412,6 +434,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // ─── คำนวณวันทำการ ───────────────────────────────────────────────────────
+    // หน้าที่: คำนวณจำนวนวันลาตามช่วงวันที่และวันหยุด
     function calculateDays() {
         const startVal = document.getElementById('start_date').value;
         const endVal   = document.getElementById('end_date').value;
@@ -464,11 +487,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ─── Helper: set ค่าวันลา ────────────────────────────────────────────────
+    // หน้าที่: กำหนดจำนวนวันลาให้ช่องข้อมูลและส่วนแสดงผล
     function setDayValue(val) {
         totalHidden.value  = val;
         totalDisplay.value = val > 0 ? val + ' วัน' : '';
     }
 
+    // หน้าที่: ล้างผลการคำนวณวันลา
     function clearDayResult() {
         totalHidden.value  = '';
         totalDisplay.value = '';
@@ -477,6 +502,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ─── ปุ่มลาครึ่งวัน → เปลี่ยนเป็น dropdown ──────────────────────────────
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     btnEditHalfday.addEventListener('click', function () {
         if (calculatedDays < 1) return;
 
@@ -498,6 +524,7 @@ document.addEventListener('DOMContentLoaded', function () {
         this.style.display         = 'none';
 
         totalHidden.value = calculatedDays;
+        // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
         totalSelect.addEventListener('change', function () {
             totalHidden.value = this.value;
             checkQuota(parseFloat(this.value));
@@ -506,6 +533,7 @@ document.addEventListener('DOMContentLoaded', function () {
         checkQuota(calculatedDays);
     });
 
+    // หน้าที่: คืนค่าตัวเลือกลาเต็มวันและครึ่งวันเป็นค่าเริ่มต้น
     function resetHalfdayMode() {
         isHalfdayMode             = false;
         totalDisplay.style.display = '';
@@ -513,6 +541,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ─── ตรวจสิทธิ์การลา ─────────────────────────────────────────────────────
+    // หน้าที่: ตรวจสอบจำนวนวันลาที่ขอกับสิทธิคงเหลือ
     function checkQuota(inputDays) {
         if (!selectedLeaveType || !leaveBalances[selectedLeaveType]) {
             hideWarning();
@@ -520,7 +549,19 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        const remain = leaveBalances[selectedLeaveType].remaining;
+        const balance = leaveBalances[selectedLeaveType];
+        if (!balance.quota_enforced) {
+            if (inputDays <= 0) {
+                showWarning('จำนวนวันลาต้องมากกว่า 0');
+                submitBtn.disabled = true;
+            } else {
+                hideWarning();
+                submitBtn.disabled = false;
+            }
+            return;
+        }
+
+        const remain = balance.remaining;
 
         if (inputDays > remain) {
             showWarning(`ลาเกินสิทธิ! ต้องการ ${inputDays} วัน แต่เหลือสิทธิ์แค่ ${remain} วัน`);
@@ -534,17 +575,20 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // หน้าที่: แสดงข้อความเตือนในแบบฟอร์ม
     function showWarning(msg) {
         warningBox.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>${msg}`;
         warningBox.classList.remove('d-none');
     }
 
+    // หน้าที่: ซ่อนข้อความเตือนในแบบฟอร์ม
     function hideWarning() {
         warningBox.classList.add('d-none');
         warningBox.innerHTML = '';
     }
 
     // ─── Loading state ตอน submit ────────────────────────────────────────────
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.getElementById('leaveForm').addEventListener('submit', function (e) {
         if (!window.EdocRequiredValidation.validate(this)) {
             e.preventDefault();

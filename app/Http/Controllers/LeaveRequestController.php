@@ -2,92 +2,54 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Http\Requests\ReviewLeaveRequest;
+use App\Models\Holiday;
 use App\Models\LeaveRequest;
-use App\Models\User;
-use App\Models\Holiday; // 🌟 เพิ่มบรรทัดนี้เพื่อเรียกใช้ตารางวันหยุด
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Carbon\Carbon;
+use App\Models\User; // 🌟 เพิ่มบรรทัดนี้เพื่อเรียกใช้ตารางวันหยุด
+use App\Services\DocumentFileStorage;
+use App\Services\FiscalYearService;
 use App\Services\LeaveWorkflowService;
 use App\Services\NotificationDispatcher;
-use App\Services\DocumentFileStorage;
 use App\Services\V2\LeaveWorkflowSynchronizer;
-use App\Http\Requests\ReviewLeaveRequest;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class LeaveRequestController extends Controller
 {
+    public function __construct(private FiscalYearService $fiscalYears) {}
+
     // ==========================================
     // 1. ฟังก์ชันเปิดหน้าฟอร์มกรอกใบลา
     // ==========================================
     public function create()
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::user();
-        $currentYear = now()->year;
+        $fiscalYear = $this->fiscalYears->year(now());
 
-        // ดึงข้อมูลการลาที่เคยอนุมัติไปแล้วในปีนี้
-        $usedLeaves = $this->approvedLeaveUsage($user->id, $currentYear);
+        // ดึงข้อมูลการลาที่เคยอนุมัติในรอบปีงบประมาณปัจจุบัน
+        $usedLeaves = $this->approvedLeaveUsage($user->id, $fiscalYear);
 
-        // คัดแยกประเภทพนักงาน
-        $pos = $user->position ?? '';
-        $generalPositions = ['พนักงานขับรถยนต์', 'คนงาน', 'ภารโรง'];
-        $isGeneralWorker = in_array($pos, $generalPositions) || str_contains($pos, 'จ้างทั่วไป');
-
-        $limits = [];
-
-        // กำหนดสิทธิพื้นฐาน
-        if ($isGeneralWorker) {
-            $limits = [
-                'ลาป่วย' => 15,
-                'ลาพักผ่อน' => 10,
-                'ลาเกณฑ์ทหาร/เตรียมพล' => 30,
-            ];
-        } else {
-            $limits = [
-                'ลาป่วย' => 60,
-                'ลากิจส่วนตัว' => 45,
-                'ลาพักผ่อน' => 10,
-                'ลาอุปสมบท/ประกอบพิธีฮัจย์' => 120,
-                'ลาเกณฑ์ทหาร/เตรียมพล' => 60,
-            ];
-        }
-
-        // เช็คเพศ
-        $gender = $user->gender ?? 'unknown';
-        if ($gender === 'unknown') {
-            if (str_starts_with(trim($user->name), 'นาย')) {
-                $gender = 'male';
-            } elseif (str_starts_with(trim($user->name), 'นาง') || str_starts_with(trim($user->name), 'น.ส.')) {
-                $gender = 'female';
-            }
-        }
-
-        if ($gender === 'female') {
-            $limits['ลาคลอดบุตร'] = 90;
-        } elseif ($gender === 'male') {
-            if (!$isGeneralWorker) {
-                $limits['ลาไปช่วยเหลือภริยาที่คลอดบุตร'] = 15;
-            }
-        } else {
-            $limits['ลาคลอดบุตร'] = 90;
-            if (!$isGeneralWorker) {
-                $limits['ลาไปช่วยเหลือภริยาที่คลอดบุตร'] = 15;
-            }
-        }
+        $limits = $this->leaveLimitsFor($user);
 
         // คำนวณยอดคงเหลือ
         $balances = [];
         foreach ($limits as $type => $limit) {
             $used = $usedLeaves[$type] ?? 0;
+            $enforcesAnnualQuota = $limit !== null;
             $balances[$type] = [
-                'used'      => $used,
-                'limit'     => $limit,
-                'remaining' => max(0, $limit - $used),
-                'percent'   => $limit > 0 ? ($used / $limit) * 100 : 0
+                'used' => $used,
+                'limit' => $limit,
+                'remaining' => $enforcesAnnualQuota ? max(0, $limit - $used) : null,
+                'percent' => $enforcesAnnualQuota && $limit > 0 ? ($used / $limit) * 100 : 0,
+                'quota_enforced' => $enforcesAnnualQuota,
             ];
         }
 
@@ -98,7 +60,7 @@ class LeaveRequestController extends Controller
         $publicHolidays = Holiday::pluck('holiday_date')->toArray();
 
         // 🌟 อย่าลืมเพิ่ม 'publicHolidays' เข้าไปใน compact ด้วยครับ
-        return view('leaves.create', compact('balances', 'users', 'publicHolidays'));
+        return view('leaves.create', compact('balances', 'users', 'publicHolidays', 'fiscalYear'));
     }
 
     // ==========================================
@@ -124,7 +86,7 @@ class LeaveRequestController extends Controller
         if (! $wasDraft && $leave->delegate) {
             app(NotificationDispatcher::class)->toUser(
                 $leave->delegate,
-                "❌ ใบลาที่มอบหมายให้คุณปฏิบัติงานแทนถูกยกเลิกแล้ว\nผู้ลา: " . ($leave->user?->name ?: '-') . "\nประเภท: {$leave->leave_type}"
+                "❌ ใบลาที่มอบหมายให้คุณปฏิบัติงานแทนถูกยกเลิกแล้ว\nผู้ลา: ".($leave->user?->name ?: '-')."\nประเภท: {$leave->leave_type}"
             );
         }
 
@@ -155,32 +117,46 @@ class LeaveRequestController extends Controller
     // ==========================================
     public function store(Request $request)
     {
-        
+        /** @var User $user */
+        $user = $request->user();
+        $limits = $this->leaveLimitsFor($user);
+
         $request->validate([
-            'leave_type'   => 'required|string',
-            'start_date'   => 'required|date',
-            'end_date'     => 'required|date|after_or_equal:start_date',
-            'total_days'   => 'required|numeric|min:0.5',
-            'reason'       => 'required|string',
+            'leave_type' => ['required', 'string', Rule::in(array_keys($limits))],
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'total_days' => 'required|numeric|min:0.5',
+            'reason' => 'required|string',
             'contact_info' => ['nullable', 'string', 'max:200'],
-            'delegate_id'  => 'nullable|exists:users,id', // เพิ่มตรวจสอบผู้รับมอบงาน
-            'attachments'   => ['nullable', 'array', 'max:5'],
+            'delegate_id' => 'nullable|exists:users,id', // เพิ่มตรวจสอบผู้รับมอบงาน
+            'attachments' => ['nullable', 'array', 'max:5'],
             'attachments.*' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
         ]);
+
+        $limit = $limits[$request->leave_type];
+        if ($limit !== null) {
+            $fiscalYear = $this->fiscalYears->year(Carbon::parse($request->start_date));
+            $used = (float) ($this->approvedLeaveUsage($user->id, $fiscalYear)[$request->leave_type] ?? 0);
+            if ((float) $request->total_days > max(0, $limit - $used)) {
+                throw ValidationException::withMessages([
+                    'total_days' => 'จำนวนวันลามากกว่าสิทธิ์คงเหลือของประเภทการลานี้',
+                ]);
+            }
+        }
 
         $storedPaths = [];
         try {
             $leave = DB::transaction(function () use ($request, &$storedPaths) {
                 $attributes = [
-                    'user_id'      => Auth::id(),
-                    'leave_type'   => $request->leave_type,
-                    'start_date'   => $request->start_date,
-                    'end_date'     => $request->end_date,
-                    'total_days'   => $request->total_days,
-                    'reason'       => $request->reason,
+                    'user_id' => Auth::id(),
+                    'leave_type' => $request->leave_type,
+                    'start_date' => $request->start_date,
+                    'end_date' => $request->end_date,
+                    'total_days' => $request->total_days,
+                    'reason' => $request->reason,
                     'contact_info' => $request->contact_info,
-                    'delegate_id'   => $request->delegate_id,
-                    'is_draft'      => true,
+                    'delegate_id' => $request->delegate_id,
+                    'is_draft' => true,
                 ];
                 if (Schema::connection((new LeaveRequest)->getConnectionName())->hasColumn('leave_requests', 'workflow_status')) {
                     $attributes['status'] = 'DRAFT';
@@ -218,7 +194,10 @@ class LeaveRequestController extends Controller
         abort_unless($leave->user_id === Auth::id(), 403);
         abort_unless($leave->is_draft, 404);
 
-        $usedLeaves = $this->approvedLeaveUsage((int) $leave->user_id, now()->year);
+        $usedLeaves = $this->approvedLeaveUsage(
+            (int) $leave->user_id,
+            $this->fiscalYears->year($leave->start_date)
+        );
 
         return view('leaves.draft', compact('leave', 'usedLeaves'));
     }
@@ -314,7 +293,9 @@ class LeaveRequestController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        if ($user->hasRole('hr')) {
+        // ผู้ดูแลระบบดูใบลาทั้งหมดได้เพื่อกำกับติดตาม แต่ไม่มีสิทธิ์พิจารณา
+        // การอนุมัติยังถูกควบคุมโดย LeaveRequestPolicy ตามขั้นตอนเดิม
+        if ($user->hasAnyRole(['hr', 'super-admin'])) {
             $leaves = LeaveRequest::with(['user', 'workflow'])
                 ->where('is_draft', false)
                 ->orderByDesc('created_at')
@@ -332,6 +313,7 @@ class LeaveRequestController extends Controller
                 ->sortByDesc('created_at')
                 ->values();
         }
+
         return view('leaves.approve_list', compact('leaves'));
     }
 
@@ -354,7 +336,10 @@ class LeaveRequestController extends Controller
             ? User::whereKeyNot(Auth::id())->orderBy('name')->get()
             : collect();
 
-        $usedLeaves = $this->approvedLeaveUsage((int) $leave->user_id, now()->year);
+        $usedLeaves = $this->approvedLeaveUsage(
+            (int) $leave->user_id,
+            $this->fiscalYears->year($leave->start_date)
+        );
         $sickUsed = (float) ($usedLeaves->get('ลาป่วย') ?? 0);
         $personalUsed = (float) ($usedLeaves->get('ลากิจส่วนตัว') ?? 0);
         $vacationUsed = (float) ($usedLeaves->get('ลาพักผ่อน') ?? 0);
@@ -393,13 +378,14 @@ class LeaveRequestController extends Controller
         $this->authorize('review', $leave);
 
         // กรณีตีกลับไม่อนุมัติ
-        if (!$request->is_approved) {
+        if (! $request->is_approved) {
             app(LeaveWorkflowService::class)->reject($leave, $user, $request->reject_reason);
+
             return redirect()->route('leaves.approve_list')->with('error', 'คุณได้ทำการตีกลับใบลาเรียบร้อยแล้ว');
         }
 
         // ตรวจสอบ PIN ถ้ายืนยันอนุมัติ
-        if (!Hash::check($request->pin, $user->pin)) {
+        if (! Hash::check($request->pin, $user->pin)) {
             return back()->with('error', 'รหัส PIN ไม่ถูกต้อง กรุณาลองอีกครั้ง');
         }
 
@@ -428,12 +414,72 @@ class LeaveRequestController extends Controller
         app(LeaveWorkflowService::class)->notifyNext($leave);
     }
 
-    private function approvedLeaveUsage(int $userId, int $year)
+    /**
+     * @return array<string, int|null> จำนวนวันต่อปี; null คืออนุมัติตามระยะเวลาที่มีคำสั่ง
+     */
+    private function leaveLimitsFor(User $user): array
+    {
+        $employmentType = $user->employment_type ?: 'local_employee';
+
+        $limits = match ($employmentType) {
+            'general_employee' => [
+                'ลาป่วย' => 15,
+                'ลาพักผ่อน' => 10,
+                'ลาเกณฑ์ทหาร/เตรียมพล' => 30,
+            ],
+            'contract_employee' => array_filter([
+                'ลาป่วย' => 60,
+                'ลากิจส่วนตัว' => $this->contractPersonalLeaveLimit($user),
+                'ลาพักผ่อน' => $this->isContractVacationEligible($user) ? 10 : null,
+                'ลาอุปสมบท/ประกอบพิธีฮัจย์' => 120,
+                'ลาเกณฑ์ทหาร/เตรียมพล' => null,
+            ], fn ($limit, $type) => $limit !== null || $type === 'ลาเกณฑ์ทหาร/เตรียมพล', ARRAY_FILTER_USE_BOTH),
+            default => [
+                'ลาป่วย' => 60,
+                'ลากิจส่วนตัว' => 45,
+                'ลาพักผ่อน' => 10,
+                'ลาอุปสมบท/ประกอบพิธีฮัจย์' => 120,
+                'ลาเกณฑ์ทหาร/เตรียมพล' => null,
+            ],
+        };
+
+        if ($user->gender === 'female') {
+            $limits['ลาคลอดบุตร'] = 90;
+        }
+
+        if ($employmentType === 'local_employee' && $user->gender === 'male') {
+            $limits['ลาไปช่วยเหลือภริยาที่คลอดบุตร'] = 15;
+        }
+
+        return $limits;
+    }
+
+    private function contractPersonalLeaveLimit(User $user): ?int
+    {
+        if (! $user->employment_started_at) {
+            return null;
+        }
+
+        return Carbon::parse($user->employment_started_at)->greaterThan(now()->subYear()) ? 15 : 45;
+    }
+
+    private function isContractVacationEligible(User $user): bool
+    {
+        if (! $user->employment_started_at || ! $user->vacation_eligible_at) {
+            return false;
+        }
+
+        return Carbon::parse($user->employment_started_at)->lte(now()->subMonths(6))
+            && Carbon::parse($user->vacation_eligible_at)->lte(now());
+    }
+
+    private function approvedLeaveUsage(int $userId, int $fiscalYear)
     {
         $connection = (new LeaveRequest)->getConnectionName() ?: config('database.default');
+        [$start, $end] = $this->fiscalYears->range($fiscalYear);
         $query = LeaveRequest::where('leave_requests.user_id', $userId)
             ->atCanonicalStatus('APPROVED')
-            ->whereYear('leave_requests.start_date', $year);
+            ->whereBetween('leave_requests.start_date', [$start, $end]);
 
         // Compatibility path for legacy databases while rollback remains supported.
         if (! Schema::connection($connection)->hasTable('leave_types')

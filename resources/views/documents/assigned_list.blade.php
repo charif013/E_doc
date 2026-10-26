@@ -1,3 +1,4 @@
+{{-- View: หน้ารายการงานเอกสารที่ผู้ใช้ได้รับมอบหมาย --}}
 @extends('layouts.app')
 
 @section('title', 'งานที่ได้รับมอบหมาย')
@@ -100,10 +101,25 @@
             <div class="task-list">
                 @forelse($documents as $doc)
                     @php
-                        $assignmentStatus = strtolower((string) $doc->assignment_status);
+                        $isV2Assignment = config('edoc.v2.document_reads');
+                        $v2ActiveAssignments = $isV2Assignment
+                            ? $doc->assignments->filter(fn ($assignment) => in_array(strtoupper((string) $assignment->status->value), ['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS', 'COMPLETED'], true))
+                            : collect();
+                        $v2UserAssignment = $v2ActiveAssignments->where('assigned_user_id', auth()->id())->sortByDesc('id')->first();
+                        $v2UnitAssignment = $v2ActiveAssignments->first(fn ($assignment) => !$assignment->assigned_user_id
+                            && $assignment->unit
+                            && $assignment->unit->name === $currentUser->department);
+                        $assignmentStatus = $isV2Assignment
+                            ? strtolower((string) ($v2UserAssignment?->status->value ?? $v2UnitAssignment?->status->value ?? 'pending'))
+                            : strtolower((string) $doc->assignment_status);
                         $canAct = (!config('edoc.v2.document_reads') || config('edoc.v2.write_enabled'))
-                            && ($doc->assigned_user_id === auth()->id()
-                            || ($currentUser->hasRole('head') && !$doc->assigned_user_id && $doc->assigned_to === $currentUser->department));
+                            && ($isV2Assignment
+                                ? ($v2UserAssignment || ($currentUser->hasRole('head') && $v2UnitAssignment))
+                                : ($doc->assigned_user_id === auth()->id()
+                                    || ($currentUser->hasRole('head') && !$doc->assigned_user_id && $doc->assigned_to === $currentUser->department)));
+                        $recipientNames = $isV2Assignment
+                            ? $v2ActiveAssignments->pluck('assignee.name')->filter()->unique()->values()
+                            : collect([$doc->assignee?->name])->filter();
                         $statusUi = match ($assignmentStatus) {
                             'accepted', 'acknowledged' => ['success', 'รับดำเนินการแล้ว', 'fa-circle-check'],
                             'in_progress' => ['blue', 'กำลังดำเนินการ', 'fa-spinner'],
@@ -126,7 +142,7 @@
                             <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="document-title">{{ $doc->title }}</a>
                             <div class="document-meta">
                                 <span><i class="fas fa-building"></i><span><small>ส่วนราชการ</small>{{ $doc->assigned_to ?: '-' }}</span></span>
-                                <span><i class="fas fa-user"></i><span><small>ผู้รับปัจจุบัน</small>{{ $doc->assignee?->name ?? 'หัวหน้าส่วนราชการ' }}</span></span>
+                                <span><i class="fas fa-user"></i><span><small>ผู้รับปัจจุบัน</small>{{ $recipientNames->isNotEmpty() ? $recipientNames->join(', ') : 'หัวหน้าส่วนราชการ' }}</span></span>
                                 @if($doc->delegator)<span><i class="fas fa-share"></i><span><small>ผู้ส่งต่อ</small>{{ $doc->delegator->name }}</span></span>@endif
                             </div>
                         </div>
@@ -134,17 +150,25 @@
                             <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="task-btn task-btn--neutral"><i class="fas fa-eye"></i>ดูเอกสาร</a>
                             @if($canAct && !in_array($assignmentStatus, ['accepted', 'acknowledged', 'completed'], true))
                                 <form action="{{ route('documents.assignment_action', $doc->uuid ?? $doc->id) }}" method="POST">@csrf<input type="hidden" name="action" value="accept"><button class="task-btn task-btn--success"><i class="fas fa-check"></i>รับดำเนินการเอง</button></form>
-                                @if($subordinates->isNotEmpty())
+                                @if($currentUser->hasRole('head') && $subordinates->isNotEmpty())
                                     <details class="action-menu action-menu--blue">
                                         <summary><i class="fas fa-share-nodes"></i>ส่งต่อบุคลากร</summary>
                                         <form action="{{ route('documents.assignment_action', $doc->uuid ?? $doc->id) }}" method="POST" class="action-menu__panel">
                                             @csrf<input type="hidden" name="action" value="delegate">
-                                            <label for="delegate_{{ $doc->id }}">เลือกบุคลากรในฝ่าย</label>
-                                            <select id="delegate_{{ $doc->id }}" name="delegate_user_id" class="form-select" required>
-                                                <option value="">กรุณาเลือกผู้รับงาน...</option>
-                                                @foreach($subordinates as $subordinate)<option value="{{ $subordinate->id }}">{{ $subordinate->name }}{{ $subordinate->position ? ' — '.$subordinate->position : '' }}</option>@endforeach
-                                            </select>
-                                            <button class="task-btn task-btn--primary w-100"><i class="fas fa-paper-plane"></i>ยืนยันส่งต่อ</button>
+                                            <label>เลือกบุคลากรในฝ่าย หรือเลือกทั้งหมด</label>
+                                            <div class="border rounded p-2" data-delegate-list style="max-height:220px;overflow-y:auto">
+                                                <label class="form-check fw-semibold border-bottom pb-2 mb-2 d-block">
+                                                    <input class="form-check-input" type="checkbox" data-delegate-select-all>
+                                                    <span class="form-check-label">เลือกทั้งหมด</span>
+                                                </label>
+                                                @foreach($subordinates as $subordinate)
+                                                    <label class="form-check mb-2 d-block" for="delegate_{{ $doc->id }}_{{ $subordinate->id }}">
+                                                        <input id="delegate_{{ $doc->id }}_{{ $subordinate->id }}" class="form-check-input" type="checkbox" name="delegate_user_ids[]" value="{{ $subordinate->id }}" data-delegate-recipient>
+                                                        <span class="form-check-label">{{ $subordinate->name }}{{ $subordinate->position ? ' — '.$subordinate->position : '' }}</span>
+                                                    </label>
+                                                @endforeach
+                                            </div>
+                                            <button class="task-btn task-btn--primary w-100"><i class="fas fa-paper-plane"></i>ยืนยันส่งต่อให้ผู้ที่เลือก</button>
                                         </form>
                                     </details>
                                 @endif
@@ -182,4 +206,21 @@
     @media(max-width:991.98px){.assignment-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.leave-card,.document-card{grid-template-columns:1fr}.document-card__icon{display:none}.task-actions{justify-content:flex-start}.document-card__actions{min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.action-finished{grid-column:1/-1}.action-menu__panel{right:auto;left:0}}
     @media(max-width:575.98px){.assignment-hero{align-items:flex-start;flex-direction:column;padding:19px}.assignment-hero__icon{width:48px;height:48px;flex-basis:48px}.assignment-back{width:100%;justify-content:center}.assignment-summary{gap:9px}.summary-card{align-items:flex-start;flex-direction:column;padding:13px}.summary-card>span{width:36px;height:36px;flex-basis:36px}.work-panel__header{align-items:flex-start;flex-direction:column;padding:16px}.panel-count{align-self:flex-start}.panel-heading__icon{display:none}.task-list{padding:9px}.leave-card,.document-card{padding:14px}.task-actions,.document-card__actions{display:flex;align-items:stretch;flex-direction:column;width:100%}.task-actions>*,.task-actions form,.task-actions button,.task-actions a,.task-actions summary{width:100%}.document-card__topline{align-items:flex-start;flex-direction:column}.document-meta{flex-direction:column;gap:8px}.action-menu__panel{position:fixed;left:12px;right:12px;top:auto;bottom:12px;width:auto}}
 </style>
+@endsection
+
+@section('scripts')
+<script>
+    document.querySelectorAll('[data-delegate-select-all]').forEach(function(selectAll) {
+        const list = selectAll.closest('[data-delegate-list]');
+        const recipients = Array.from(list.querySelectorAll('[data-delegate-recipient]'));
+        selectAll.addEventListener('change', function() {
+            recipients.forEach(function(recipient) { recipient.checked = selectAll.checked; });
+        });
+        recipients.forEach(function(recipient) {
+            recipient.addEventListener('change', function() {
+                selectAll.checked = recipients.length > 0 && recipients.every(function(item) { return item.checked; });
+            });
+        });
+    });
+</script>
 @endsection

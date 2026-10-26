@@ -1,3 +1,4 @@
+{{-- View: หน้าเข้าสู่ระบบของผู้ใช้งาน --}}
 @extends('layouts.app')
 
 @section('content')
@@ -167,14 +168,6 @@
                     @enderror
                 </div>
 
-                {{-- Remember Me --}}
-                <div class="mb-4 form-check">
-                    <input class="form-check-input shadow-sm" type="checkbox" name="remember" id="remember" {{ old('remember') ? 'checked' : '' }} style="cursor: pointer;">
-                    <label class="form-check-label text-muted small fw-bold" for="remember" style="cursor: pointer;">
-                        จดจำการเข้าสู่ระบบ
-                    </label>
-                </div>
-
                 {{-- Submit Button --}}
                 <button type="submit" class="btn btn-primary w-100 btn-login text-white shadow-sm mt-2">
                     <i class="fas fa-sign-in-alt me-2"></i> เข้าสู่ระบบ
@@ -187,6 +180,7 @@
 
 {{-- Script สำหรับเปิด/ปิด การมองเห็นรหัสผ่าน --}}
 <script>
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function () {
         const togglePasswordBtn = document.getElementById('togglePassword');
         const passwordInput = document.getElementById('password');
@@ -198,6 +192,7 @@
             // ตั้งค่าเริ่มต้นของ Title ตอนเอาเมาส์ชี้
             togglePasswordBtn.setAttribute('title', 'แสดงรหัสผ่าน');
 
+            // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
             togglePasswordBtn.addEventListener('click', function () {
                 const isPassword = passwordInput.type === 'password';
                 

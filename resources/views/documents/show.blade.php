@@ -1,3 +1,4 @@
+{{-- View: หน้าแสดงรายละเอียดเอกสารแบบทั่วไปหรือประเภทสำรอง --}}
 @extends('layouts.app')
 @section('title', 'รายละเอียดเอกสาร')
 
@@ -15,7 +16,7 @@
         $isReviewer = (
             ($user->hasRole('saraban')                           && in_array($document->status, ['WAITING_ADMIN', 'WAITING_NUMBERING'])) ||
             ($user->hasRole('head')                             && $document->status === 'WAITING_SUPERVISOR') ||
-            ($user->hasAnyRole(['palad', 'deputy-palad'])       && $document->status === 'WAITING_PALAD') ||
+            ($user->hasRole('palad')                            && $document->status === 'WAITING_PALAD') ||
             ($user->hasRole('executive')                        && $document->status === 'WAITING_NAYOK')
         );
 
@@ -43,7 +44,9 @@
         }
 
         // ─── ฟังก์ชัน: แปลง path ลายเซ็นให้ปลอดภัย ──────────────────
+        // หน้าที่: ประมวลผล callback ของส่วนนี้
         if (!function_exists('getSigUrl')) {
+            // หน้าที่: สร้าง URL สำหรับแสดงรูปภาพลายเซ็น
             function getSigUrl($path) {
                 if (empty($path)) return '';
                 $path = trim($path);
@@ -55,7 +58,9 @@
         }
 
         // ─── ฟังก์ชัน: แปลงวันที่ Carbon เป็น พ.ศ. ──────────────────
+        // หน้าที่: ประมวลผล callback ของส่วนนี้
         if (!function_exists('toThaiDate')) {
+            // หน้าที่: จัดรูปแบบวันที่เอกสารเป็นวันที่ภาษาไทย
             function toThaiDate($dateValue, $withTime = false) {
                 if (empty($dateValue)) return '-';
                 $dt = $dateValue instanceof \Carbon\Carbon
@@ -167,7 +172,7 @@
             <button onclick="window.print()" class="btn btn-dark rounded-pill px-4 shadow-sm fw-bold">
                 <i class="fas fa-print me-2"></i>พิมพ์เอกสาร
             </button>
-            <a href="{{ $user->hasAnyRole(['super-admin','executive','palad','deputy-palad','head','saraban','officer']) ? route('documents.approve_list') : route('documents.assigned') }}" class="ds-back-link">
+            <a href="{{ $user->hasAnyRole(['super-admin','executive','palad','head','saraban','officer']) ? route('documents.approve_list') : route('documents.assigned') }}" class="ds-back-link">
                 <i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้ารายการ
             </a>
         </div>
@@ -550,6 +555,7 @@
 @section('scripts')
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
 
     // ─── Flash messages ──────────────────────────────────────────
@@ -577,6 +583,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ─── ดึงเลขที่หนังสือล่าสุดอัตโนมัติ ────────────────────────────
+// หน้าที่: จองเลขเอกสารและเติมกลับเข้าสู่หน้าแสดงผล
 async function autoReserveNo() {
     try {
         const docType = '{{ $document->doc_type }}';
@@ -594,6 +601,7 @@ async function autoReserveNo() {
 }
 
 // ─── ฟังก์ชันเรียก Pop-up กรอก PIN เพื่อประทับลายเซ็น ─────────────────
+// หน้าที่: ขอและตรวจสอบ PIN ก่อนลงลายเซ็น
 function promptSignaturePin() {
     Swal.fire({
         title: 'ยืนยันการลงนามหนังสือออก',

@@ -17,7 +17,6 @@ class DocumentReadService
             'creator.positionRecord',
             'type', 'category', 'priority', 'confidentiality',
             'files', 'assignments.assignee', 'assignments.unit',
-            'accessRequests.requester.organizationUnit.parent',
             'numberAllocation', 'workflow',
             'routes.user.organizationUnit.parent',
             'routes.user.positionRecord',
@@ -72,6 +71,7 @@ class DocumentReadService
     public function assignedDocuments(LegacyUser $user): Collection
     {
         $names = array_values(array_filter([$user->department, $user->division, $user->work_unit]));
+
         return Document::whereHas('assignments', function (Builder $assignments) use ($user, $names) {
             $assignments->whereIn('status', ['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS', 'COMPLETED'])
                 ->where(function (Builder $visibleAssignments) use ($user, $names) {

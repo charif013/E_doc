@@ -1,3 +1,4 @@
+{{-- View: หน้าแดชบอร์ดรายงานภาพรวมสำหรับผู้บริหาร --}}
 @extends('layouts.app')
 @section('title', 'รายงานภาพรวมทั้งหมด')
 
@@ -498,6 +499,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function() {
         const rawData = @json($byDept);
         const chartElement = document.getElementById('deptChart');

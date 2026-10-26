@@ -1,3 +1,4 @@
+{{-- View: หน้าแก้ไขข้อมูลเอกสารที่อัปโหลด --}}
 @extends('layouts.app')
 @section('title', 'แก้ไขเอกสารอัปโหลด')
 
@@ -154,6 +155,7 @@
 </style>
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     
     // เริ่มต้นใช้งาน Select2 
@@ -171,6 +173,7 @@ document.addEventListener('DOMContentLoaded', function () {
         altInput: true,
         altFormat: "d F Y",
         dateFormat: "Y-m-d",
+        // หน้าที่: จัดรูปแบบวันที่ของปฏิทินให้ตรงกับรูปแบบที่ร้องขอ
         formatDate: function(date, format, locale) {
             let d = date.getDate();
             let m = date.toLocaleString('th-TH', { month: 'long' });

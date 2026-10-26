@@ -8,9 +8,11 @@ use App\Models\V2\RoomBooking;
 
 class DocumentPolicy
 {
-    public function before(User $user): ?bool
+    public function before(User $user, string $ability): ?bool
     {
-        return $user->hasRole('super-admin') ? true : null;
+        // ผู้ดูแลระบบจัดการเอกสารได้ตามปกติ ยกเว้นการออกเลขหนังสือ
+        // ซึ่งสงวนไว้ให้สารบรรณเพื่อคุมลำดับเลขเพียงจุดเดียว
+        return $user->hasRole('super-admin') && $ability !== 'number' ? true : null;
     }
 
     public function view(User $user, Document $document): bool
@@ -26,8 +28,7 @@ class DocumentPolicy
             ->whereIn('status', $activeAssignmentStatuses)->exists()) {
             return true;
         }
-        if ($user->hasRole('head') && $document->assignments()->whereHas('unit', fn ($units) =>
-            $units->whereIn('name', array_filter([$user->department, $user->division, $user->work_unit]))
+        if ($user->hasRole('head') && $document->assignments()->whereHas('unit', fn ($units) => $units->whereIn('name', array_filter([$user->department, $user->division, $user->work_unit]))
         )->whereIn('status', $activeAssignmentStatuses)->exists()) {
             return true;
         }
@@ -70,7 +71,7 @@ class DocumentPolicy
 
     public function number(User $user): bool
     {
-        return $user->hasAnyRole(['super-admin', 'palad', 'saraban']);
+        return $user->hasRole('saraban');
     }
 
     public function dispatch(User $user, Document $document): bool
@@ -82,19 +83,6 @@ class DocumentPolicy
 
     public function accessConfidential(User $user, Document $document): bool
     {
-        $isConfidential = $document->confidentiality_id
-            && $document->getConnection()->table('document_confidentialities')
-                ->where('id', $document->confidentiality_id)->where('level_no', '>', 1)->exists();
-        if (! $isConfidential) {
-            return $this->view($user, $document);
-        }
-        $approved = $document->getConnection()->table('document_access_requests')
-            ->where('document_id', $document->id)->where('requested_by', $user->id)
-            ->where('status', 'APPROVED')->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-            ->exists();
-
-        return $this->view($user, $document)
-            && ($approved || $document->created_by === $user->id
-                || $user->hasAnyRole(['saraban', 'head', 'palad', 'deputy-palad', 'executive']));
+        return $this->view($user, $document);
     }
 }

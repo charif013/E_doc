@@ -1,3 +1,4 @@
+{{-- Partial: สคริปต์และรูปแบบตรวจสอบช่องบังคับของแบบฟอร์ม --}}
 @once
 <style>
     .edoc-required-invalid {

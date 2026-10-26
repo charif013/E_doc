@@ -1,3 +1,4 @@
+{{-- View: หน้าแสดงรายละเอียดหนังสือรับเข้า --}}
 @extends('layouts.app')
 @section('title', 'รายละเอียดหนังสือรับเข้า')
 
@@ -40,7 +41,7 @@
             $isReviewer = (isset($canApprove) && $canApprove) || (
                 ($user->hasRole('saraban') && in_array($document->status, ['WAITING_ADMIN', 'WAITING_NUMBERING'])) ||
                 ($user->hasRole('head')      && $document->status === 'WAITING_SUPERVISOR') ||
-                ($user->hasAnyRole(['palad', 'deputy-palad']) && $document->status === 'WAITING_PALAD') ||
+                ($user->hasRole('palad') && $document->status === 'WAITING_PALAD') ||
                 ($user->hasRole('executive') && $document->status === 'WAITING_NAYOK')
             );
             
@@ -76,7 +77,9 @@
             ];
 
             // 🌟 ตัวช่วยจัดการ URL ลายเซ็นแบบครอบจักรวาล ป้องกัน Error (Malformed HTTP request)
+            // หน้าที่: ประมวลผล callback ของส่วนนี้
             if (!function_exists('getSigUrl')) {
+                // หน้าที่: สร้าง URL สำหรับแสดงรูปภาพลายเซ็น
                 function getSigUrl($path) {
                     if (empty($path)) return '';
                     $path = trim($path); // ตัดช่องว่างซ่อนเร้น
@@ -91,7 +94,9 @@
             }
 
             // 🌟 ฟังก์ชันแปลงเลขไทย
+            // หน้าที่: ประมวลผล callback ของส่วนนี้
             if (!function_exists('toThaiNum')) {
+                // หน้าที่: แปลงตัวเลขอารบิกเป็นเลขไทยสำหรับแสดงในเอกสาร
                 function toThaiNum($string) {
                     if (!$string) return '';
                     $arabic = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -125,21 +130,35 @@
 
         @php
             $activeAssignmentStatuses = ['pending', 'accepted', 'delegated', 'in_progress', 'completed'];
+            $isV2Assignment = config('edoc.v2.document_reads');
+            $v2ActiveAssignments = $isV2Assignment
+                ? $document->assignments->filter(fn ($assignment) => in_array(strtoupper((string) $assignment->status->value), ['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS', 'COMPLETED'], true))
+                : collect();
+            $v2UserAssignment = $v2ActiveAssignments->where('assigned_user_id', $user->id)->sortByDesc('id')->first();
+            $v2UnitAssignment = $v2ActiveAssignments->first(fn ($assignment) => !$assignment->assigned_user_id
+                && $assignment->unit
+                && $assignment->unit->name === $user->department);
             $assignmentIsFinalized = in_array($document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
-                && in_array($document->assignment_status, $activeAssignmentStatuses, true);
+                && ($isV2Assignment ? $v2ActiveAssignments->isNotEmpty() : in_array($document->assignment_status, $activeAssignmentStatuses, true));
             $canHandleAssignment = (!config('edoc.v2.document_reads') || config('edoc.v2.write_enabled'))
                 && $assignmentIsFinalized
-                && ($document->assigned_user_id === $user->id
-                || ($user->hasRole('head') && !$document->assigned_user_id && $document->assigned_to === $user->department));
-            $departmentUsers = $canHandleAssignment
+                && ($isV2Assignment
+                    ? ($v2UserAssignment || ($user->hasRole('head') && $v2UnitAssignment))
+                    : ($document->assigned_user_id === $user->id
+                        || ($user->hasRole('head') && !$document->assigned_user_id && $document->assigned_to === $user->department)));
+            $assignmentAccepted = $isV2Assignment
+                ? (strtoupper((string) ($v2UserAssignment?->status->value ?? '')) === 'ACKNOWLEDGED')
+                : $document->assignment_status === 'accepted';
+            $canDelegateAssignment = $canHandleAssignment && $user->hasRole('head');
+            $departmentUsers = $canDelegateAssignment
                 ? \App\Models\User::where('department', $user->department)->where('id', '!=', $user->id)->orderBy('name')->get()
                 : collect();
         @endphp
-        @if($document->status === 'APPROVED' && $canHandleAssignment && $document->assignment_status !== 'accepted')
+        @if($document->status === 'APPROVED' && $canHandleAssignment && !$assignmentAccepted)
             <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius:12px;border-left:5px solid #0284c7 !important">
                 <div class="card-body p-4">
                     <h5 class="fw-bold"><i class="fas fa-tasks text-primary me-2"></i>งานที่นายกมอบหมายให้ {{ $document->assigned_to }}</h5>
-                    <p class="text-muted small">เลือกรับดำเนินการด้วยตนเอง หรือส่งต่อให้บุคลากรในฝ่ายเดียวกัน</p>
+                    <p class="text-muted small">เลือกรับดำเนินการด้วยตนเอง หรือเลือกส่งต่อให้บุคลากรในฝ่ายเดียวกันได้หลายคน</p>
                     <div class="d-flex flex-wrap gap-2">
                         <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST">
                             @csrf
@@ -147,63 +166,27 @@
                             <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold"><i class="fas fa-check me-1"></i>รับดำเนินการเอง</button>
                         </form>
                         @if($departmentUsers->isNotEmpty())
-                        <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST" class="d-flex gap-2 flex-grow-1">
+                        <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST" class="d-flex flex-column gap-2 flex-grow-1">
                             @csrf
                             <input type="hidden" name="action" value="delegate">
-                            <select name="delegate_user_id" class="form-select" required>
-                                <option value="">เลือกบุคลากรในฝ่าย...</option>
+                            <div class="border rounded p-2 bg-light" data-delegate-list style="max-height:220px;overflow-y:auto">
+                                <label class="form-check fw-semibold border-bottom pb-2 mb-2 d-block">
+                                    <input class="form-check-input" type="checkbox" data-delegate-select-all>
+                                    <span class="form-check-label">เลือกทั้งหมด</span>
+                                </label>
                                 @foreach($departmentUsers as $departmentUser)
-                                    <option value="{{ $departmentUser->id }}">{{ $departmentUser->name }}{{ $departmentUser->position ? ' — '.$departmentUser->position : '' }}</option>
+                                    <label class="form-check mb-2 d-block" for="delegate_{{ $document->id }}_{{ $departmentUser->id }}">
+                                        <input id="delegate_{{ $document->id }}_{{ $departmentUser->id }}" class="form-check-input" type="checkbox" name="delegate_user_ids[]" value="{{ $departmentUser->id }}" data-delegate-recipient>
+                                        <span class="form-check-label">{{ $departmentUser->name }}{{ $departmentUser->position ? ' — '.$departmentUser->position : '' }}</span>
+                                    </label>
                                 @endforeach
-                            </select>
-                            <button type="submit" class="btn btn-primary text-nowrap"><i class="fas fa-share me-1"></i>ส่งต่อ</button>
+                            </div>
+                            <div><button type="submit" class="btn btn-primary text-nowrap"><i class="fas fa-share me-1"></i>ส่งต่อให้ผู้ที่เลือก</button></div>
                         </form>
                         @endif
                     </div>
                 </div>
             </div>
-        @endif
-
-        {{-- 🌟 กล่องจัดการคำขอสิทธิ์ (เห็นเฉพาะธุรการและเจ้าของเรื่อง) 🌟 --}}
-        @php
-            $pendingRequests = config('edoc.v2.document_reads')
-                ? $document->accessRequests->filter(fn ($accessRequest) => strtoupper((string) $accessRequest->status) === 'PENDING')
-                : \App\Models\DocumentAccessRequest::where('document_id', $document->id)->where('status', 'pending')->get();
-            $canManageAccess = auth()->user()->id === $document->created_by || auth()->user()->hasRole('saraban');
-        @endphp
-
-        @if(in_array($document->doc_secret, ['ลับ', 'ลับเฉพาะ', 'ลับที่สุด']) && $canManageAccess && $pendingRequests->count() > 0)
-        <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius: 12px; border-left: 5px solid #f59e0b !important;">
-            <div class="card-header bg-white py-3 border-bottom-0">
-                <h6 class="fw-bold mb-0 text-dark"><i class="fas fa-key text-warning me-2"></i>มีผู้ส่งคำขอสิทธิ์เข้าถึงเอกสารลับฉบับนี้</h6>
-            </div>
-            <div class="card-body pt-0">
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                        <tbody>
-                            @foreach($pendingRequests as $req)
-                            <tr>
-                                <td class="py-2">
-                                    <strong>{{ $req->user->name ?? 'ไม่ทราบชื่อ' }}</strong> 
-                                    <span class="text-muted small">({{ $req->user->department ?? '-' }})</span>
-                                </td>
-                                <td class="text-end py-2">
-                                    <form action="{{ route('documents.approve_access', ['request_id' => $req->id, 'status' => 'approved']) }}" method="POST" class="d-inline">
-                                        @csrf
-                                        <button class="btn btn-sm btn-success rounded-pill px-3 shadow-sm fw-bold"><i class="fas fa-check me-1"></i> อนุมัติ</button>
-                                    </form>
-                                    <form action="{{ route('documents.approve_access', ['request_id' => $req->id, 'status' => 'rejected']) }}" method="POST" class="d-inline">
-                                        @csrf
-                                        <button class="btn btn-sm btn-danger rounded-pill px-3 shadow-sm fw-bold ms-1"><i class="fas fa-times me-1"></i> ปฏิเสธ</button>
-                                    </form>
-                                </td>
-                            </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
         @endif
 
         {{-- 🌟 Main Card (ข้อมูลเอกสาร) --}}
@@ -770,6 +753,7 @@
 
 @section('scripts')
 <script>
+    // หน้าที่: ตรวจสอบว่าระบุเหตุผลก่อนส่งผลการพิจารณา
     function checkReason() {
         const reasonInput = document.getElementById('comment');
         if (reasonInput && reasonInput.value.trim() === '') {
@@ -789,6 +773,7 @@
         return true;
     }
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.getElementById('comment')?.addEventListener('input', function() {
         this.style.borderColor = '#dde3ea';
         this.style.backgroundColor = '#ffffff';
@@ -796,7 +781,20 @@
         if(reasonAst) reasonAst.style.display = 'none';
     });
 
+    // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('[data-delegate-select-all]').forEach(function(selectAll) {
+            const list = selectAll.closest('[data-delegate-list]');
+            const recipients = Array.from(list.querySelectorAll('[data-delegate-recipient]'));
+            selectAll.addEventListener('change', function() {
+                recipients.forEach(function(recipient) { recipient.checked = selectAll.checked; });
+            });
+            recipients.forEach(function(recipient) {
+                recipient.addEventListener('change', function() {
+                    selectAll.checked = recipients.length > 0 && recipients.every(function(item) { return item.checked; });
+                });
+            });
+        });
         @if(session('error_signature'))
             Swal.fire({ icon: 'warning', title: 'ยังไม่พร้อมใช้งาน', text: '{{ session("error_signature") }}', confirmButtonText: 'ไปหน้าตั้งค่าโปรไฟล์', confirmButtonColor: '#0284c7' }).then((result) => { if (result.isConfirmed) window.location.href = "{{ route('profile.index') }}"; });
         @endif
@@ -805,6 +803,7 @@
         @if(session('success')) Swal.fire({ icon: 'success', title: 'สำเร็จ!', text: '{{ session("success") }}', confirmButtonText: 'ตกลง', confirmButtonColor: '#10b981', timer: 2500 }); @endif
     });
 
+    // หน้าที่: ขอคำยืนยันก่อนบันทึกการรับทราบเอกสาร
     function confirmAcknowledge(btn) {
         Swal.fire({
             icon: 'question',

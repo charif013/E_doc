@@ -1,6 +1,9 @@
+{{-- Partial: แสดงรูปแบบกระดาษของบันทึกข้อความภายใน --}}
 @php
     // 🌟 ดักจับฟังก์ชันแปลงเลขไทย ป้องกัน Error: Call to undefined function
+    // หน้าที่: ประมวลผล callback ของส่วนนี้
     if (!function_exists('toThaiNum')) {
+        // หน้าที่: แปลงตัวเลขอารบิกเป็นเลขไทยสำหรับแสดงในเอกสาร
         function toThaiNum($string) {
             if (!$string) return '';
             $arabic = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];

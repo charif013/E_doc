@@ -3,7 +3,6 @@
 namespace App\Policies;
 
 use App\Models\Document;
-use App\Models\DocumentAccessRequest;
 use App\Models\RoomBooking;
 use App\Models\User;
 
@@ -70,7 +69,9 @@ class DocumentPolicy
 
     public function number(User $user, Document $document): bool
     {
-        return $user->hasAnyRole(['super-admin', 'palad', 'saraban']);
+        // เลขหนังสือเป็นหน้าที่ของเจ้าหน้าที่สารบรรณเท่านั้น
+        // สิทธิ์ผู้ดูแลระบบไม่ควรข้ามการควบคุมเลขสารบรรณได้
+        return $user->hasRole('saraban');
     }
 
     public function dispatch(User $user, Document $document): bool
@@ -87,24 +88,7 @@ class DocumentPolicy
 
     public function accessConfidential(User $user, Document $document): bool
     {
-        if (! in_array($document->doc_secret, ['ลับ', 'ลับเฉพาะ', 'ลับที่สุด'], true)) {
-            return $this->view($user, $document);
-        }
-
-        $hasRoleAccess = $document->created_by === $user->id
-            || $user->hasAnyRole(['super-admin', 'saraban', 'head', 'palad', 'deputy-palad', 'executive']);
-        $approved = DocumentAccessRequest::where('document_id', $document->id)
-            ->where('user_id', $user->id)
-            ->where('status', 'approved')
-            ->exists();
-        $hasBooking = RoomBooking::where('document_id', $document->id)
-            ->where(function ($query) use ($user) {
-                $query->where('created_by', $user->id)
-                    ->orWhereHas('invitees', fn ($invitees) => $invitees->where('users.id', $user->id));
-            })->exists();
-
-        return $this->view($user, $document)
-            && ($hasRoleAccess || $approved || $hasBooking || $this->hasReachedRoute($user, $document));
+        return $this->view($user, $document);
     }
 
     private function hasReachedRoute(User $user, Document $document): bool
@@ -142,7 +126,7 @@ class DocumentPolicy
                 && in_array($status, ['WAITING_SUPERVISOR', 'WAITING_PALAD', 'WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED'], true);
         }
 
-        if ($user->hasAnyRole(['palad', 'deputy-palad'])) {
+        if ($user->hasRole('palad')) {
             return in_array($status, ['WAITING_PALAD', 'WAITING_NAYOK', 'WAITING_NUMBERING', 'APPROVED'], true);
         }
 

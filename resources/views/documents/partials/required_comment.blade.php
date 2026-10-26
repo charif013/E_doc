@@ -1,3 +1,4 @@
+{{-- Partial: ช่องกรอกความคิดเห็นที่ใช้ร่วมในแบบฟอร์มพิจารณาเอกสาร --}}
 @php
     $commentId = $id ?? 'document_comment';
     $commentLabel = $label ?? 'ความคิดเห็น';

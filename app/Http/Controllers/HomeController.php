@@ -5,11 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\Document;
 use App\Models\LeaveRequest;
 use App\Models\RoomBooking;
+use App\Models\User;
+use App\Services\V2\DashboardDocumentService as V2DashboardDocumentService;
+use App\Services\V2\DocumentReadService as V2DocumentReadService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use App\Services\V2\DashboardDocumentService as V2DashboardDocumentService;
-use App\Services\V2\DocumentReadService as V2DocumentReadService;
 
 class HomeController extends Controller
 {
@@ -22,9 +23,8 @@ class HomeController extends Controller
         Request $request,
         V2DashboardDocumentService $v2Documents,
         V2DocumentReadService $v2DocumentReads,
-    )
-    {
-        /** @var \App\Models\User $user */
+    ) {
+        /** @var User $user */
         $user = Auth::user();
         if (config('edoc.v2.document_reads')) {
             return $this->v2Index($request, $user, $v2Documents, $v2DocumentReads);
@@ -61,7 +61,7 @@ class HomeController extends Controller
                 // กฎข้อ 2: ถ้าเป็นผู้บริหาร หรือสารบรรณ ให้มองเห็นเอกสารที่ส่งมาถึงด่านตัวเองและด่านถัดไป
                 if ($user->hasRole('executive')) {
                     $q->orWhereIn('status', ['WAITING_NAYOK', 'APPROVED']);
-                } elseif ($user->hasAnyRole(['palad', 'deputy-palad'])) {
+                } elseif ($user->hasRole('palad')) {
                     $q->orWhereIn('status', ['WAITING_PALAD', 'WAITING_NAYOK', 'APPROVED']);
                 } elseif ($user->hasRole('head')) {
                     $q->orWhereIn('status', ['WAITING_SUPERVISOR', 'WAITING_PALAD', 'WAITING_NAYOK', 'APPROVED']);
@@ -136,7 +136,7 @@ class HomeController extends Controller
                 + $creatorActionCount;
         } elseif ($user->hasRole('executive')) {
             $waitingCount = Document::where('status', 'WAITING_NAYOK')->count() + $dynamicWaitingCount + $assignmentWaitingCount + $creatorActionCount;
-        } elseif ($user->hasAnyRole(['palad', 'deputy-palad'])) {
+        } elseif ($user->hasRole('palad')) {
             $waitingCount = Document::where('status', 'WAITING_PALAD')->count() + $dynamicWaitingCount + $assignmentWaitingCount + $creatorActionCount;
         } elseif ($user->hasRole('head')) {
             $waitingCount = Document::where('status', 'WAITING_SUPERVISOR')->count() + $dynamicWaitingCount + $assignmentWaitingCount + $creatorActionCount;
@@ -192,8 +192,7 @@ class HomeController extends Controller
         $user,
         V2DashboardDocumentService $documents,
         V2DocumentReadService $documentReads,
-    )
-    {
+    ) {
         $search = trim((string) $request->query('q', ''));
         $filter = in_array($request->query('filter'), ['all', 'waiting', 'approved', 'rejected'], true)
             ? $request->query('filter')
@@ -247,7 +246,7 @@ class HomeController extends Controller
                         ->where('assignment_status', 'pending');
                 });
             }
-            if ($user->hasAnyRole(['palad', 'deputy-palad'])) {
+            if ($user->hasRole('palad')) {
                 $query->orWhere('status', 'WAITING_PALAD');
             }
             if ($user->hasRole('executive')) {
@@ -274,6 +273,7 @@ class HomeController extends Controller
                     'pending_delegate', 'pending_head', 'pending_inspector',
                     'pending_palad', 'pending_nayok',
                 ]);
+
                 return;
             }
 
@@ -293,7 +293,7 @@ class HomeController extends Controller
             if ($user->hasRole('hr')) {
                 $query->orWhere(fn ($leaves) => $leaves->atWorkflowStage('pending_inspector'));
             }
-            if ($user->hasAnyRole(['palad', 'deputy-palad'])) {
+            if ($user->hasRole('palad')) {
                 $query->orWhere(fn ($leaves) => $leaves->atWorkflowStage('pending_palad'));
             }
             if ($user->hasRole('executive')) {

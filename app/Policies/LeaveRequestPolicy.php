@@ -33,7 +33,7 @@ class LeaveRequestPolicy
             'pending_head' => $user->hasRole('head')
                 && $user->department
                 && $user->department === $leave->user?->department,
-            'pending_palad' => $user->hasAnyRole(['palad', 'deputy-palad']),
+            'pending_palad' => $user->hasRole('palad'),
             'pending_nayok' => $user->hasRole('executive'),
             default => false,
         };

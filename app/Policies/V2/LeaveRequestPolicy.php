@@ -7,9 +7,13 @@ use App\Models\V2\LeaveRequest;
 
 class LeaveRequestPolicy
 {
-    public function before(User $user): ?bool
+    public function before(User $user, string $ability): ?bool
     {
-        return $user->hasRole('super-admin') ? true : null;
+        // ผู้ดูแลระบบมีสิทธิ์ดูข้อมูลทั้งหมด แต่ห้ามตัดสินใจใน workflow ใบลา
+        // และห้ามยกเลิกแทนผู้ยื่นคำขอ เพื่อคงหลักฐานและลำดับอนุมัติไว้
+        return $user->hasRole('super-admin') && ! in_array($ability, ['review', 'cancel'], true)
+            ? true
+            : null;
     }
 
     public function view(User $user, LeaveRequest $leave): bool

@@ -1,3 +1,4 @@
+{{-- Partial: แถบแสดงขั้นตอนและสถานะปัจจุบันของเอกสาร --}}
 @php
     $timelineStatus = strtoupper((string) ($document->status ?? 'DRAFT'));
     if ($document->isAtFinalApprovalStep()) {
@@ -16,6 +17,7 @@
         $actualRoutes = $actualRoutes->sortBy('step_order')->values();
         $lastRouteIndex = $actualRoutes->count() - 1;
         $routeCurrentStep = (int) ($document->current_step ?? 1);
+        // หน้าที่: ประมวลผล callback ของส่วนนี้
         $timelineSteps = $actualRoutes->map(function ($route, $index) use ($lastRouteIndex, $routeCurrentStep) {
             $actionType = strtoupper((string) ($route->action_type ?? ''));
             $isCreator = (int) $route->step_order === 1 || $actionType === 'SUBMIT';

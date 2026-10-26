@@ -2,12 +2,10 @@
 
 namespace App\Services\V2;
 
-use App\Services\DocumentFileStorage;
-use App\Services\DocumentRevisionService;
 use App\Models\User as LegacyUser;
 use App\Models\V2\Document;
-use App\Models\V2\DocumentCategory;
 use App\Models\V2\DocumentAccessRequest;
+use App\Models\V2\DocumentCategory;
 use App\Models\V2\DocumentConfidentiality;
 use App\Models\V2\DocumentFile;
 use App\Models\V2\DocumentPriority;
@@ -17,6 +15,8 @@ use App\Models\V2\User;
 use App\Models\V2\WorkflowDefinition;
 use App\Models\V2\WorkflowInstance;
 use App\Models\V2\WorkflowStep;
+use App\Services\DocumentFileStorage;
+use App\Services\DocumentRevisionService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -78,6 +78,22 @@ class DocumentWriteService
             $previousSignerId = $locked->doc_type === 'outgoing'
                 ? $this->signerIdFromName((string) $locked->signer_name)
                 : null;
+            if ($locked->doc_type === 'outgoing' && ($data['document_source'] ?? null) === 'upload') {
+                $runningNumber = (int) ($data['running_number'] ?? 0);
+                $formattedNumber = trim((string) ($data['doc_number'] ?? ''));
+                if ($runningNumber < 1 || $formattedNumber === '') {
+                    throw ValidationException::withMessages([
+                        'doc_number' => 'เลขหนังสือส่งออกต้องเชื่อมกับเลขลำดับในสมุดคุมเลข',
+                    ]);
+                }
+                $this->numbering->allocate(
+                    $locked,
+                    $actorId,
+                    $runningNumber,
+                    $formattedNumber,
+                    $this->scope('outgoing', (int) $locked->created_by)
+                );
+            }
             $locked->update($this->documentColumns($data, $actorId, $locked->doc_type, false) + [
                 'status' => 'DRAFT', 'rejection_reason' => null,
             ]);
@@ -105,7 +121,9 @@ class DocumentWriteService
     public function submit(Document $document, User $actor): Document
     {
         $this->guard->ensureEnabled();
-        if ($document->created_by !== $actor->id || $document->status !== 'DRAFT') { abort(403); }
+        if ($document->created_by !== $actor->id || $document->status !== 'DRAFT') {
+            abort(403);
+        }
         $this->ensureOutgoingSignerStep($document);
         $instance = $document->workflow()->firstOrFail();
         $this->workflow->act($instance, $actor, 'APPROVED', 'ลงนามและส่งเรื่อง', null, 'CREATED');
@@ -115,12 +133,21 @@ class DocumentWriteService
         } else {
             $document->update(['status' => 'IN_REVIEW']);
         }
+
         return $document->fresh();
     }
 
     public function review(Document $document, User $actor, bool $approved, ?string $comment, ?string $assignmentChoice, ?string $evidenceAction = null): Document
     {
         $this->guard->ensureEnabled();
+        if ($approved && $document->doc_type === 'outgoing' && $document->source_type === 'upload') {
+            $allocation = $document->numberAllocation()->first();
+            if (! $allocation || trim((string) $allocation->formatted_number) !== trim((string) $document->document_number)) {
+                throw ValidationException::withMessages([
+                    'document_number' => 'ไม่สามารถอนุมัติได้ เนื่องจากเลขหนังสือไม่ตรงกับสมุดคุมเลข',
+                ]);
+            }
+        }
         $noAssignment = $assignmentChoice === '__NO_ASSIGNMENT__';
         $unit = null;
         if ($document->doc_type === 'incoming' && $assignmentChoice !== null && ! $noAssignment) {
@@ -174,21 +201,27 @@ class DocumentWriteService
                 ]);
             }
         }
+
         return $document->fresh();
     }
 
     public function replaceAttachment(Document $document, UploadedFile $file, int $actorId): Document
     {
         $this->guard->ensureEnabled();
-        if ($document->created_by !== $actorId || ! in_array($document->status, ['DRAFT', 'REJECTED'], true)) { abort(403); }
+        if ($document->created_by !== $actorId || ! in_array($document->status, ['DRAFT', 'REJECTED'], true)) {
+            abort(403);
+        }
         $this->storeFile($document, $file, 'MAIN', $this->folderFor($document->doc_type), $actorId);
+
         return $document->fresh();
     }
 
     public function attachExternalQrCopy(Document $document, UploadedFile $file, int $actorId): Document
     {
         $this->guard->ensureEnabled();
-        if ($document->created_by !== $actorId || ! in_array($document->status, ['DRAFT', 'REJECTED'], true)) { abort(403); }
+        if ($document->created_by !== $actorId || ! in_array($document->status, ['DRAFT', 'REJECTED'], true)) {
+            abort(403);
+        }
 
         $externalFile = $document->files()->where('file_type', 'EXTERNAL')->latest('version_no')->first();
         if (! $externalFile || ! $externalFile->external_url) {
@@ -222,7 +255,9 @@ class DocumentWriteService
     public function delete(Document $document, int $actorId): void
     {
         $this->guard->ensureEnabled();
-        if ($document->created_by !== $actorId || ! in_array($document->status, ['DRAFT', 'REJECTED'], true)) { abort(403); }
+        if ($document->created_by !== $actorId || ! in_array($document->status, ['DRAFT', 'REJECTED'], true)) {
+            abort(403);
+        }
         $document->delete();
     }
 
@@ -244,13 +279,17 @@ class DocumentWriteService
             $numberingData['document_date'] = now()->toDateString();
         }
         $numbered->update($numberingData);
-        if ($confirm && $numbered->status === 'APPROVED') { $numbered->update(['status' => 'COMPLETED']); }
+        if ($confirm && $numbered->status === 'APPROVED') {
+            $numbered->update(['status' => 'COMPLETED']);
+        }
+
         return $numbered->fresh();
     }
 
     public function reserveSlot(string $type, int $actorId, int $runningNumber, string $formatted): Document
     {
         $this->guard->ensureEnabled();
+
         return DB::connection('mysql_v2')->transaction(function () use ($type, $actorId, $runningNumber, $formatted) {
             $document = Document::create([
                 'uuid' => (string) Str::uuid(),
@@ -258,15 +297,49 @@ class DocumentWriteService
                 'document_date' => now()->toDateString(), 'title' => '[จองเลขเอกสารล่วงหน้า]',
                 'status' => 'REGISTERED', 'created_by' => $actorId,
             ]);
+
             return $this->numbering->allocate($document, $actorId, $runningNumber, $formatted, $this->scope($type, $actorId));
         }, 3);
     }
 
-    public function assign(Document $document, LegacyUser $actor, string $action, ?int $delegateId = null): Document
+    /**
+     * รับงานหรือส่งต่อให้ผู้รับงานได้หลายคน
+     *
+     * แต่ละผู้รับมีแถว assignment ของตนเองเพื่อให้ตอบรับงานได้แยกกัน
+     * การส่งต่ออนุญาตเฉพาะหัวหน้าส่วนราชการหรือหัวหน้าสำนักปลัด
+     * โดยไม่กระทบผู้รับงานคนอื่นของเอกสารฉบับเดียวกัน
+     */
+    public function assign(Document $document, LegacyUser $actor, string $action, array|int|null $delegateIds = null): Document
     {
         $this->guard->ensureEnabled();
-        return DB::connection('mysql_v2')->transaction(function () use ($document, $actor, $action, $delegateId) {
-            $assignment = $document->assignments()->latest('id')->lockForUpdate()->firstOrFail();
+
+        return DB::connection('mysql_v2')->transaction(function () use ($document, $actor, $action, $delegateIds) {
+            if ($action === 'delegate' && ! $actor->hasRole('head')) {
+                abort(403, 'เฉพาะหัวหน้าส่วนราชการหรือหัวหน้าสำนักปลัดเท่านั้นที่ส่งต่องานได้');
+            }
+
+            $activeAssignments = $document->assignments()
+                ->whereIn('status', ['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS']);
+
+            // เลือกงานที่เป็นของผู้ดำเนินการก่อนเสมอ เพื่อรองรับเอกสารที่มอบหมายหลายคน
+            $assignment = (clone $activeAssignments)
+                ->where('assigned_user_id', $actor->id)
+                ->latest('id')
+                ->lockForUpdate()
+                ->first();
+
+            // หัวหน้าสามารถดำเนินการงานที่ส่งถึงหน่วยงานและยังไม่ได้ระบุผู้รับได้
+            if (! $assignment && $actor->hasRole('head')) {
+                $unitNames = array_filter([$actor->department, $actor->division, $actor->work_unit]);
+                $assignment = (clone $activeAssignments)
+                    ->whereNull('assigned_user_id')
+                    ->whereHas('unit', fn ($units) => $units->whereIn('name', $unitNames))
+                    ->latest('id')
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            abort_unless($assignment, 403);
             $assignmentStatus = $assignment->status instanceof \BackedEnum
                 ? $assignment->status->value
                 : (string) $assignment->status;
@@ -274,24 +347,45 @@ class DocumentWriteService
                 || ! in_array($assignmentStatus, ['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS'], true)) {
                 abort(403, 'เอกสารยังไม่ผ่านการอนุมัติขั้นสุดท้าย');
             }
-            $unitNames = array_filter([$actor->department, $actor->division, $actor->work_unit]);
-            $isUnitHead = $actor->hasRole('head') && $assignment->unit && in_array($assignment->unit->name, $unitNames, true);
-            if ($assignment->assigned_user_id !== $actor->id && ! $isUnitHead) { abort(403); }
             if ($action === 'accept') {
                 $assignment->update([
                     'assigned_user_id' => $actor->id, 'status' => 'ACKNOWLEDGED',
                     'acknowledged_at' => now(),
                 ]);
             } else {
-                $delegate = User::findOrFail($delegateId);
-                if ($delegate->department !== $actor->department || $delegate->id === $actor->id) {
+                $delegateIds = collect(is_array($delegateIds) ? $delegateIds : [$delegateIds])
+                    ->filter(fn ($id) => filter_var($id, FILTER_VALIDATE_INT) !== false)
+                    ->map(fn ($id) => (int) $id)
+                    ->unique()
+                    ->values();
+                if ($delegateIds->isEmpty()) {
+                    throw ValidationException::withMessages(['delegate_user_ids' => 'กรุณาเลือกบุคลากรอย่างน้อย 1 คน']);
+                }
+                $delegates = User::with('organizationUnit.parent')->whereIn('id', $delegateIds)->get()->keyBy('id');
+                if ($delegates->count() !== $delegateIds->count()
+                    || $delegates->contains(fn (User $delegate) => $delegate->department !== $actor->department || $delegate->id === $actor->id)) {
                     throw ValidationException::withMessages(['delegate_user_id' => 'เลือกได้เฉพาะบุคลากรในฝ่ายเดียวกัน']);
                 }
+
+                $firstDelegate = $delegates->get($delegateIds->first());
                 $assignment->update([
-                    'assigned_user_id' => $delegate->id, 'delegated_by' => $actor->id,
+                    'assigned_user_id' => $firstDelegate->id, 'delegated_by' => $actor->id,
                     'status' => 'PENDING', 'assigned_at' => now(), 'acknowledged_at' => null,
                 ]);
+
+                // แถวแรกใช้แถวเดิม ส่วนคนที่เหลือมีแถวของตนเองเพื่อให้รับงานแยกกันได้
+                $delegateIds->skip(1)->each(function (int $delegateId) use ($document, $assignment, $actor): void {
+                    $document->assignments()->create([
+                        'assigned_user_id' => $delegateId,
+                        'assigned_unit_id' => $assignment->assigned_unit_id,
+                        'assigned_by' => $assignment->assigned_by ?? $actor->id,
+                        'delegated_by' => $actor->id,
+                        'status' => 'PENDING',
+                        'assigned_at' => now(),
+                    ]);
+                });
             }
+
             return $document->fresh();
         }, 3);
     }
@@ -299,6 +393,7 @@ class DocumentWriteService
     public function requestAccess(Document $document, int $actorId, ?string $reason = null): DocumentAccessRequest
     {
         $this->guard->ensureEnabled();
+
         return DocumentAccessRequest::updateOrCreate(
             ['document_id' => $document->id, 'requested_by' => $actorId],
             ['reason' => $reason, 'status' => 'PENDING', 'reviewed_by' => null, 'reviewed_at' => null, 'expires_at' => null]
@@ -308,11 +403,14 @@ class DocumentWriteService
     public function decideAccess(DocumentAccessRequest $accessRequest, LegacyUser $actor, string $status): DocumentAccessRequest
     {
         $this->guard->ensureEnabled();
-        if ($accessRequest->document->created_by !== $actor->id && ! $actor->hasAnyRole(['super-admin', 'saraban'])) { abort(403); }
+        if ($accessRequest->document->created_by !== $actor->id && ! $actor->hasAnyRole(['super-admin', 'saraban'])) {
+            abort(403);
+        }
         $accessRequest->update([
             'status' => strtoupper($status), 'reviewed_by' => $actor->id,
             'reviewed_at' => now(), 'expires_at' => $status === 'approved' ? now()->addDays(30) : null,
         ]);
+
         return $accessRequest->fresh(['document', 'requester']);
     }
 
@@ -343,6 +441,7 @@ class DocumentWriteService
         } else {
             unset($columns['document_type_id']);
         }
+
         return $columns;
     }
 
@@ -420,6 +519,7 @@ class DocumentWriteService
 
             if ($lastStep && (int) $lastStep->assigned_user_id === $signerId) {
                 $lastStep->update(['step_name' => 'Document signer', 'action_type' => 'SIGNATURE']);
+
                 return;
             }
 
@@ -459,13 +559,17 @@ class DocumentWriteService
             || User::whereIn('id', $ids)->count() !== count($ids)) {
             throw ValidationException::withMessages(['routing_users' => 'เส้นทางผู้พิจารณาไม่ถูกต้อง']);
         }
+
         return $ids;
     }
 
     private function categoryId(?string $name): ?int
     {
         $name = trim((string) $name);
-        if ($name === '') { return null; }
+        if ($name === '') {
+            return null;
+        }
+
         return DocumentCategory::firstOrCreate(
             ['name' => $name], ['code' => 'LEGACY_'.strtoupper(substr(hash('sha256', $name), 0, 16)), 'is_active' => true]
         )->id;
@@ -476,6 +580,15 @@ class DocumentWriteService
         return $model::where('name', $name)->value('id') ?: $model::where('code', 'NORMAL')->value('id');
     }
 
-    private function folderFor(string $type): string { return match ($type) { 'incoming' => 'incoming_docs', 'outgoing' => 'outgoing_docs', default => 'attachments' }; }
-    private function scope(string $type, int $actorId): string { return $type === 'internal' ? (User::find($actorId)?->department ?: 'organization') : 'organization'; }
+    private function folderFor(string $type): string
+    {
+        return match ($type) {
+            'incoming' => 'incoming_docs', 'outgoing' => 'outgoing_docs', default => 'attachments'
+        };
+    }
+
+    private function scope(string $type, int $actorId): string
+    {
+        return $type === 'internal' ? (User::find($actorId)?->department ?: 'organization') : 'organization';
+    }
 }

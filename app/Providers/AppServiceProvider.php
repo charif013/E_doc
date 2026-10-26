@@ -89,9 +89,8 @@ class AppServiceProvider extends ServiceProvider
                                 ->where(fn ($assignee) => $assignee
                                     ->where('assigned_user_id', $user->id)
                                     ->orWhereIn('assigned_role_id', $roleIds))))->count();
-                    if ($user->hasAnyRole(['super-admin', 'saraban'])) {
+                    if ($user->hasRole('saraban')) {
                         $numberingPendingCount = V2Document::where('status', 'APPROVED')
-                            ->whereHas('type', fn ($types) => $types->where('code', 'INTERNAL'))
                             ->whereDoesntHave('numberAllocation')
                             ->count();
                     }
@@ -112,7 +111,7 @@ class AppServiceProvider extends ServiceProvider
                         ->where('user_id', $user->id)
                         ->where('status', 'pending')
                         ->whereColumn('document_routes.step_order', 'documents.current_step'))->count();
-                    if ($user->hasAnyRole(['super-admin', 'saraban'])) {
+                    if ($user->hasRole('saraban')) {
                         $numberingPendingCount = Document::where('status', 'WAITING_NUMBERING')->count();
                     }
                 }

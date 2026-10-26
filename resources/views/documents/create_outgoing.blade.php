@@ -1,3 +1,4 @@
+{{-- View: หน้าสร้างหนังสือส่งออก --}}
 @extends('layouts.app')
 @section('title', 'สร้างหนังสือส่งออก')
 
@@ -372,7 +373,7 @@
                                         @php
                                             $suffix = '';
                                             if ($person->hasRole('executive')) { $suffix = ' — นายก อบต.พร่อน'; }
-                                            elseif ($person->hasRole('palad') || $person->hasRole('deputy-palad')) { $suffix = ' — ปลัด อบต.พร่อน ปฏิบัติราชการแทน'; }
+                                            elseif ($person->hasRole('palad')) { $suffix = ' — ปลัด อบต.พร่อน ปฏิบัติราชการแทน'; }
                                             else { $suffix = ' — หัวหน้าสำนักปลัด รักษาราชการแทน'; }
                                             $fullNameWithPosition = $person->name . $suffix;
                                         @endphp
@@ -442,7 +443,7 @@
                                                 @php
                                                     $uploadSuffix = '';
                                                     if ($person->hasRole('executive')) { $uploadSuffix = ' — นายก อบต.พร่อน'; }
-                                                    elseif ($person->hasRole('palad') || $person->hasRole('deputy-palad')) { $uploadSuffix = ' — ปลัด อบต.พร่อน ปฏิบัติราชการแทน'; }
+                                                    elseif ($person->hasRole('palad')) { $uploadSuffix = ' — ปลัด อบต.พร่อน ปฏิบัติราชการแทน'; }
                                                     else { $uploadSuffix = ' — หัวหน้าสำนักปลัด รักษาราชการแทน'; }
                                                     $uploadSignerName = $person->name . $uploadSuffix;
                                                 @endphp
@@ -559,6 +560,7 @@
     let systemDatePicker;
     let uploadDatePicker;
 
+    // หน้าที่: สร้างตัวเลือกปฏิทินตามโหมดวันที่ที่กำหนด
     function datePickerOptions(mode) {
         return {
             locale: "th",
@@ -566,12 +568,14 @@
             allowInput: false,
             disableMobile: true,
             defaultDate: initialDocumentDate,
+            // หน้าที่: ประมวลผล callback ของส่วนนี้
             onReady: function(selectedDates, dateStr, instance) {
                 if (selectedDates.length > 0) {
                     _updateThaiDisplay(selectedDates[0], instance);
                     _syncHiddenField(selectedDates[0]);
                 }
             },
+            // หน้าที่: ซิงก์ข้อมูลเมื่อค่าของตัวเลือกวันที่เปลี่ยน
             onChange: function(selectedDates, dateStr, instance) {
                 if (selectedDates.length === 0 || syncingDatePickers) return;
                 syncingDatePickers = true;
@@ -585,8 +589,11 @@
                 }
                 syncingDatePickers = false;
             },
+            // หน้าที่: ปรับส่วนแสดงผลปฏิทินหลังสถานะปฏิทินเปลี่ยน
             onMonthChange: function(s, d, instance) { _patchCalendarHeader(instance); },
+            // หน้าที่: ปรับส่วนแสดงผลปฏิทินหลังสถานะปฏิทินเปลี่ยน
             onYearChange: function(s, d, instance) { _patchCalendarHeader(instance); },
+            // หน้าที่: ปรับส่วนแสดงผลปฏิทินหลังสถานะปฏิทินเปลี่ยน
             onOpen: function(s, d, instance) { _patchCalendarHeader(instance); }
         };
     }
@@ -594,6 +601,7 @@
     systemDatePicker = flatpickr("#doc_date_picker", datePickerOptions('system'));
     uploadDatePicker = flatpickr("#upload_doc_date_picker", datePickerOptions('upload'));
 
+    // หน้าที่: อัปเดตข้อความวันที่ในรูปแบบปีพุทธศักราช
     function _updateThaiDisplay(dateObj, instance) {
         const d   = dateObj.getDate();
         const month = THAI_MONTHS[dateObj.getMonth()];
@@ -601,10 +609,12 @@
         instance.input.value = toThaiDigitsText(`${d} ${month} ${yBE}`);
     }
 
+    // หน้าที่: แปลงตัวเลขอารบิกเป็นเลขไทย
     function toThaiDigitsText(value) {
         return String(value).replace(/[0-9]/g, digit => '๐๑๒๓๔๕๖๗๘๙'[Number(digit)]);
     }
 
+    // หน้าที่: ซิงก์วันที่มาตรฐานไปยังช่องข้อมูลที่ซ่อนอยู่
     function _syncHiddenField(dateObj) {
         const yyyy = dateObj.getFullYear();
         const mm   = (dateObj.getMonth() + 1).toString().padStart(2, '0');
@@ -612,6 +622,7 @@
         document.getElementById('doc_date_hidden').value = `${yyyy}-${mm}-${dd}`;
     }
 
+    // หน้าที่: ปรับหัวปฏิทินให้แสดงปีพุทธศักราช
     function _patchCalendarHeader(instance) {
         requestAnimationFrame(() => {
             const yearInput = instance.calendarContainer?.querySelector('.cur-year');
@@ -632,10 +643,12 @@
     const DEFAULT_OUTGOING_ADDRESS = @json(config('edoc.organization.outgoing_address'));
     let draftTimer = null;
 
+    // หน้าที่: คืนแหล่งที่มาของเอกสารที่เลือกอยู่
     function selectedSource() {
         return document.querySelector('input[name="document_source"]:checked')?.value || 'system';
     }
 
+    // หน้าที่: จัดรูปแบบเลขจองหนังสือให้อยู่ในรูปแบบมาตรฐาน
     function normalizeReservedDocumentNumber() {
         const isSystem = selectedSource() === 'system';
         const hidden = document.getElementById('running_number');
@@ -654,6 +667,7 @@
         hidden.value = running;
     }
 
+    // หน้าที่: ซิงก์ข้อมูลแบบมีโครงสร้างกับช่องเนื้อหาเอกสาร
     function syncStructuredContent() {
         const content = [...document.querySelectorAll('.structured-content-part')]
             .map(field => field.value.trim())
@@ -663,6 +677,7 @@
         document.getElementById('contentCount').innerText = content.length.toLocaleString('th-TH');
     }
 
+    // หน้าที่: ซิงก์ข้อมูลกำกับระหว่างโหมดสร้างและโหมดอัปโหลด
     function syncUploadMetadata(isSystem) {
         const pairs = [
             ['title', 'upload_title'],
@@ -678,6 +693,7 @@
         });
     }
 
+    // หน้าที่: ซิงก์รหัสผู้ลงนามจากช่องเลือกไปยังช่องซ่อน
     function syncSignerUserIds() {
         [
             ['signer', 'signer_user_id'],
@@ -689,6 +705,7 @@
         });
     }
 
+    // หน้าที่: ปรับแบบฟอร์มให้ตรงกับแหล่งเอกสารที่เลือก
     function applySourceMode() {
         const isSystem = selectedSource() === 'system';
         normalizeReservedDocumentNumber();
@@ -712,6 +729,7 @@
         syncSignerUserIds();
     }
 
+    // หน้าที่: บันทึกร่างหนังสือส่งออกไว้ในเบราว์เซอร์
     function saveLocalDraft() {
         const values = {};
         outgoingForm.querySelectorAll('input:not([type="file"]):not([type="hidden"]), textarea, select').forEach(field => {
@@ -729,12 +747,14 @@
         }
     }
 
+    // หน้าที่: หน่วงเวลาการบันทึกร่างเพื่อลดการเขียนซ้ำ
     function scheduleLocalDraft() {
         clearTimeout(draftTimer);
         document.getElementById('draftIndicator').innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>กำลังบันทึกร่าง';
         draftTimer = setTimeout(saveLocalDraft, 500);
     }
 
+    // หน้าที่: กู้คืนร่างหนังสือส่งออกจากเบราว์เซอร์
     function restoreLocalDraft() {
         if (hasServerOldInput) return;
         const raw = localStorage.getItem(draftKey);
@@ -761,6 +781,7 @@
 
     outgoingForm.addEventListener('input', scheduleLocalDraft);
     outgoingForm.addEventListener('change', scheduleLocalDraft);
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     outgoingForm.addEventListener('submit', function(e) {
         normalizeReservedDocumentNumber();
         syncStructuredContent();
@@ -786,6 +807,7 @@
         { name:"หัวหน้าส่วนราชการทุกส่วน", org:"ส่วนราชการภายใน" }
     ];
 
+    // หน้าที่: กรองและแสดงรายการหน่วยงานปลายทาง
     function renderAddrList(filter = "") {
         const list = document.getElementById('addrList');
         list.innerHTML = "";
@@ -808,17 +830,21 @@
     }
     renderAddrList();
 
+    // หน้าที่: กรองรายชื่อหน่วยงานตามคำค้นหา
     function filterAddr() { renderAddrList(document.getElementById('addrSearch').value); }
+    // หน้าที่: สลับการแสดงกล่องตัวเลือกที่ระบุ
     function togglePopup(id) {
         const el = document.getElementById(id);
         el.style.display = el.style.display === 'block' ? 'none' : 'block';
     }
+    // หน้าที่: นำข้อความอ้างอิงที่เลือกไปใส่ในแบบฟอร์ม
     function selectRef(text) {
         document.getElementById('reference_doc').value = text;
         document.getElementById('refPopup').style.display = 'none';
     }
 
     // ✅ API รันเลขอัตโนมัติ
+    // หน้าที่: ขอและเติมเลขเอกสารจากระบบอัตโนมัติ
     async function autoDocNo() {
         try {
             const res  = await fetch("{{ route('documents.api_next_number') }}?type=outgoing");
@@ -842,6 +868,7 @@
         if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; handleFileChange(fileInput); }
     });
 
+    // หน้าที่: ตรวจไฟล์ที่เลือกและอัปเดตส่วนแสดงชื่อไฟล์
     function handleFileChange(input) {
         const display = document.getElementById('file-display');
         if (input.files && input.files[0]) {
@@ -856,6 +883,7 @@
     }
 
     // 🌟 ลูกเล่นแจ้งเตือนสายตา (UI) + อัปเดต Badge ด้านบน
+    // หน้าที่: อัปเดตป้ายชั้นความเร็วและชั้นความลับ
     function updateBadges() {
         const speed  = document.getElementById('doc_speed').value;
         const secretSelect = document.getElementById('doc_secret');
@@ -883,6 +911,7 @@
     }
 
     // ✅ Step Transition
+    // หน้าที่: ตรวจข้อมูลและเปิดขั้นตอนตัวอย่างเอกสาร
     function goToPreview() {
         normalizeReservedDocumentNumber();
         syncStructuredContent();
@@ -951,12 +980,14 @@
         window.scrollTo(0, 0);
     }
 
+    // หน้าที่: กลับจากหน้าตัวอย่างไปยังแบบฟอร์มแก้ไข
     function backToEdit() {
         document.getElementById('step2').style.display = 'none';
         document.getElementById('step1').style.display = 'block';
         window.scrollTo(0, 0);
     }
 
+    // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.addEventListener('click', function(e) {
         if (!e.target.closest('#addrBookPopup') && !e.target.closest('button[onclick*="addrBookPopup"]'))
             document.getElementById('addrBookPopup').style.display = 'none';

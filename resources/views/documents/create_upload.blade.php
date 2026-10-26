@@ -1,3 +1,4 @@
+{{-- View: หน้าอัปโหลดบันทึกข้อความจากไฟล์ --}}
 @extends('layouts.app')
 @section('title', 'อัปโหลดบันทึกข้อความ')
 
@@ -160,6 +161,7 @@
 </style>
 
 <script>
+// หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     
     // เริ่มต้นใช้งาน Select2 (พิมค้นหาได้ + พิมพ์คำใหม่เพิ่มเองได้)
@@ -178,6 +180,7 @@ document.addEventListener('DOMContentLoaded', function () {
         altFormat: "d F Y",
         dateFormat: "Y-m-d",
         defaultDate: "today",
+        // หน้าที่: จัดรูปแบบวันที่ของปฏิทินให้ตรงกับรูปแบบที่ร้องขอ
         formatDate: function(date, format, locale) {
             let d = date.getDate();
             let m = date.toLocaleString('th-TH', { month: 'long' });
@@ -196,6 +199,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // 🌟 ลูกเล่นแจ้งเตือนสายตา (UI) หากเลือกชั้นความลับ "ลับ" ขึ้นไป
     const secretSelect = document.getElementById('doc_secret');
     if (secretSelect) {
+        // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
         secretSelect.addEventListener('change', function() {
             if (this.value !== 'ไม่มีชั้นความลับ') {
                 this.classList.remove('text-dark');

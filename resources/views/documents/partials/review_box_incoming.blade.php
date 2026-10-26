@@ -1,3 +1,4 @@
+{{-- Partial: กล่องพิจารณาและเกษียนสั่งการสำหรับหนังสือรับเข้า --}}
 {{-- 🌟 สำหรับ: หนังสือรับเข้า (Incoming) - เกษียนสั่งการ / เสนอเรื่อง --}}
 @php
     $user = auth()->user();
@@ -16,7 +17,7 @@
         <div class="row g-3">
             
             {{-- 🌟 ซ่อน/แสดง ช่องมอบหมาย: เฉพาะ ปลัด, รองปลัด และ นายกฯ ถึงจะเห็น --}}
-            @hasanyrole('palad|deputy-palad|executive')
+            @hasanyrole('palad|executive')
             <div class="col-md-12 mb-2">
                 <label class="form-label fw-bold text-dark" for="assignment_choice">
                     <i class="fas fa-share-nodes me-1 text-primary"></i> การมอบหมายงาน <span class="text-danger">*</span>
@@ -77,6 +78,7 @@
 </form>
 
 <script>
+    // หน้าที่: เตรียมข้อมูลก่อนส่งผลพิจารณาหนังสือรับเข้า
     function prepareIncomingReview(isApproved) {
         document.getElementById('is_approved_incoming').value = isApproved ? '1' : '0';
         const assignment = document.getElementById('assignment_choice');

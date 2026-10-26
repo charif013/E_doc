@@ -78,9 +78,11 @@ class AuthorizationPolicyTest extends TestCase
         Role::create(['name' => 'officer']);
         Role::create(['name' => 'palad']);
         Role::create(['name' => 'saraban']);
+        Role::create(['name' => 'super-admin']);
         $officer = User::factory()->create()->assignRole('officer');
         $palad = User::factory()->create()->assignRole('palad');
         $saraban = User::factory()->create()->assignRole('saraban');
+        $admin = User::factory()->create()->assignRole('super-admin');
 
         $this->actingAs($officer)->get(route('documents.number_ledger'))->assertForbidden();
         $this->actingAs($officer)->getJson(route('documents.api_next_number'))->assertForbidden();
@@ -88,6 +90,20 @@ class AuthorizationPolicyTest extends TestCase
         $this->actingAs($palad)->getJson(route('documents.api_next_number'))->assertForbidden();
         $this->actingAs($palad)->get(route('documents.registry'))->assertForbidden();
         $this->actingAs($palad)->post(route('documents.reserve_number_slot'))->assertForbidden();
+        $this->actingAs($admin)->get(route('documents.number_ledger'))->assertForbidden();
+        $this->actingAs($admin)->getJson(route('documents.api_next_number'))->assertForbidden();
+        $this->actingAs($admin)->get(route('documents.registry'))->assertForbidden();
+        $this->actingAs($admin)->post(route('documents.reserve_number_slot'))->assertForbidden();
+
+        $draft = Document::create([
+            'doc_type' => 'outgoing', 'title' => 'ร่างสำหรับทดสอบสิทธิ์ออกเลข',
+            'status' => 'DRAFT', 'created_by' => $admin->id,
+        ]);
+        $this->assertFalse($admin->can('number', $draft));
+        $this->assertTrue($saraban->can('number', $draft));
+        $this->actingAs($admin)->post(route('documents.reserve_number', $draft->uuid), [
+            'doc_number' => 'ยล 77301/1', 'running_number' => 1,
+        ])->assertForbidden();
 
         $this->actingAs($saraban)->get(route('documents.number_ledger'))->assertOk();
         $this->actingAs($saraban)->getJson(route('documents.api_next_number'))
@@ -113,6 +129,30 @@ class AuthorizationPolicyTest extends TestCase
 
         $this->assertFalse($saraban->can('review', $leave));
         $this->actingAs($saraban)->get(route('leaves.show', $leave))->assertForbidden();
+    }
+
+    public function test_super_admin_can_view_every_leave_but_cannot_review_it(): void
+    {
+        Role::create(['name' => 'officer']);
+        Role::create(['name' => 'super-admin']);
+        $owner = User::factory()->create()->assignRole('officer');
+        $admin = User::factory()->create()->assignRole('super-admin');
+        $leave = LeaveRequest::create([
+            'user_id' => $owner->id,
+            'leave_type' => 'ลาป่วย',
+            'start_date' => now()->toDateString(), 'end_date' => now()->toDateString(),
+            'total_days' => 1, 'reason' => 'ทดสอบสิทธิ์ผู้ดูแล',
+            'status' => 'PENDING', 'workflow_status' => 'pending_nayok', 'is_draft' => false,
+        ]);
+
+        $this->assertTrue($admin->can('view', $leave));
+        $this->assertFalse($admin->can('review', $leave));
+        $this->actingAs($admin)->get(route('leaves.approve_list'))
+            ->assertOk()->assertSee($owner->name);
+        $this->actingAs($admin)->get(route('leaves.show', $leave))->assertOk();
+        $this->actingAs($admin)->post(route('leaves.reviewAction', $leave), [
+            'is_approved' => 0, 'reject_reason' => 'ไม่มีสิทธิ์พิจารณา',
+        ])->assertForbidden();
     }
 
     public function test_saraban_can_review_document_waiting_for_number_after_routes_are_completed(): void
