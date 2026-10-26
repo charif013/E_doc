@@ -682,6 +682,11 @@
                 <span class="nav-text">จัดการห้องประชุม</span>
             </a>
 
+            <a href="{{ route('admin.audit_logs.index') }}" class="nav-link-item {{ request()->routeIs('admin.audit_logs.*') ? 'active' : '' }}">
+                <span class="nav-icon"><i class="fa-solid fa-shield-halved"></i></span>
+                <span class="nav-text">ประวัติการใช้งานระบบ</span>
+            </a>
+
             <a href="{{ route('holidays.index') }}" class="nav-link-item {{ request()->routeIs('holidays.*') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-calendar-days"></i></span>
                 <span class="nav-text">ตั้งค่าปฏิทินวันหยุด</span>

@@ -2911,7 +2911,9 @@ class DocumentController extends Controller
      */
     private function authorizeSarabanNumbering(): void
     {
-        abort_unless(Auth::user()?->hasRole('saraban'), 403, 'เฉพาะเจ้าหน้าที่สารบรรณเท่านั้นที่สามารถระบุเลขหนังสือได้');
+        $user = Auth::user();
+
+        abort_unless($user instanceof User && $user->hasRole('saraban'), 403, 'เฉพาะเจ้าหน้าที่สารบรรณเท่านั้นที่สามารถระบุเลขหนังสือได้');
     }
 
     // หน้าที่: ตรวจสอบข้อมูลสำหรับอัปเดตเอกสาร V2
