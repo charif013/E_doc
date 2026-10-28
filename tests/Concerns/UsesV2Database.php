@@ -18,11 +18,12 @@ trait UsesV2Database
         ]);
         config()->set('edoc.v2.enabled', true);
         config()->set('edoc.v2.write_enabled', true);
+        config()->set('edoc.v2.connection', 'mysql_v2');
         DB::purge('mysql_v2');
 
         $exitCode = Artisan::call('migrate', [
             '--database' => 'mysql_v2',
-            '--path' => 'database/migrations-v2',
+            '--path' => 'database/migrations',
             '--force' => true,
         ]);
         Assert::assertSame(0, $exitCode, Artisan::output());

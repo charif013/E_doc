@@ -22,7 +22,7 @@ composer install
 npm ci
 cp .env.example .env
 php artisan key:generate
-php artisan edoc:v2-schema --force
+php artisan migrate --force
 php artisan db:seed --force
 php artisan storage:link
 npm run build
@@ -130,7 +130,7 @@ php artisan edoc:production-health --json
 2. เปิด maintenance mode: `php artisan down`
 3. ติดตั้ง dependency ด้วย `composer install --no-dev --optimize-autoloader` และ `npm ci && npm run build`
 4. รัน `composer audit --locked` และ `npm audit --audit-level=moderate` ซึ่งต้องไม่มี advisory ที่ไม่อนุมัติ
-5. รัน `php artisan edoc:v2-schema --force` ห้ามใช้ `php artisan migrate` กับฐาน V2
+5. รัน `php artisan migrate --force` เพื่ออัปเดต schema หลักของระบบ V2
 6. รัน `php artisan edoc:secure-document-storage` แล้ว `php artisan edoc:secure-document-storage --commit`
 7. รัน `php artisan optimize` และ `php artisan queue:restart`
 8. ตรวจสิทธิ์เขียน `storage`/`bootstrap/cache`, queue worker, scheduler และ HTTPS
@@ -141,21 +141,19 @@ php artisan edoc:production-health --json
 
 สำรองทุกวันอย่างน้อยสองส่วน: database dump และ `storage/app/public` เก็บแบบเข้ารหัสคนละเครื่อง/พื้นที่ และทดสอบ restore เป็นระยะ การกู้คืนต้องใช้ฐานข้อมูลกับ storage จากเวลาเดียวกันเพื่อให้ hash/path ของเอกสารตรงกัน
 
-ก่อน restore ให้หยุด queue worker และนำระบบเข้า maintenance mode หลัง restore ให้รัน `php artisan edoc:v2-schema --force`, `php artisan storage:link`, ล้าง cache และตรวจไฟล์ตัวอย่างเทียบค่า SHA-256 ในระบบ
+ก่อน restore ให้หยุด queue worker และนำระบบเข้า maintenance mode หลัง restore ให้รัน `php artisan migrate --force`, `php artisan storage:link`, ล้าง cache และตรวจไฟล์ตัวอย่างเทียบค่า SHA-256 ในระบบ
 
-## ฐานข้อมูล V2
+## ฐานข้อมูลหลัก
 
-V2 ถูกพัฒนาในฐาน `e_docv2` และ connection `mysql_v2` แยกจากฐานเดิม ห้ามเปิด write flag ใน production จนกว่า validation และ smoke test จะผ่าน
+ระบบใช้ schema V2 เป็น schema หลักในฐาน `e_docv2` แล้ว โดย migration ทั้งหมดอยู่ใน `database/migrations` และคำสั่งมาตรฐานคือ `php artisan migrate`.
 
 ```bash
-php artisan edoc:v2-schema --force
-php artisan edoc:v2-migrate
-php artisan edoc:v2-migrate --commit
+php artisan migrate --force
 php artisan edoc:v2-repair-leave-workflows
 php artisan edoc:v2-validate
 ```
 
-รายละเอียด mapping อยู่ที่ `docs/database-v2-migration.md`, ขั้นตอนสลับระบบ/ย้อนกลับอยู่ที่ `docs/database-v2-cutover-runbook.md` และนโยบาย parent/child, restore, purge อยู่ที่ `docs/data-lifecycle-policy.md`
+`php artisan edoc:v2-schema --force` ยังใช้ได้ในฐานะคำสั่ง compatibility ที่เรียก migration ชุดเดียวกัน ส่วนเอกสาร mapping และ cutover เดิมเก็บไว้เป็นประวัติที่ `docs/database-v2-migration.md` และ `docs/database-v2-cutover-runbook.md`
 
 สถานะเครื่องปัจจุบัน: default connection ใช้ `e_docv2` แล้ว โดยเปิดทั้ง V2 reads และ writes;
 ฐาน `edoc_db` คงไว้ผ่าน connection `mysql_legacy_readonly` สำหรับ validation และ rollback เท่านั้น

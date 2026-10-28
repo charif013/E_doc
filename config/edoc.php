@@ -16,12 +16,12 @@ return [
     ],
 
     'v2' => [
-        // V2 stays dark until validation and smoke tests are complete.
-        'enabled' => env('EDOC_V2_ENABLED', false),
-        'write_enabled' => env('EDOC_V2_WRITE_ENABLED', false),
+        // V2 is the canonical application schema.
+        'enabled' => env('EDOC_V2_ENABLED', true),
+        'write_enabled' => env('EDOC_V2_WRITE_ENABLED', true),
         'connection' => env('EDOC_V2_CONNECTION', 'mysql_v2'),
-        'document_reads' => env('EDOC_V2_DOCUMENT_READS', false),
-        'migration_path' => env('EDOC_V2_MIGRATION_PATH', 'database/migrations-v2'),
+        'document_reads' => env('EDOC_V2_DOCUMENT_READS', true),
+        'migration_path' => env('EDOC_V2_MIGRATION_PATH', 'database/migrations'),
     ],
 
     'queue' => [

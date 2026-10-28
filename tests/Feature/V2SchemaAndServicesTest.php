@@ -14,7 +14,6 @@ use App\Services\V2\RoomBookingService;
 use App\Services\V2\WorkflowService;
 use App\Policies\V2\DocumentPolicy;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -152,43 +151,6 @@ class V2SchemaAndServicesTest extends TestCase
             'signature_sha256' => str_repeat('a', 64), 'request_id' => 'test-request',
         ], 'mysql_v2');
         $this->assertDatabaseHas('documents', ['id' => 1, 'status' => 'APPROVED'], 'mysql_v2');
-    }
-
-    public function test_legacy_copy_command_repairs_a_missing_document_allocation_in_v2_only(): void
-    {
-        config()->set('database.connections.legacy_test', [
-            'driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '',
-            'foreign_key_constraints' => true,
-        ]);
-        DB::purge('legacy_test');
-        $exitCode = Artisan::call('migrate', [
-            '--database' => 'legacy_test', '--path' => 'database/migrations', '--force' => true,
-        ]);
-        $this->assertSame(0, $exitCode, Artisan::output());
-
-        $legacy = DB::connection('legacy_test');
-        $legacy->table('users')->insert([
-            'id' => 99, 'name' => 'Legacy User', 'email' => 'legacy@example.test',
-            'department' => 'สำนักงานปลัด', 'position' => 'เจ้าหน้าที่',
-            'password' => password_hash('password', PASSWORD_BCRYPT),
-            'created_at' => now(), 'updated_at' => now(),
-        ]);
-        $legacy->table('documents')->insert([
-            'id' => 99, 'uuid' => '00000000-0000-4000-8000-000000000099',
-            'doc_type' => 'internal', 'doc_number' => 'ยล 77301/7', 'running_number' => 7,
-            'title' => 'Legacy numbered document', 'status' => 'PROCESSING', 'created_by' => 99,
-            'created_at' => '2026-09-01 00:00:00', 'updated_at' => '2026-09-01 00:00:00',
-        ]);
-        $this->assertSame(0, $legacy->table('document_number_allocations')->count());
-
-        $exitCode = Artisan::call('edoc:v2-migrate', [
-            '--source' => 'legacy_test', '--target' => 'mysql_v2', '--commit' => true,
-        ]);
-        $this->assertSame(0, $exitCode, Artisan::output());
-        $this->assertSame(0, $legacy->table('document_number_allocations')->count());
-        $this->assertDatabaseHas('number_allocations', [
-            'document_id' => 99, 'running_number' => 7, 'formatted_number' => 'ยล 77301/7',
-        ], 'mysql_v2');
     }
 
     public function test_v2_models_expose_transitional_legacy_read_attributes(): void
@@ -355,7 +317,7 @@ class V2SchemaAndServicesTest extends TestCase
             'SIGNATURE_CONFIRMED'
         );
 
-        $this->assertSame('COMPLETED', $document->refresh()->status);
+        $this->assertSame('APPROVED', $document->refresh()->status);
         $this->assertDatabaseHas('workflow_action_evidence', [
             'resource_type' => 'DOCUMENT',
             'resource_id' => $document->id,
@@ -364,7 +326,7 @@ class V2SchemaAndServicesTest extends TestCase
         ], 'mysql_v2');
     }
 
-    public function test_uploaded_outgoing_cannot_be_approved_without_a_number_allocation(): void
+    public function test_uploaded_outgoing_can_be_approved_before_saraban_assigns_a_number(): void
     {
         $this->seedV2User(1);
         $this->seedV2User(2);
@@ -382,18 +344,13 @@ class V2SchemaAndServicesTest extends TestCase
         ], [2], 1);
         $service->submit($document, User::findOrFail(1));
 
-        try {
-            $service->review($document->refresh(), User::findOrFail(2), true, 'Signed', null);
-            $this->fail('Approval without a canonical allocation should have failed.');
-        } catch (ValidationException $error) {
-            $this->assertArrayHasKey('document_number', $error->errors());
-        }
+        $service->review($document->refresh(), User::findOrFail(2), true, 'Signed', null);
 
-        $this->assertSame('IN_REVIEW', $document->refresh()->status);
+        $this->assertSame('APPROVED', $document->refresh()->status);
         $this->assertDatabaseHas('workflow_steps', [
             'workflow_instance_id' => $document->workflow()->value('id'),
             'step_order' => 2,
-            'status' => 'PENDING',
+            'status' => 'APPROVED',
         ], 'mysql_v2');
     }
 

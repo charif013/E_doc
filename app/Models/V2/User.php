@@ -14,7 +14,6 @@ class User extends Authenticatable
 {
     use HasRoles, SoftDeletes;
 
-    protected $connection = 'mysql_v2';
     protected $guarded = [];
     protected $hidden = ['password', 'pin', 'remember_token'];
     protected $casts = [
@@ -25,6 +24,11 @@ class User extends Authenticatable
         'line_followed_at' => 'datetime',
         'password' => 'hashed',
     ];
+
+    public function getConnectionName(): ?string
+    {
+        return (string) config('edoc.v2.connection', parent::getConnectionName());
+    }
 
     public function organizationUnit(): BelongsTo { return $this->belongsTo(OrganizationUnit::class); }
     public function positionRecord(): BelongsTo { return $this->belongsTo(Position::class, 'position_id'); }

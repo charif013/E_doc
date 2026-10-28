@@ -15,7 +15,7 @@ class MigrateV2Schema extends Command
     {
         $arguments = [
             '--database' => (string) config('edoc.v2.connection', 'mysql_v2'),
-            '--path' => (string) config('edoc.v2.migration_path', 'database/migrations-v2'),
+            '--path' => (string) config('edoc.v2.migration_path', 'database/migrations'),
             '--force' => (bool) $this->option('force'),
             '--no-interaction' => true,
         ];

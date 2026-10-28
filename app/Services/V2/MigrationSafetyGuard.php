@@ -26,18 +26,22 @@ class MigrationSafetyGuard
         }
 
         $path = $event->input?->getParameterOption('--path');
+        if ($path === null || $path === false || $path === '') {
+            return;
+        }
+
         $paths = array_map(
             fn ($value) => trim(str_replace('\\', '/', (string) $value), '/'),
             is_array($path) ? $path : [$path]
         );
-        $allowed = trim(str_replace('\\', '/', (string) config('edoc.v2.migration_path')), '/');
+        $allowed = trim(str_replace('\\', '/', (string) config('edoc.v2.migration_path', 'database/migrations')), '/');
 
-        if ($event->command === 'migrate' && $paths === [$allowed]) {
+        if ($paths === [$allowed]) {
             return;
         }
 
         throw new RuntimeException(
-            'Blocked legacy migration command against the V2 database. Use php artisan edoc:v2-schema instead.'
+            'Blocked a non-canonical migration path against the V2 database. Use database/migrations.'
         );
     }
 }

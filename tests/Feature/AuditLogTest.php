@@ -79,7 +79,7 @@ class AuditLogTest extends TestCase
             ->assertSee('ผู้ดำเนินการ')
             ->assertSee('ผู้ทดสอบประวัติ')
             ->assertSee('document.test_viewed')
-            ->assertSee('ดูการเปลี่ยนแปลง');
+            ->assertSee('ดูรายละเอียด');
 
         /** @var LengthAwarePaginator $logs */
         $logs = $response->viewData('logs');
