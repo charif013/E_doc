@@ -32,7 +32,7 @@ class DocumentExtractionQueueTest extends TestCase
         $response->assertAccepted()
             ->assertJsonPath('success', true)
             ->assertJsonPath('status', 'queued')
-            ->assertJsonStructure(['task_id', 'status_url']);
+            ->assertJsonStructure(['task_id', 'status_url', 'cancel_url']);
 
         $task = DocumentExtractionTask::findOrFail($response->json('task_id'));
         $this->assertSame($user->id, $task->user_id);
@@ -63,6 +63,36 @@ class DocumentExtractionQueueTest extends TestCase
             ->assertOk()
             ->assertJsonPath('status', 'completed')
             ->assertJsonPath('data.title', 'หนังสือทดสอบ');
+    }
+
+    public function test_owner_can_cancel_queued_task_and_its_private_source_file_is_removed(): void
+    {
+        Storage::fake('local');
+        $task = $this->makeTaskWithStoredFile();
+
+        $this->actingAs(User::findOrFail($task->user_id))
+            ->postJson(route('documents.auto_extract_cancel', $task->id))
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('status', 'cancelled');
+
+        $task->refresh();
+        $this->assertSame('cancelled', $task->status);
+        $this->assertFalse(Storage::disk('local')->exists((string) $task->file_path));
+    }
+
+    public function test_cancelled_task_is_not_processed_or_overwritten_by_its_job(): void
+    {
+        Storage::fake('local');
+        $task = $this->makeTaskWithStoredFile();
+        $task->update(['status' => 'cancelled', 'finished_at' => now()]);
+
+        (new ProcessDocumentExtraction($task->id))->handle(new DocumentExtractionService(function (): void {
+            $this->fail('A cancelled task must not run the extractor.');
+        }));
+
+        $task->refresh();
+        $this->assertSame('cancelled', $task->status);
     }
 
     public function test_job_completes_task_and_removes_private_source_file(): void

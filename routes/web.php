@@ -126,6 +126,8 @@ Route::middleware(['auth'])->group(function () {
             ->name('cancel_number_slot');
 
         Route::post('/auto-extract', [DocumentController::class, 'autoExtract'])->name('auto_extract');
+        Route::post('/auto-extract/{taskId}/cancel', [DocumentController::class, 'cancelAutoExtract'])
+            ->name('auto_extract_cancel');
         Route::get('/auto-extract/{taskId}', [DocumentController::class, 'autoExtractStatus'])
             ->name('auto_extract_status');
 

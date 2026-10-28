@@ -2654,6 +2654,7 @@ class DocumentController extends Controller
                 'task_id' => $task->id,
                 'status' => $task->status,
                 'status_url' => route('documents.auto_extract_status', $task->id),
+                'cancel_url' => route('documents.auto_extract_cancel', $task->id),
             ], 202);
         } catch (\Throwable $error) {
             Storage::disk('local')->delete($path);
@@ -2682,6 +2683,52 @@ class DocumentController extends Controller
             'status' => $task->status,
             'data' => $task->status === 'completed' ? $task->result : null,
             'message' => $task->status === 'failed' ? $task->error_message : null,
+        ]);
+    }
+
+    // หน้าที่: ยกเลิกงานสกัดข้อมูลที่ผู้ใช้เลิกใช้หลังเปลี่ยนไฟล์
+    public function cancelAutoExtract(Request $request, string $taskId)
+    {
+        $task = DocumentExtractionTask::findOrFail($taskId);
+
+        abort_unless(
+            $task->user_id === $request->user()->id || $request->user()->hasRole('super-admin'),
+            403
+        );
+
+        $cancelledAt = now();
+
+        // งานที่ยังไม่ถูก worker หยิบไปทำสามารถลบไฟล์ต้นทางได้ทันที
+        // การเปลี่ยนสถานะแบบมีเงื่อนไขป้องกันการแข่งขันกับ worker ที่เพิ่งเริ่มงาน
+        $cancelledQueuedTask = DocumentExtractionTask::query()
+            ->whereKey($task->id)
+            ->where('status', 'queued')
+            ->update([
+                'status' => 'cancelled',
+                'finished_at' => $cancelledAt,
+                'updated_at' => $cancelledAt,
+            ]);
+
+        if ($cancelledQueuedTask) {
+            Storage::disk('local')->delete((string) $task->file_path);
+        } else {
+            // งานที่กำลังทำอยู่จะปล่อยให้ job ล้างไฟล์เมื่อหยุด/จบการทำงาน
+            DocumentExtractionTask::query()
+                ->whereKey($task->id)
+                ->where('status', 'processing')
+                ->update([
+                    'status' => 'cancelled',
+                    'finished_at' => $cancelledAt,
+                    'updated_at' => $cancelledAt,
+                ]);
+        }
+
+        $task->refresh();
+
+        return response()->json([
+            'success' => true,
+            'task_id' => $task->id,
+            'status' => $task->status,
         ]);
     }
 

@@ -33,16 +33,24 @@ class ProcessDocumentExtraction implements ShouldQueue
 
     public function handle(DocumentExtractionService $extraction): void
     {
-        $task = DocumentExtractionTask::find($this->taskId);
-        if (! $task || $task->status !== 'queued') {
+        // claim งานแบบมีเงื่อนไข เพื่อไม่ให้ worker เริ่มงานที่ผู้ใช้ยกเลิกไปแล้ว
+        $claimed = DocumentExtractionTask::query()
+            ->whereKey($this->taskId)
+            ->where('status', 'queued')
+            ->update([
+                'status' => 'processing',
+                'started_at' => now(),
+                'error_message' => null,
+            ]);
+
+        if (! $claimed) {
             return;
         }
 
-        $task->update([
-            'status' => 'processing',
-            'started_at' => now(),
-            'error_message' => null,
-        ]);
+        $task = DocumentExtractionTask::find($this->taskId);
+        if (! $task) {
+            return;
+        }
 
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('local');
@@ -54,18 +62,30 @@ class ProcessDocumentExtraction implements ShouldQueue
                 pathinfo($filePath, PATHINFO_EXTENSION)
             );
 
-            $task->update([
-                'status' => 'completed',
-                'result' => $result,
-                'finished_at' => now(),
-            ]);
+            // การยกเลิกระหว่าง OCR อาจหยุด Python กลางคันไม่ได้
+            // แต่ต้องไม่บันทึกผลของไฟล์เก่าทับไฟล์ล่าสุดของผู้ใช้
+            DocumentExtractionTask::query()
+                ->whereKey($this->taskId)
+                ->where('status', 'processing')
+                ->update([
+                    'status' => 'completed',
+                    'result' => $result,
+                    'finished_at' => now(),
+                ]);
         } catch (Throwable $error) {
+            if (DocumentExtractionTask::find($this->taskId)?->status === 'cancelled') {
+                return;
+            }
+
             report($error);
-            $task->update([
-                'status' => 'failed',
-                'error_message' => 'ไม่สามารถสกัดข้อมูลเอกสารได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
-                'finished_at' => now(),
-            ]);
+            DocumentExtractionTask::query()
+                ->whereKey($this->taskId)
+                ->where('status', 'processing')
+                ->update([
+                    'status' => 'failed',
+                    'error_message' => 'ไม่สามารถสกัดข้อมูลเอกสารได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+                    'finished_at' => now(),
+                ]);
 
             throw $error;
         } finally {
@@ -81,10 +101,13 @@ class ProcessDocumentExtraction implements ShouldQueue
         }
 
         Storage::disk('local')->delete($task->file_path);
-        $task->update([
-            'status' => 'failed',
-            'error_message' => 'ไม่สามารถสกัดข้อมูลเอกสารได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
-            'finished_at' => now(),
-        ]);
+        DocumentExtractionTask::query()
+            ->whereKey($this->taskId)
+            ->where('status', '!=', 'cancelled')
+            ->update([
+                'status' => 'failed',
+                'error_message' => 'ไม่สามารถสกัดข้อมูลเอกสารได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+                'finished_at' => now(),
+            ]);
     }
 }

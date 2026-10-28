@@ -78,13 +78,10 @@
                 {{-- แสดงเมื่อเลือกไฟล์แล้ว --}}
                 <div id="file_name_display" class="mt-3 file-success-text" style="display: none;"></div>
 
-                {{-- 🌟 ปุ่ม AI อัจฉริยะ (จะโผล่มาตอนเลือกไฟล์แล้ว) --}}
+                {{-- สถานะ OCR เริ่มทันทีหลังเลือกไฟล์ --}}
                 <div id="ai_action_area" class="mt-3" style="display: none; position: relative; z-index: 10;">
-                    <button type="button" class="btn-ai" onclick="extractFromAttached()">
-                        ✨ ให้ AI ช่วยดึงข้อมูลจากไฟล์นี้
-                    </button>
-                    <div id="ai_loading" class="mt-2 text-center" style="display: none; color: var(--green-700);">
-                        <i class="fas fa-circle-notch fa-spin me-2"></i> <span class="small fw-bold">กำลังประมวลผล...</span>
+                    <div id="ai_loading" class="text-center" style="display: none; color: var(--green-700);" role="status" aria-live="polite">
+                        <i class="fas fa-circle-notch fa-spin me-2"></i> <span id="ai_status_text" class="small fw-bold">กำลังประมวลผล...</span>
                     </div>
                 </div>
             </div>
@@ -410,19 +407,6 @@
     }
     .btn-qr:hover { background: var(--green-100); color: var(--green-700); border-color: var(--green-500); }
 
-    .btn-ai {
-        background: linear-gradient(135deg, #1c6b3c 0%, #0e3d2b 100%);
-        color: #fff;
-        border: none;
-        padding: 0.8rem 1.5rem;
-        border-radius: 50px;
-        font-family: 'Kanit', sans-serif;
-        font-size: 0.95rem;
-        cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .btn-ai:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(14,61,43,0.3); }
-
     .btn-run-no {
         background: var(--gold);
         color: white;
@@ -614,6 +598,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // หน้าที่: ล้างข้อมูลเอกสารที่เลือกและคืนสถานะแบบฟอร์ม
     function clearSelectedDocument() {
+        window.cancelCurrentExtraction?.();
         fileInput.value = '';
         document.getElementById('upload_text_default').style.display = 'block';
         document.getElementById('upload_hint').style.display = 'block';
@@ -838,7 +823,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('upload_text_default').style.display = 'none';
             document.getElementById('upload_hint').style.display = 'none';
 
-            // โชว์ชื่อไฟล์และปุ่ม AI
+            // โชว์ชื่อไฟล์และสถานะ OCR
             fileNameDisplay.style.display = 'block';
             fileNameDisplay.innerHTML = `<i class="fas fa-check-circle me-1"></i> ไฟล์: <b>${file.name}</b>`;
             aiActionArea.style.display = 'block';
@@ -861,6 +846,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 previewFileType.textContent = 'รูปภาพ';
             }
             previewCard.style.display = 'block';
+            window.startDocumentExtraction(file);
         } else {
             clearSelectedDocument();
         }
@@ -1196,18 +1182,82 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==========================================
-// 🌟 6. ให้ AI ดึงข้อมูลจากไฟล์ที่แนบ
+// 🌟 6. OCR อัตโนมัติหลังเลือกไฟล์
 // ==========================================
-// หน้าที่: ติดตามสถานะงานดึงข้อมูลจนเสร็จหรือหมดเวลา
-async function waitForExtractionTask(statusUrl) {
+let extractionGeneration = 0;
+let activeExtraction = null;
+
+function setExtractionStatus(message, isLoading = true) {
+    const loading = document.getElementById('ai_loading');
+    const text = document.getElementById('ai_status_text');
+    if (!loading || !text) return;
+
+    loading.style.display = 'block';
+    loading.querySelector('i').style.display = isLoading ? '' : 'none';
+    text.textContent = message;
+}
+
+function isCurrentExtraction(generation) {
+    return generation === extractionGeneration;
+}
+
+async function cancelExtraction(task) {
+    if (!task || task.cancelRequested) return;
+    task.cancelRequested = true;
+
+    try {
+        await fetch(task.cancelUrl, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            },
+        });
+    } catch (error) {
+        // ผู้ใช้เลือกไฟล์ใหม่แล้ว จึงไม่รบกวนหน้าจอด้วย error ของงานเก่า
+        console.warn('Unable to cancel obsolete OCR task.', error);
+    }
+}
+
+window.cancelCurrentExtraction = function() {
+    extractionGeneration += 1;
+    const task = activeExtraction;
+    activeExtraction = null;
+    void cancelExtraction(task);
+};
+
+function applyExtractionResult(data) {
+    if (document.getElementById('doc_number')) document.getElementById('doc_number').value = data.doc_number || '';
+
+    const dateInput = document.getElementById('doc_date');
+    if (dateInput && data.doc_date) {
+        dateInput.value = data.doc_date;
+        if (dateInput._flatpickr) dateInput._flatpickr.setDate(data.doc_date);
+    }
+
+    if (document.getElementById('title')) document.getElementById('title').value = data.title || '';
+    if (document.getElementById('doc_from')) document.getElementById('doc_from').value = data.doc_from || '';
+
+    ['doc_number', 'title', 'doc_from'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input && input.value) {
+            input.style.borderColor = 'var(--green-500)';
+            input.style.backgroundColor = '#f0fdf4';
+        }
+    });
+}
+
+async function waitForExtractionTask(task, generation) {
     const maxAttempts = 480; // สูงสุดประมาณ 16 นาที รองรับ OCR เอกสารขนาดใหญ่
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 2000));
+        if (!isCurrentExtraction(generation)) {
+            void cancelExtraction(task);
+            return null;
+        }
 
-        const response = await fetch(statusUrl, {
-            headers: { 'Accept': 'application/json' },
-        });
+        const response = await fetch(task.statusUrl, { headers: { 'Accept': 'application/json' } });
         const result = await response.json();
 
         if (!response.ok || !result.success) {
@@ -1215,82 +1265,65 @@ async function waitForExtractionTask(statusUrl) {
         }
 
         if (result.status === 'completed') return result.data;
+        if (result.status === 'cancelled') return null;
         if (result.status === 'failed') {
             throw new Error(result.message || 'ระบบไม่สามารถสกัดข้อมูลจากเอกสารนี้ได้');
         }
 
-        const statusText = result.status === 'processing'
+        setExtractionStatus(result.status === 'processing'
             ? 'กำลังอ่านข้อความและวิเคราะห์ข้อมูลด้วย AI...'
-            : 'งานอยู่ในคิว รอเริ่มประมวลผล...';
-        const container = Swal.getHtmlContainer();
-        if (container) container.textContent = statusText;
+            : 'กำลังรอคิวประมวลผล...');
     }
 
-    throw new Error('งาน OCR ใช้เวลานานเกินกำหนด กรุณาลองใหม่อีกครั้ง');
+    throw new Error('งาน OCR ใช้เวลานานเกินกำหนด กรุณาเลือกไฟล์อีกครั้ง');
 }
 
-// หน้าที่: ส่งไฟล์แนบไปดึงข้อมูลและเติมลงแบบฟอร์ม
-async function extractFromAttached() {
-    const fileInput = document.getElementById('file_input');
-
-    if (!fileInput.files.length) {
-        Swal.fire({ icon: 'warning', title: 'แจ้งเตือน', text: 'กรุณาแนบไฟล์เอกสารก่อนครับ' });
-        return;
-    }
-
-    document.getElementById('ai_loading').style.display = 'block';
-
-    Swal.fire({
-        title: 'กำลังเตรียมงาน OCR/AI',
-        html: 'กำลังอัปโหลดไฟล์เข้าสู่คิว...',
-        allowOutsideClick: false,
-        allowEscapeKey: false,
-        showConfirmButton: false,
-        didOpen: () => Swal.showLoading(),
-    });
+window.startDocumentExtraction = async function(file) {
+    window.cancelCurrentExtraction();
+    const generation = extractionGeneration;
+    setExtractionStatus('กำลังอัปโหลดไฟล์เข้าสู่คิว...');
 
     const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
+    formData.append('file', file);
     formData.append('_token', '{{ csrf_token() }}');
 
     try {
         const response = await fetch('{{ route("documents.auto_extract") }}', {
-            method: 'POST', body: formData,
+            method: 'POST',
+            body: formData,
+            headers: { 'Accept': 'application/json' },
         });
-
         const result = await response.json();
 
-        if (response.ok && result.success) {
-            const data = await waitForExtractionTask(result.status_url);
-
-            if(document.getElementById('doc_number')) document.getElementById('doc_number').value = data.doc_number || '';
-
-            if(document.getElementById('doc_date') && data.doc_date) {
-                let dateInput = document.getElementById('doc_date');
-                dateInput.value = data.doc_date;
-                if(dateInput._flatpickr) dateInput._flatpickr.setDate(data.doc_date);
-            }
-
-            if(document.getElementById('title')) document.getElementById('title').value = data.title || '';
-            if(document.getElementById('doc_from')) document.getElementById('doc_from').value = data.doc_from || '';
-
-            // ไฮไลต์ให้ผู้ใช้เห็นว่าช่องไหนถูกเติม (ลูกเล่น UI)
-            ['doc_number', 'title', 'doc_from'].forEach(id => {
-                if(document.getElementById(id) && document.getElementById(id).value) {
-                    document.getElementById(id).style.borderColor = 'var(--green-500)';
-                    document.getElementById(id).style.backgroundColor = '#f0fdf4';
-                }
-            });
-
-            Swal.fire({ icon: 'success', title: 'ดึงข้อมูลสำเร็จ!', text: 'AI กรอกฟอร์มให้คุณเรียบร้อยแล้ว', timer: 2000 });
-        } else {
-            Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: result.message || 'ไม่สามารถเริ่มงาน OCR/AI ได้' });
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'ไม่สามารถเริ่มงาน OCR/AI ได้');
         }
+
+        const task = {
+            statusUrl: result.status_url,
+            cancelUrl: result.cancel_url,
+            cancelRequested: false,
+        };
+
+        if (!isCurrentExtraction(generation)) {
+            void cancelExtraction(task);
+            return;
+        }
+
+        activeExtraction = task;
+        const data = await waitForExtractionTask(task, generation);
+        if (!data || !isCurrentExtraction(generation)) return;
+
+        activeExtraction = null;
+        applyExtractionResult(data);
+        setExtractionStatus('อ่านข้อมูลสำเร็จ ระบบกรอกข้อมูลให้แล้ว', false);
     } catch (error) {
+        if (!isCurrentExtraction(generation)) return;
+
+        activeExtraction = null;
+        setExtractionStatus('ไม่สามารถอ่านข้อมูลจากไฟล์นี้ได้', false);
         console.error(error);
-        Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: error.message || 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้' });
-    } finally {
-        document.getElementById('ai_loading').style.display = 'none';
+        Swal.fire({ icon: 'error', title: 'OCR ไม่สำเร็จ', text: error.message || 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้' });
     }
 }
 </script>
