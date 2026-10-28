@@ -201,6 +201,7 @@
                                     <details class="action-menu action-menu--blue">
                                         <summary><i class="fas fa-share-nodes"></i>ส่งต่อบุคลากร</summary>
                                         <form action="{{ route('documents.assignment_action', $doc->uuid ?? $doc->id) }}" method="POST" class="action-menu__panel">
+                                            <button type="button" class="action-menu__close" data-action-menu-close aria-label="ปิดหน้าต่างส่งต่อบุคลากร"><i class="fas fa-xmark"></i></button>
                                             @csrf<input type="hidden" name="action" value="delegate">
                                             <label>เลือกบุคลากรในฝ่าย หรือเลือกทั้งหมด</label>
                                             <div class="border rounded p-2" data-delegate-list style="max-height:220px;overflow-y:auto">
@@ -215,7 +216,7 @@
                                                     </label>
                                                 @endforeach
                                             </div>
-                                            <button class="task-btn task-btn--primary w-100"><i class="fas fa-paper-plane"></i>ยืนยันส่งต่อให้ผู้ที่เลือก</button>
+                                            <button type="submit" class="task-btn task-btn--primary w-100" data-delegate-submit disabled><i class="fas fa-paper-plane"></i>ยืนยันส่งต่อให้ผู้ที่เลือก</button>
                                         </form>
                                     </details>
                                 @endif
@@ -233,12 +234,12 @@
                                         @csrf
                                         <input type="hidden" name="assignment_id" value="{{ $v2UserAssignment->id }}">
                                         <label for="progress_status_{{ $doc->id }}">สถานะ</label>
-                                        <select id="progress_status_{{ $doc->id }}" name="status" class="form-select form-select-sm" required>
+                                        <select id="progress_status_{{ $doc->id }}" name="status" class="form-select form-select-sm" data-progress-status required>
                                             <option value="in_progress">กำลังดำเนินการ</option>
                                             <option value="completed">ดำเนินการเสร็จสิ้น</option>
                                         </select>
                                         <label for="progress_percent_{{ $doc->id }}">ความคืบหน้า (0–100%)</label>
-                                        <input id="progress_percent_{{ $doc->id }}" name="progress_percent" type="number" class="form-control form-control-sm" min="0" max="100" value="{{ $v2UserAssignment->progressUpdates->first()?->progress_percent ?? 0 }}" required>
+                                        <input id="progress_percent_{{ $doc->id }}" name="progress_percent" type="number" class="form-control form-control-sm" min="0" max="100" value="{{ $v2UserAssignment->progressUpdates->first()?->progress_percent ?? 0 }}" data-progress-percent required>
                                         <label for="progress_note_{{ $doc->id }}">รายละเอียด</label>
                                         <textarea id="progress_note_{{ $doc->id }}" name="progress_note" class="form-control form-control-sm" rows="3" maxlength="2000" placeholder="ระบุงานที่ดำเนินการ อุปสรรค หรือผลลัพธ์"></textarea>
                                         <label for="progress_attachment_{{ $doc->id }}">ไฟล์แนบ (ถ้ามี)</label>
@@ -271,28 +272,78 @@
     .work-panel{overflow:visible;background:#fff;border:1px solid var(--ap-border);border-radius:20px;box-shadow:0 7px 24px rgba(15,23,42,.055)}.work-panel--leave{border-color:#f3d991}.work-panel__header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:19px 21px;border-bottom:1px solid #e8eef2}.panel-heading{display:flex;align-items:center;gap:12px;min-width:0}.panel-heading__icon{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px}.panel-heading__icon--blue{color:#0369a1;background:#e0f2fe}.panel-heading__icon--amber{color:#b45309;background:#fef3c7}.panel-heading h3{margin:0 0 3px;color:var(--ap-text);font-size:1.05rem;font-weight:800}.panel-heading p{margin:0;color:var(--ap-muted);font-size:.79rem}.panel-heading em{display:inline-flex;margin-left:5px;padding:2px 7px;color:#0369a1;background:#e0f2fe;border-radius:999px;font-style:normal;font-weight:700}.panel-count{flex:0 0 auto;padding:6px 11px;border-radius:999px;font-size:.75rem;font-weight:800}.panel-count--blue{color:#0369a1;background:#e0f2fe}.panel-count--amber{color:#92400e;background:#fef3c7}.task-list{display:grid;gap:12px;padding:14px}
     .leave-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:18px;padding:16px;background:#fffdf7;border:1px solid #f4e2ad;border-radius:15px}.leave-card__person{display:flex;align-items:flex-start;gap:12px;min-width:0}.person-avatar{width:45px;height:45px;flex:0 0 45px;display:grid;place-items:center;color:#92400e;background:#fef3c7;border-radius:13px;font-weight:800}.leave-card h4{margin:0;color:var(--ap-text);font-size:.98rem;font-weight:800}.task-meta{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--ap-muted);font-size:.77rem}.task-meta span{display:inline-flex;align-items:center;gap:5px}.task-meta i{color:#94a3b8}.task-reason{margin:7px 0 0;color:#475569;font-size:.81rem}.task-actions{position:relative;display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px}
     .task-btn,.action-menu summary{min-height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 13px;border:1px solid transparent;border-radius:10px;font-size:.79rem;font-weight:800;text-decoration:none;cursor:pointer}.task-btn--neutral{color:#334155;background:#fff;border-color:#cbd5e1}.task-btn--success{color:#fff;background:#059669}.task-btn--primary{color:#fff;background:#0284c7}.task-btn--danger{color:#fff;background:#dc2626}.task-btn:hover{filter:brightness(.95);color:inherit}.task-btn--success:hover,.task-btn--primary:hover,.task-btn--danger:hover{color:#fff}
+    .task-btn:disabled{opacity:.5;cursor:not-allowed;filter:none}
     .action-menu{position:relative}.action-menu summary{list-style:none}.action-menu summary::-webkit-details-marker{display:none}.action-menu--danger summary{color:#b91c1c;background:#fff;border-color:#fecaca}.action-menu--blue summary{color:#0369a1;background:#f0f9ff;border-color:#bae6fd}.action-menu__panel{position:absolute;z-index:20;right:0;top:calc(100% + 7px);width:min(340px,86vw);display:grid;gap:9px;padding:14px;color:#334155;background:#fff;border:1px solid var(--ap-border);border-radius:13px;box-shadow:0 14px 35px rgba(15,23,42,.16)}.action-menu__panel label{font-size:.78rem;font-weight:800}
-    .document-card{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(190px,auto);align-items:center;gap:15px;padding:17px;background:#fff;border:1px solid #e3ebef;border-left:4px solid #f59e0b;border-radius:15px;transition:.18s}.document-card:hover,.leave-card:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(15,23,42,.07)}.document-card--success{border-left-color:#10b981}.document-card--blue{border-left-color:#0ea5e9}.document-card__icon{width:46px;height:46px;display:grid;place-items:center;color:#087fba;background:#e8f7fc;border-radius:13px;font-size:18px}.document-card__body{min-width:0}.document-card__topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:7px}.document-card__topline time{color:#94a3b8;font-size:.71rem;white-space:nowrap}.document-card__topline time i{margin-right:5px}.soft-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:.69rem;font-weight:800}.soft-badge--warning{color:#a16207;background:#fef3c7}.soft-badge--success{color:#047857;background:#d1fae5}.soft-badge--blue{color:#0369a1;background:#e0f2fe}.soft-badge--slate{color:#475569;background:#f1f5f9}.document-number{color:#64748b;font-size:.73rem;font-weight:700}.document-title{display:block;margin-bottom:10px;color:var(--ap-text);font-size:1rem;font-weight:800;line-height:1.45;text-decoration:none;overflow-wrap:anywhere}.document-title:hover{color:var(--ap-blue)}.document-meta{display:flex;flex-wrap:wrap;gap:9px 20px}.document-meta>span{display:flex;align-items:center;gap:8px;color:#334155;font-size:.78rem}.document-meta>span>i{color:#94a3b8}.document-meta small{display:block;color:#94a3b8;font-size:.65rem}.document-card__actions{position:relative;display:flex;align-items:stretch;justify-content:flex-end;flex-direction:column;gap:7px;min-width:190px}.document-card__actions form,.document-card__actions button,.document-card__actions>a,.document-card__actions summary{width:100%}.action-finished{display:flex;align-items:center;justify-content:center;gap:7px;padding:9px;color:#047857;background:#ecfdf5;border-radius:10px;font-size:.76rem;font-weight:800}.action-finished--blue{color:#0369a1;background:#f0f9ff}
+    /* หมายเหตุ: ห้ามใส่ transform/filter ที่ .document-card (รวม :hover) เพราะจะทำให้ position:fixed ของหน้าต่างส่งต่ออ้างอิงตัวการ์ดแทนหน้าจอ */
+    .document-card{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(190px,auto);align-items:center;gap:15px;padding:17px;background:#fff;border:1px solid #e3ebef;border-left:4px solid #f59e0b;border-radius:15px;transition:box-shadow .18s}.leave-card{transition:transform .18s,box-shadow .18s}.document-card:hover{box-shadow:0 8px 20px rgba(15,23,42,.07)}.leave-card:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(15,23,42,.07)}.document-card--success{border-left-color:#10b981}.document-card--blue{border-left-color:#0ea5e9}.document-card__icon{width:46px;height:46px;display:grid;place-items:center;color:#087fba;background:#e8f7fc;border-radius:13px;font-size:18px}.document-card__body{min-width:0}.document-card__topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:7px}.document-card__topline time{color:#94a3b8;font-size:.71rem;white-space:nowrap}.document-card__topline time i{margin-right:5px}.soft-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:.69rem;font-weight:800}.soft-badge--warning{color:#a16207;background:#fef3c7}.soft-badge--success{color:#047857;background:#d1fae5}.soft-badge--blue{color:#0369a1;background:#e0f2fe}.soft-badge--slate{color:#475569;background:#f1f5f9}.document-number{color:#64748b;font-size:.73rem;font-weight:700}.document-title{display:block;margin-bottom:10px;color:var(--ap-text);font-size:1rem;font-weight:800;line-height:1.45;text-decoration:none;overflow-wrap:anywhere}.document-title:hover{color:var(--ap-blue)}.document-meta{display:flex;flex-wrap:wrap;gap:9px 20px}.document-meta>span{display:flex;align-items:center;gap:8px;color:#334155;font-size:.78rem}.document-meta>span>i{color:#94a3b8}.document-meta small{display:block;color:#94a3b8;font-size:.65rem}.document-card__actions{position:relative;display:flex;align-items:stretch;justify-content:flex-end;flex-direction:column;gap:7px;min-width:190px}.document-card__actions form,.document-card__actions button,.document-card__actions>a,.document-card__actions summary{width:100%}.action-finished{display:flex;align-items:center;justify-content:center;gap:7px;padding:9px;color:#047857;background:#ecfdf5;border-radius:10px;font-size:.76rem;font-weight:800}.action-finished--blue{color:#0369a1;background:#f0f9ff}
     .assignment-progress-list{display:grid;gap:7px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px}.assignment-progress-list__label{color:#475569;font-size:.7rem;font-weight:800}.assignment-progress-list__label i{margin-right:5px;color:#0284c7}.assignment-progress-item{padding-top:7px;border-top:1px solid #e2e8f0}.assignment-progress-item:first-of-type{padding-top:0;border-top:0}.assignment-progress-item__head{display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:.75rem}.assignment-progress-item__note{margin-top:3px;color:#64748b;font-size:.72rem;line-height:1.45}.assignment-progress-item__note small{display:block;margin-top:2px;color:#94a3b8}.assignment-progress-item__file{display:block;width:max-content;max-width:100%;margin-top:5px;color:#0369a1;font-weight:700;overflow:hidden;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}.assignment-progress-item__file:hover{text-decoration:underline}
     .assignment-empty{display:flex;align-items:center;flex-direction:column;padding:52px 20px;text-align:center}.assignment-empty>span{width:70px;height:70px;display:grid;place-items:center;margin-bottom:14px;color:#94a3b8;background:#f1f5f9;border-radius:22px;font-size:28px}.assignment-empty h4{margin:0 0 5px;color:#334155;font-size:1rem;font-weight:800}.assignment-empty p{margin:0 0 18px;color:#94a3b8;font-size:.81rem}
     @media(max-width:991.98px){.assignment-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.leave-card,.document-card{grid-template-columns:1fr}.document-card__icon{display:none}.task-actions{justify-content:flex-start}.document-card__actions{min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.action-finished{grid-column:1/-1}.action-menu__panel{right:auto;left:0}}
     @media(max-width:575.98px){.assignment-hero{align-items:flex-start;flex-direction:column;padding:19px}.assignment-hero__icon{width:48px;height:48px;flex-basis:48px}.assignment-back{width:100%;justify-content:center}.assignment-summary{gap:9px}.summary-card{align-items:flex-start;flex-direction:column;padding:13px}.summary-card>span{width:36px;height:36px;flex-basis:36px}.work-panel__header{align-items:flex-start;flex-direction:column;padding:16px}.panel-count{align-self:flex-start}.panel-heading__icon{display:none}.task-list{padding:9px}.leave-card,.document-card{padding:14px}.task-actions,.document-card__actions{display:flex;align-items:stretch;flex-direction:column;width:100%}.task-actions>*,.task-actions form,.task-actions button,.task-actions a,.task-actions summary{width:100%}.document-card__topline{align-items:flex-start;flex-direction:column}.document-meta{flex-direction:column;gap:8px}.action-menu__panel{position:fixed;left:12px;right:12px;top:auto;bottom:12px;width:auto}}
+    /* The picker is a modal layer: it preserves the card's height and keeps the list behind it unobstructed. */
+    .document-card__actions .action-menu[open]::before{content:"";position:fixed;z-index:19;inset:0;background:rgba(15,23,42,.28)}
+    .document-card__actions .action-menu__panel{position:fixed;z-index:20;top:50%;right:auto;bottom:auto;left:50%;width:min(390px,calc(100vw - 28px));max-height:calc(100vh - 28px);margin:0;overflow-y:auto;transform:translate(-50%,-50%)}
+    .action-menu__close{position:absolute;top:9px;right:9px;width:30px!important;min-height:30px;padding:0;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px}.action-menu__close:hover{color:#0f172a;background:#e2e8f0}.document-card__actions .action-menu__panel>label{padding-right:35px}
 </style>
 @endsection
 
 @section('scripts')
 <script>
+    function closeActionMenus() {
+        document.querySelectorAll('details.action-menu[open]').forEach(function(menu) {
+            menu.removeAttribute('open');
+        });
+    }
+
+    // ปุ่ม X
+    document.querySelectorAll('[data-action-menu-close]').forEach(function(closeButton) {
+        closeButton.addEventListener('click', function() {
+            closeButton.closest('details').removeAttribute('open');
+        });
+    });
+
+    // คลิกพื้นหลังมืด (pseudo-element ของ <details> ทำให้ target คือ <details> เอง) หรือกด Esc เพื่อปิด
+    document.addEventListener('click', function(e) {
+        if (e.target instanceof Element && e.target.matches('details.action-menu[open]')) {
+            e.target.removeAttribute('open');
+        }
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeActionMenus();
+    });
+
+    // Reaching 100% completes the assignment; the server enforces the same rule.
+    document.querySelectorAll('[data-progress-percent]').forEach(function(progressInput) {
+        progressInput.addEventListener('input', function() {
+            if (Number(progressInput.value) === 100) {
+                progressInput.closest('form').querySelector('[data-progress-status]').value = 'completed';
+            }
+        });
+    });
+
+    // เลือกทั้งหมด + เปิด/ปิดปุ่มยืนยันตามจำนวนที่เลือก + กันกดซ้ำ
     document.querySelectorAll('[data-delegate-select-all]').forEach(function(selectAll) {
-        const list = selectAll.closest('[data-delegate-list]');
-        const recipients = Array.from(list.querySelectorAll('[data-delegate-recipient]'));
+        const form = selectAll.closest('form');
+        const submit = form.querySelector('[data-delegate-submit]');
+        const recipients = Array.from(form.querySelectorAll('[data-delegate-recipient]'));
+
+        function sync() {
+            const checkedCount = recipients.filter(function(item) { return item.checked; }).length;
+            selectAll.checked = recipients.length > 0 && checkedCount === recipients.length;
+            if (submit) submit.disabled = checkedCount === 0;
+        }
+
         selectAll.addEventListener('change', function() {
             recipients.forEach(function(recipient) { recipient.checked = selectAll.checked; });
+            sync();
         });
         recipients.forEach(function(recipient) {
-            recipient.addEventListener('change', function() {
-                selectAll.checked = recipients.length > 0 && recipients.every(function(item) { return item.checked; });
-            });
+            recipient.addEventListener('change', sync);
         });
+        form.addEventListener('submit', function() {
+            if (submit) submit.disabled = true;
+        });
+        sync();
     });
 </script>
 @endsection

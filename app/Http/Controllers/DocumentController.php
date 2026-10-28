@@ -2337,18 +2337,22 @@ class DocumentController extends Controller
             'progress_percent.max' => 'เปอร์เซ็นต์ความคืบหน้าต้องอยู่ระหว่าง 0 ถึง 100',
         ]);
 
+        $progressPercent = isset($data['progress_percent']) ? (int) $data['progress_percent'] : null;
+        // Complete the work automatically at 100% so the status and progress cannot disagree.
+        $status = $progressPercent === 100 ? 'completed' : $data['status'];
+
         $document = $v2Documents->find($id);
         $v2Writes->updateAssignmentProgress(
             $document,
             Auth::user(),
             (int) $data['assignment_id'],
-            $data['status'],
-            isset($data['progress_percent']) ? (int) $data['progress_percent'] : null,
+            $status,
+            $progressPercent,
             filled($data['progress_note'] ?? null) ? trim($data['progress_note']) : null,
             $request->file('progress_attachment'),
         );
 
-        return back()->with('success', $data['status'] === 'completed'
+        return back()->with('success', $status === 'completed'
             ? 'บันทึกว่างานเสร็จสิ้นแล้ว'
             : 'อัปเดตความคืบหน้าเรียบร้อยแล้ว');
     }

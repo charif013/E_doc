@@ -411,6 +411,10 @@ class DocumentWriteService
                 && in_array($currentStatus, ['ACKNOWLEDGED', 'IN_PROGRESS'], true), 403, 'กรุณารับดำเนินการก่อนอัปเดตความคืบหน้า');
 
             $status = strtoupper($status);
+            // 100% always represents a finished assignment, even if the form still submits IN_PROGRESS.
+            if ($progressPercent === 100) {
+                $status = 'COMPLETED';
+            }
             $progressPercent = $status === 'COMPLETED' ? 100 : $progressPercent;
             $assignment->update([
                 'status' => $status,

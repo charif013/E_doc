@@ -784,7 +784,7 @@ class V2SchemaAndServicesTest extends TestCase
         $this->assertNotNull($storedPath);
         Storage::disk('documents')->assertExists($storedPath);
 
-        $service->updateAssignmentProgress($document, $assignee, $assignment->id, 'completed', null, 'ดำเนินการเรียบร้อย');
+        $service->updateAssignmentProgress($document, $assignee, $assignment->id, 'in_progress', 100, 'ดำเนินการเรียบร้อย');
         $this->assertDatabaseHas('document_assignments', [
             'id' => $assignment->id, 'status' => 'COMPLETED',
         ], 'mysql_v2');
