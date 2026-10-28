@@ -8,9 +8,11 @@
         <h4 class="fw-bold text-dark mb-0"><i class="fas fa-history me-2 text-teal"></i> ประวัติการลาของฉัน</h4>
         <div class="d-flex align-items-center gap-2 flex-wrap">
             <a href="{{ route('home') }}" class="ds-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>กลับหน้าหลัก</a>
+            @unless(auth()->user()?->hasRole('executive'))
             <a href="{{ route('leaves.create') }}" class="btn btn-teal fw-bold rounded-pill shadow-sm px-4">
                 <i class="fas fa-plus me-1" aria-hidden="true"></i>ยื่นใบลาใหม่
             </a>
+            @endunless
         </div>
     </div>
 
@@ -66,18 +68,18 @@
                                     </div>
                                 @endif
                                 
-                                {{-- 🌟 ปุ่มยกเลิก จะโชว์เฉพาะใบลาที่ยังดำเนินการอยู่ --}}
-                                @if(!in_array($leave->status, ['APPROVED', 'REJECTED', 'CANCELED']))
+                                {{-- 🌟 ปุ่มยกเลิก --}}
+                                @can('cancel', $leave)
                                     <div class="mt-2">
                                         <button class="btn btn-sm btn-outline-danger rounded-pill px-3 fw-bold" onclick="confirmCancel({{ $leave->id }})">
-                                            <i class="fas fa-times-circle"></i> ยกเลิกการลา
+                                            <i class="fas fa-times-circle me-1"></i>ยกเลิกการลา
                                         </button>
                                         <form id="cancel-form-{{ $leave->id }}" action="{{ route('leaves.cancel', $leave->id) }}" method="POST" style="display: none;">
                                             @csrf
                                             @method('PUT')
                                         </form>
                                     </div>
-                                @endif
+                                @endcan
                             </div>
                         </div>
 
@@ -139,7 +141,9 @@
                 <img src="https://cdn-icons-png.flaticon.com/512/7486/7486831.png" width="120" class="mb-3 opacity-50">
                 <h5 class="text-muted">ยังไม่มีใบลาที่อนุมัติหรือยกเลิกแล้ว</h5>
                 <p class="text-muted">ใบลาที่กำลังดำเนินการสามารถติดตามได้ที่เมนูพิจารณาใบลา</p>
+                @unless(auth()->user()?->hasRole('executive'))
                 <a href="{{ route('leaves.create') }}" class="btn btn-outline-teal mt-2 rounded-pill">ยื่นใบลาครั้งแรกเลย!</a>
+                @endunless
             </div>
         @endforelse
     </div>

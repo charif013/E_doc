@@ -42,7 +42,7 @@ class V2SchemaAndServicesTest extends TestCase
             'organization_units', 'users', 'user_signatures', 'documents', 'document_files',
             'leave_requests', 'workflow_instances', 'workflow_steps', 'workflow_action_evidence',
             'number_sequences', 'number_allocations', 'rooms', 'room_bookings', 'audit_logs',
-            'document_route_presets', 'outgoing_deliveries',
+            'document_route_presets', 'outgoing_deliveries', 'document_assignment_progress_updates',
         ] as $table) {
             $this->assertTrue($schema->hasTable($table), "Missing V2 table: {$table}");
         }
@@ -499,6 +499,37 @@ class V2SchemaAndServicesTest extends TestCase
             ->where('running_number', 101)->count());
     }
 
+    public function test_v2_uploaded_outgoing_waits_for_saraban_to_assign_a_number_after_signing(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        DB::connection('mysql_v2')->table('document_types')->insert([
+            'code' => 'OUTGOING', 'name' => 'Outgoing', 'direction' => 'OUTGOING',
+            'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $service = app(DocumentWriteService::class);
+        $document = $service->create([
+            'doc_type' => 'outgoing', 'source_type' => 'upload',
+            'doc_date' => '2026-10-28', 'title' => 'หนังสือส่งออกที่รอลงเลข',
+            'doc_to' => 'Destination', 'signer_user_id' => 2,
+        ], [2], 1);
+
+        $service->submit($document, User::findOrFail(1));
+        $service->review($document->fresh(), User::findOrFail(2), true, 'Signed', null);
+
+        $document->refresh();
+        $this->assertSame('APPROVED', $document->status);
+        $this->assertSame('UNASSIGNED', $document->number_status);
+        $this->assertNull($document->document_number);
+        $this->assertNull($document->finalized_at);
+
+        $service->allocateNumber($document, 1, 102, 'ยล ๗๗๓๐๑/๑๐๒');
+        $document->refresh();
+        $this->assertSame('COMPLETED', $document->status);
+        $this->assertSame('CONFIRMED', $document->number_status);
+    }
+
     public function test_future_reviewer_cannot_view_document_until_current_step_reaches_them(): void
     {
         $this->seedV2User(1);
@@ -756,5 +787,133 @@ class V2SchemaAndServicesTest extends TestCase
         ]);
 
         $this->assertCount(0, $queue->approvalQueue($head));
+    }
+
+    public function test_assignee_can_record_progress_and_completion_history(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2Document();
+        $document = Document::findOrFail(1);
+        $document->update(['status' => 'APPROVED']);
+        $assignment = $document->assignments()->create([
+            'assigned_user_id' => 1,
+            'assigned_by' => 1,
+            'status' => 'ACKNOWLEDGED',
+            'assigned_at' => now(),
+            'acknowledged_at' => now(),
+        ]);
+        /** @var LegacyUser&MockInterface $assignee */
+        $assignee = Mockery::mock(LegacyUser::class)->makePartial();
+        $assignee->forceFill(['id' => 1]);
+
+        $service = app(DocumentWriteService::class);
+        Storage::fake('documents');
+        $attachment = UploadedFile::fake()->create('evidence.pdf', 256, 'application/pdf');
+        $service->updateAssignmentProgress($document, $assignee, $assignment->id, 'in_progress', 60, 'ตรวจเอกสารและประสานงานแล้ว', $attachment);
+        $this->assertDatabaseHas('document_assignments', [
+            'id' => $assignment->id, 'status' => 'IN_PROGRESS',
+        ], 'mysql_v2');
+        $this->assertDatabaseHas('document_assignment_progress_updates', [
+            'document_assignment_id' => $assignment->id,
+            'updated_by' => 1,
+            'status' => 'IN_PROGRESS',
+            'progress_percent' => 60,
+            'note' => 'ตรวจเอกสารและประสานงานแล้ว',
+            'attachment_original_name' => 'evidence.pdf',
+        ], 'mysql_v2');
+        $storedPath = DB::connection('mysql_v2')->table('document_assignment_progress_updates')
+            ->where('document_assignment_id', $assignment->id)
+            ->value('attachment_path');
+        $this->assertNotNull($storedPath);
+        Storage::disk('documents')->assertExists($storedPath);
+
+        $service->updateAssignmentProgress($document, $assignee, $assignment->id, 'completed', null, 'ดำเนินการเรียบร้อย');
+        $this->assertDatabaseHas('document_assignments', [
+            'id' => $assignment->id, 'status' => 'COMPLETED',
+        ], 'mysql_v2');
+        $this->assertDatabaseHas('document_assignment_progress_updates', [
+            'document_assignment_id' => $assignment->id,
+            'status' => 'COMPLETED',
+            'progress_percent' => 100,
+        ], 'mysql_v2');
+    }
+
+    public function test_assignee_cannot_record_progress_before_accepting_the_work(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2Document();
+        $document = Document::findOrFail(1);
+        $document->update(['status' => 'APPROVED']);
+        $assignment = $document->assignments()->create([
+            'assigned_user_id' => 1,
+            'assigned_by' => 1,
+            'status' => 'PENDING',
+            'assigned_at' => now(),
+        ]);
+        /** @var LegacyUser&MockInterface $assignee */
+        $assignee = Mockery::mock(LegacyUser::class)->makePartial();
+        $assignee->forceFill(['id' => 1]);
+
+        $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        app(DocumentWriteService::class)->updateAssignmentProgress(
+            $document, $assignee, $assignment->id, 'in_progress', 10, 'พยายามอัปเดตก่อนรับงาน'
+        );
+    }
+
+    public function test_assigner_can_see_the_work_they_assigned_without_being_the_assignee(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        $this->seedV2Document();
+        $document = Document::findOrFail(1);
+        $document->update(['status' => 'APPROVED']);
+        $document->assignments()->create([
+            'assigned_user_id' => 2,
+            'assigned_by' => 1,
+            'status' => 'IN_PROGRESS',
+            'assigned_at' => now(),
+        ]);
+        /** @var LegacyUser&MockInterface $assigner */
+        $assigner = Mockery::mock(LegacyUser::class)->makePartial();
+        $assigner->forceFill(['id' => 1]);
+        $assigner->shouldReceive('hasRole')->with('head')->andReturn(false);
+        $assigner->shouldReceive('hasRole')->with('saraban')->andReturn(false);
+
+        $documents = app(\App\Services\V2\DocumentReadService::class)->assignedDocuments($assigner);
+
+        $this->assertCount(1, $documents);
+        $this->assertSame($document->id, $documents->first()->id);
+        $this->assertTrue(app(DocumentPolicy::class)->view($assigner, $document));
+    }
+
+    public function test_assignment_overview_returns_only_work_the_manager_can_track(): void
+    {
+        $this->seedV2User(1);
+        $this->seedV2User(2);
+        $this->seedV2User(3);
+        $this->seedV2Document(1);
+        $this->seedV2Document(2);
+        $db = DB::connection('mysql_v2');
+        $db->table('documents')->whereIn('id', [1, 2])->update(['status' => 'APPROVED']);
+        $db->table('document_assignments')->insert([
+            [
+                'document_id' => 1, 'assigned_user_id' => 2, 'assigned_by' => 1,
+                'status' => 'IN_PROGRESS', 'assigned_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+            ],
+            [
+                'document_id' => 2, 'assigned_user_id' => 3, 'assigned_by' => 3,
+                'status' => 'PENDING', 'assigned_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+            ],
+        ]);
+        /** @var LegacyUser&MockInterface $manager */
+        $manager = Mockery::mock(LegacyUser::class)->makePartial();
+        $manager->forceFill(['id' => 1]);
+        $manager->shouldReceive('hasRole')->with('head')->andReturn(false);
+
+        $overview = app(\App\Services\V2\DocumentReadService::class)->assignmentOverview($manager);
+
+        $this->assertCount(1, $overview);
+        $this->assertSame(1, $overview->first()->document_id);
+        $this->assertSame('IN_PROGRESS', $overview->first()->status->value);
     }
 }

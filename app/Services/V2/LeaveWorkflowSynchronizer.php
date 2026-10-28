@@ -29,8 +29,13 @@ class LeaveWorkflowSynchronizer
         $definitionId = $this->ensureDefinition($db);
         $instance = $db->table('workflow_instances')->where('leave_request_id', $leave->id)->first();
 
+        $owner = $leave->user ?? \App\Models\User::find($leave->user_id);
+        $isHead = $owner?->hasRole('head') ?? false;
+        $isPalad = $owner?->hasRole('palad') ?? false;
+
         if (! $instance) {
-            $currentStep = $leave->delegate_user_id ? 1 : 2;
+            $defaultFirstStep = ($isHead || $isPalad) ? 3 : 2;
+            $currentStep = $leave->delegate_user_id ? 1 : $defaultFirstStep;
             $instanceId = $db->table('workflow_instances')->insertGetId([
                 'workflow_definition_id' => $definitionId,
                 'document_id' => null,
@@ -54,6 +59,16 @@ class LeaveWorkflowSynchronizer
             $roleId = $definition['role']
                 ? $db->table('roles')->where('name', $definition['role'])->value('id')
                 : null;
+
+            $status = 'PENDING';
+            if ($order === 1 && ! $leave->delegate_user_id) {
+                $status = 'SKIPPED';
+            } elseif ($order === 2 && ($isHead || $isPalad)) {
+                $status = 'SKIPPED';
+            } elseif ($order === 5 && $isPalad) {
+                $status = 'SKIPPED';
+            }
+
             $db->table('workflow_steps')->insert([
                 'workflow_instance_id' => $instanceId,
                 'workflow_definition_step_id' => $definitionStepId,
@@ -62,7 +77,7 @@ class LeaveWorkflowSynchronizer
                 'action_type' => $definition['action'],
                 'assigned_role_id' => $roleId,
                 'assigned_user_id' => $order === 1 ? $leave->delegate_user_id : null,
-                'status' => $order === 1 && ! $leave->delegate_user_id ? 'SKIPPED' : 'PENDING',
+                'status' => $status,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);

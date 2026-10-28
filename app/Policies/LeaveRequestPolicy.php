@@ -19,10 +19,16 @@ class LeaveRequestPolicy
             ]), true);
     }
 
+    public function create(User $user): bool
+    {
+        return ! $user->hasRole('executive');
+    }
+
     public function cancel(User $user, LeaveRequest $leave): bool
     {
         return $leave->user_id === $user->id
-            && ! in_array($leave->workflow_status, ['approved', 'rejected'], true);
+            && ! in_array(strtolower((string) $leave->workflow_status), ['rejected', 'canceled'], true)
+            && ! in_array(strtoupper((string) $leave->status), ['REJECTED', 'CANCELED'], true);
     }
 
     public function review(User $user, LeaveRequest $leave): bool
@@ -32,8 +38,10 @@ class LeaveRequestPolicy
             'pending_inspector' => $user->hasRole('hr'),
             'pending_head' => $user->hasRole('head')
                 && $user->department
-                && $user->department === $leave->user?->department,
-            'pending_palad' => $user->hasRole('palad'),
+                && $user->department === $leave->user?->department
+                && $user->id !== $leave->user_id,
+            'pending_palad' => $user->hasRole('palad')
+                && $user->id !== $leave->user_id,
             'pending_nayok' => $user->hasRole('executive'),
             default => false,
         };

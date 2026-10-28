@@ -229,7 +229,6 @@
                                 <label class="form-label small fw-bold text-muted mb-2">ประเภทหนังสือ <span class="text-danger">*</span></label>
                                 <select name="doc_type_category" id="doc_type_category" class="form-select shadow-sm fw-bold text-dark">
                                     <option value="หนังสือภายนอก (กระดาษตราครุฑ)">หนังสือภายนอก (กระดาษตราครุฑ)</option>
-                                    <option value="หนังสือภายใน / บันทึกข้อความ">หนังสือภายใน / บันทึกข้อความ</option>
                                     <option value="หนังสือประทับตรา">หนังสือประทับตรา</option>
                                     <option value="หนังสือสั่งการ (คำสั่ง / ระเบียบ / ข้อบังคับ)">หนังสือสั่งการ (คำสั่ง / ระเบียบ / ข้อบังคับ)</option>
                                     <option value="หนังสือประชาสัมพันธ์ (ประกาศ / แถลงการณ์)">หนังสือประชาสัมพันธ์ (ประกาศ / แถลงการณ์)</option>
@@ -405,12 +404,10 @@
                                 </div>
                                 <div class="row g-3">
                                     <div class="col-md-6">
-                                        <label class="form-label small fw-bold text-muted">เลขที่หนังสือออก <span class="text-danger">*</span></label>
-                                        <div class="input-group shadow-sm">
-                                            <input type="text" name="doc_number" id="upload_doc_number" class="form-control upload-metadata-input" value="{{ old('doc_number') }}" placeholder="พิมพ์เลขจอง เช่น ๑๐๑" required disabled data-required-label="เลขที่หนังสือออก">
-                                            <button type="button" onclick="autoDocNo()" class="btn btn-primary" title="ดึงเลขจากสมุดคุมเลข"><i class="fas fa-magic"></i></button>
+                                        <label class="form-label small fw-bold text-muted">เลขที่หนังสือออก</label>
+                                        <div class="form-control bg-light text-muted d-flex align-items-center" style="min-height:42px;">
+                                            <i class="fas fa-clock me-2"></i>รอธุรการลงเลขหลังผู้ลงนามอนุมัติ
                                         </div>
-                                        <small class="text-muted d-block mt-1"><i class="fas fa-link me-1"></i>ระบบจะเชื่อมเลขจองกับสมุดคุมเลขอัตโนมัติ</small>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small fw-bold text-muted">วันที่ออกเอกสาร <span class="text-danger">*</span></label>
@@ -465,7 +462,7 @@
                                             <i class="fas fa-cloud-upload-alt fs-3"></i>
                                         </div>
                                         <h6 class="fw-bold text-dark mb-1">คลิกเพื่อเลือกไฟล์ หรือ ลากไฟล์ PDF มาวางที่นี่</h6>
-                                        <small class="text-muted">รองรับเฉพาะไฟล์ .PDF ขนาดไม่เกิน 20 MB</small>
+                                        <small class="text-muted">รองรับเฉพาะไฟล์ .PDF ขนาดไม่เกิน 10 MB</small>
                                     </div>
                                 </div>
                                 <input type="file" name="file" id="file" accept=".pdf" style="display:none;" onchange="handleFileChange(this)" data-required-label="ไฟล์หนังสือฉบับเต็ม (PDF)" data-validation-target="#dropzone">
@@ -648,23 +645,9 @@
         return document.querySelector('input[name="document_source"]:checked')?.value || 'system';
     }
 
-    // หน้าที่: จัดรูปแบบเลขจองหนังสือให้อยู่ในรูปแบบมาตรฐาน
+    // หน้าที่: หนังสือส่งออกทุกประเภทจะรอธุรการลงเลขหลังลงนาม
     function normalizeReservedDocumentNumber() {
-        const isSystem = selectedSource() === 'system';
-        const hidden = document.getElementById('running_number');
-        if (isSystem) {
-            hidden.value = '';
-            return;
-        }
-        const input = document.getElementById('upload_doc_number');
-        const arabic = input.value.trim().replace(/[๐-๙]/g, digit => '๐๑๒๓๔๕๖๗๘๙'.indexOf(digit));
-        const match = arabic.match(/^(?:ยล\s*\d+\s*\/\s*)?(\d+)$/u);
-        if (!match || Number(match[1]) < 1) return;
-
-        const running = String(Number(match[1]));
-        const thai = (`ยล 77301/${running}`).replace(/[0-9]/g, digit => '๐๑๒๓๔๕๖๗๘๙'[Number(digit)]);
-        input.value = thai;
-        hidden.value = running;
+        document.getElementById('running_number').value = '';
     }
 
     // หน้าที่: ซิงก์ข้อมูลแบบมีโครงสร้างกับช่องเนื้อหาเอกสาร
@@ -843,23 +826,10 @@
         document.getElementById('refPopup').style.display = 'none';
     }
 
-    // ✅ API รันเลขอัตโนมัติ
-    // หน้าที่: ขอและเติมเลขเอกสารจากระบบอัตโนมัติ
-    async function autoDocNo() {
-        try {
-            const res  = await fetch("{{ route('documents.api_next_number') }}?type=outgoing");
-            const data = await res.json();
-            document.getElementById('upload_doc_number').value = data.formatted;
-            document.getElementById('running_number').value = data.next_number;
-            Swal.fire({ toast:true, position:'top-end', icon:'success', title:'ดึงเลขรันนิ่งล่าสุดสำเร็จ', showConfirmButton:false, timer:1500 });
-        } catch(e) {
-            Swal.fire('Error','ไม่สามารถเชื่อมต่อระบบรันเลขได้','error');
-        }
-    }
-
     // ✅ File Dropzone Interactive
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('file');
+    const MAX_OUTGOING_FILE_SIZE = 10 * 1024 * 1024;
 
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
@@ -874,6 +844,15 @@
         if (input.files && input.files[0]) {
             const file   = input.files[0];
             const sizeMB = (file.size / (1024*1024)).toFixed(2);
+            if (file.size > MAX_OUTGOING_FILE_SIZE) {
+                input.value = '';
+                dropzone.style.borderColor = '#dc3545';
+                dropzone.style.background  = '#fff5f5';
+                display.innerHTML = `<i class="fas fa-exclamation-circle text-danger mb-3" style="font-size:42px;"></i>
+                                     <div style="font-size:16px;color:#b42318;font-weight:bold;">ไฟล์มีขนาด ${sizeMB} MB</div>
+                                     <div class="small text-danger mt-1 fw-bold">กรุณาเลือกไฟล์ PDF ที่มีขนาดไม่เกิน 10 MB</div>`;
+                return;
+            }
             dropzone.style.borderColor = '#10b981';
             dropzone.style.background  = '#f0fdf4';
             display.innerHTML = `<i class="fas fa-check-circle text-success mb-3" style="font-size:42px;"></i>
@@ -919,7 +898,7 @@
         if (!window.EdocRequiredValidation.validate(document.getElementById('step1'))) return;
 
         const isSystem     = selectedSource() === 'system';
-        const docNo        = isSystem ? 'รอธุรการลงทะเบียนเลข' : document.getElementById('upload_doc_number').value;
+        const docNo        = 'รอธุรการลงทะเบียนเลข';
         const title        = document.getElementById(isSystem ? 'title' : 'upload_title').value;
         const to           = document.getElementById(isSystem ? 'doc_to' : 'upload_doc_to').value;
         const file         = document.getElementById('file').files[0];
@@ -996,7 +975,6 @@
     });
 
     document.querySelectorAll('.structured-content-part').forEach(field => field.addEventListener('input', syncStructuredContent));
-    document.getElementById('upload_doc_number').addEventListener('blur', normalizeReservedDocumentNumber);
     restoreLocalDraft();
     normalizeReservedDocumentNumber();
     syncStructuredContent();

@@ -382,6 +382,21 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // หน้าที่: กำหนด maxDate ตามประเภทการลา (ลาป่วย = ถึงพรุ่งนี้เท่านั้น)
+    function applyDateConstraintsForType(leaveType) {
+        if (leaveType === 'ลาป่วย') {
+            // อนุญาตให้เลือกย้อนหลัง + วันนี้ + วันพรุ่งนี้ แต่ไม่ให้เลือกอนาคตไกล
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            fpStart.set('maxDate', tomorrow);
+            fpEnd.set('maxDate', tomorrow);
+        } else {
+            // ประเภทอื่น ๆ ไม่จำกัดวันสูงสุด
+            fpStart.set('maxDate', null);
+            fpEnd.set('maxDate', null);
+        }
+    }
+
     // ─── แสดง badge สิทธิ์คงเหลือ ───────────────────────────────────────────
     // หน้าที่: แสดงยอดวันลาคงเหลือของประเภทที่เลือก
     function showCurrentBalance(type) {
@@ -424,8 +439,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
             showCurrentBalance(selectedLeaveType);
             setCalendarLocked(false);
+            applyDateConstraintsForType(selectedLeaveType);
             fpStart.altInput.placeholder = 'คลิกเลือกวันที่เริ่มต้น';
             fpEnd.altInput.placeholder   = 'คลิกเลือกวันที่สิ้นสุด';
+
+            // Reset ค่าวันที่ถ้าเกิน maxDate ใหม่
+            if (selectedLeaveType === 'ลาป่วย') {
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const curStart = fpStart.selectedDates[0];
+                const curEnd   = fpEnd.selectedDates[0];
+                if (curStart && curStart > tomorrow) { fpStart.clear(); }
+                if (curEnd   && curEnd   > tomorrow) { fpEnd.clear(); }
+                calculateDays();
+            }
 
             // Reset half-day mode เมื่อเปลี่ยนประเภท
             resetHalfdayMode();

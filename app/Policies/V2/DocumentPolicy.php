@@ -28,6 +28,13 @@ class DocumentPolicy
             ->whereIn('status', $activeAssignmentStatuses)->exists()) {
             return true;
         }
+        // ผู้มอบหมายต้องเปิดเอกสารเพื่อติดตามความคืบหน้าของงานที่ตนสั่งการได้
+        if ($document->assignments()
+            ->where(fn ($assignments) => $assignments->where('assigned_by', $user->id)
+                ->orWhere('delegated_by', $user->id))
+            ->whereIn('status', $activeAssignmentStatuses)->exists()) {
+            return true;
+        }
         if ($user->hasRole('head') && $document->assignments()->whereHas('unit', fn ($units) => $units->whereIn('name', array_filter([$user->department, $user->division, $user->work_unit]))
         )->whereIn('status', $activeAssignmentStatuses)->exists()) {
             return true;

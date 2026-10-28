@@ -35,8 +35,18 @@ class RoomBookingController extends Controller
 
         $assignedDocuments = $this->assignedDocumentsFor(Auth::user())->get();
         $holidays = Holiday::orderBy('holiday_date')->get(['holiday_date', 'name']);
+        // ส่งเฉพาะข้อมูลที่จำเป็นสำหรับตรวจช่วงเวลาว่างบนแบบฟอร์ม โดยไม่เปิดเผยหัวข้อการประชุม
+        $activeBookings = RoomBooking::query()
+            ->whereIn('status', ['PENDING', 'APPROVED'])
+            ->get(['room_id', 'start_time', 'end_time'])
+            ->map(fn (RoomBooking $booking) => [
+                'room_id' => $booking->room_id,
+                'start_time' => $booking->start_time->format('Y-m-d\\TH:i:s'),
+                'end_time' => $booking->end_time->format('Y-m-d\\TH:i:s'),
+            ])
+            ->values();
 
-        return view('bookings.create', compact('rooms', 'users', 'assignedDocuments', 'holidays'));
+        return view('bookings.create', compact('rooms', 'users', 'assignedDocuments', 'holidays', 'activeBookings'));
     }
 
     // ฟังก์ชันรับข้อมูลจากฟอร์มและบันทึกลงฐานข้อมูล

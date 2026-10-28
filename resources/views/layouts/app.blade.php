@@ -525,6 +525,8 @@
             // ทุกบทบาทในพื้นที่งานเอกสารสร้างบันทึกข้อความได้ตาม Route เดิม
             // รวมถึงนายก ปลัด และหัวหน้าส่วน/หัวหน้าสำนักปลัด
             $canCreateInternalDocument = $canUseDocumentWorkspace;
+            // ผู้ใช้ที่ล็อกอินทุกคนเข้าหน้าสร้าง/อัปโหลดหนังสือส่งออกได้
+            $canCreateOutgoingDocument = true;
             $canUploadIncomingDocument = $canUseDocumentWorkspace
                 && ($isSuperAdmin || $menuUser->can('receive_register'));
             $canUploadOutgoingDocument = $canUseDocumentWorkspace
@@ -538,10 +540,12 @@
             $canManageHolidays = $isSuperAdmin || $menuUser->hasRole('palad');
             $canSeeSarabanSection = $canCreateInternalDocument
                 || $canUploadIncomingDocument
+                || $canCreateOutgoingDocument
                 || $canUploadOutgoingDocument
                 || $canViewDocumentRegistry;
             $canSeeReviewSection = $canReviewDocuments || $canReviewLeaves;
             $canSeeAssignedWork = $canUseDocumentWorkspace || ($assignedPendingCount ?? 0) > 0;
+            $canSeeAssignmentOverview = $menuUser->hasAnyRole(['executive', 'palad', 'head']);
         @endphp
 
         {{-- 🌟 1. ภาพรวมและติดตามงาน --}}
@@ -571,6 +575,13 @@
             </a>
             @endif
 
+            @if($canSeeAssignmentOverview)
+            <a href="{{ route('documents.assignment_overview') }}" class="nav-link-item {{ request()->routeIs('documents.assignment_overview') ? 'active' : '' }}">
+                <span class="nav-icon" style="color: var(--primary);"><i class="fas fa-chart-line"></i></span>
+                <span class="nav-text">ภาพรวมงานที่มอบหมาย</span>
+            </a>
+            @endif
+
         </div>
 
         {{-- 🌟 2. งานสารบรรณ (สร้างและลงทะเบียน) --}}
@@ -585,10 +596,10 @@
             </a>
             @endif
 
-            @if($canUploadOutgoingDocument)
+            @if($canCreateOutgoingDocument)
             <a href="{{ route('documents.create_outgoing') }}" class="nav-link-item {{ request()->routeIs('documents.create_outgoing') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-file-export"></i></span>
-                <span class="nav-text">อัปโหลดหนังสือส่งออก</span>
+                <span class="nav-text">สร้าง/อัปโหลดหนังสือส่งออก</span>
             </a>
             @endif
 
@@ -651,10 +662,12 @@
         <div class="sidebar-section">
             <div class="sidebar-label">ระบบบุคลากร (HR)</div>
 
+            @unless(auth()->user()?->hasRole('executive'))
             <a href="{{ route('leaves.create') }}" class="nav-link-item {{ request()->routeIs('leaves.create') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-umbrella-beach"></i></span>
                 <span class="nav-text">ยื่นใบลาพักผ่อน</span>
             </a>
+            @endunless
 
             <a href="{{ route('leaves.index') }}" class="nav-link-item {{ request()->routeIs('leaves.index') ? 'active' : '' }}">
                 <span class="nav-icon"><i class="fa-solid fa-clock-rotate-left"></i></span>

@@ -554,24 +554,39 @@ function loadTemplate(type, event) {
     }
 }
 
-// หน้าที่: ส่งหัวข้อให้ AI ช่วยร่างเนื้อหาเอกสาร
+// หน้าที่: รวบรวมข้อมูลหัวบันทึกเพื่อส่งเป็นบริบทให้ AI วิเคราะห์ร่วมกับรายละเอียดเพิ่มเติม
+function getAIDraftContext() {
+    const valueOf = (selector) => document.querySelector(selector)?.value?.trim() || '';
+
+    return {
+        doc_from: valueOf('[name="doc_from"]'),
+        doc_date: valueOf('#doc_date'),
+        title: valueOf('[name="title"]'),
+        doc_to: valueOf('#doc_to')
+    };
+}
+
+// หน้าที่: ส่งหัวข้อและข้อมูลหัวบันทึกให้ AI ช่วยร่างเนื้อหาเอกสาร
 async function askAI(previousTopic = '') {
+    const documentContext = getAIDraftContext();
     const { value: topic } = await Swal.fire({
         title: '✨ ให้ AI ช่วยร่างบันทึกข้อความ',
         input: 'textarea',
-        inputLabel: 'พิมพ์รายละเอียดสั้นๆ ที่ต้องการ',
+        inputLabel: 'พิมพ์รายละเอียดเพิ่มเติมที่ต้องการ',
         inputValue: previousTopic, 
-        inputPlaceholder: 'เช่น ขออนุมัติจัดซื้อคอมพิวเตอร์ 3 เครื่อง งบ 50,000 บาท...',
+        inputPlaceholder: 'เช่น จัดซื้อคอมพิวเตอร์ 3 เครื่อง งบ 50,000 บาท... (AI จะใช้ ส่วนราชการ วันที่ เรื่อง และเรียน จากแบบฟอร์มร่วมด้วย)',
         showCancelButton: true,
         confirmButtonText: 'ร่างข้อความ',
         cancelButtonText: 'ยกเลิก',
         confirmButtonColor: '#8b5cf6',
         inputValidator: (value) => {
-            if (!value) { return 'กรุณาพิมพ์รายละเอียดสักนิดนะครับ!' }
+            if (!(value || '').trim() && !documentContext.title) { return 'กรุณาระบุเรื่องหรือรายละเอียดสักนิดนะครับ!' }
         }
     });
+    const normalizedTopic = (topic || '').trim();
 
-    if (topic) {
+    // ผู้ใช้สามารถใช้ข้อมูล "เรื่อง" ที่กรอกไว้เป็นบริบทหลักได้ แม้ไม่เพิ่มรายละเอียด
+    if (normalizedTopic || documentContext.title) {
         Swal.fire({
             title: '✨ AI กำลังทำงาน...',
             html: '<div id="ai-status" class="fw-bold text-primary mt-2">✍️ กำลังวิเคราะห์เรื่อง...</div>',
@@ -596,29 +611,56 @@ async function askAI(previousTopic = '') {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': '{{ csrf_token() }}'
                 },
-                body: JSON.stringify({ topic: topic })
+                body: JSON.stringify({
+                    topic: normalizedTopic,
+                    document_context: documentContext
+                })
             });
 
             const data = await response.json();
 
             if (response.ok) {
                 const textArea = document.getElementById('doc_content');
-                textArea.value = data.draft;
-                
-                textArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
+                const titleInput = document.querySelector('[name="title"]');
+                const suggestedTitle = typeof data.title === 'string' ? data.title.trim() : '';
                 Swal.fire({
                     icon: 'success',
                     title: 'ร่างข้อความสำเร็จ!',
-                    text: 'พอใจกับเนื้อหาที่ AI ร่างให้ไหมครับ?',
+                    html: `
+                        ${suggestedTitle ? `
+                            <label for="ai-title-preview" class="form-label text-start w-100 mb-1">เรื่องที่ AI เสนอ</label>
+                            <input id="ai-title-preview" class="form-control mb-3" type="text" aria-label="เรื่องที่ AI เสนอ">
+                        ` : ''}
+                        <p class="mb-2">พอใจกับเนื้อหาที่ AI ร่างให้ไหมครับ?</p>
+                        <textarea id="ai-draft-preview" class="form-control text-start" rows="10" readonly aria-label="ข้อความที่ AI ร่าง"></textarea>
+                    `,
                     showDenyButton: true,
+                    showCancelButton: true,
                     confirmButtonText: 'พอใจแล้ว',
                     denyButtonText: 'ร่างใหม่อีกครั้ง',
+                    cancelButtonText: 'ยกเลิก',
                     confirmButtonColor: '#10b981',
-                    denyButtonColor: '#6b7280'
+                    denyButtonColor: '#6b7280',
+                    preConfirm: () => ({
+                        // เก็บค่าก่อน SweetAlert ปิดและนำองค์ประกอบของหน้าต่างออกจาก DOM
+                        suggestedTitle: document.getElementById('ai-title-preview')?.value.trim() || ''
+                    }),
+                    didOpen: () => {
+                        // กำหนดผ่าน value เพื่อให้ข้อความจาก AI แสดงเป็นข้อความธรรมดาเสมอ
+                        // และไม่ถูกตีความเป็น HTML ภายในหน้าต่างยืนยัน
+                        document.getElementById('ai-draft-preview').value = data.draft || '';
+                        const titlePreview = document.getElementById('ai-title-preview');
+                        if (titlePreview) titlePreview.value = suggestedTitle;
+                    }
                 }).then((result) => {
-                    if (result.isDenied) {
-                        askAI(topic); 
+                    if (result.isConfirmed) {
+                        // นำข้อความไปวางในแบบฟอร์ม เฉพาะเมื่อผู้ใช้ยืนยันว่าพอใจแล้ว
+                        if (result.value?.suggestedTitle) titleInput.value = result.value.suggestedTitle;
+                        textArea.value = data.draft;
+                        textArea.focus();
+                        textArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    } else if (result.isDenied) {
+                        askAI(normalizedTopic);
                     }
                 });
 

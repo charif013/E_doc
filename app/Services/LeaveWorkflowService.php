@@ -129,14 +129,22 @@ class LeaveWorkflowService
         DB::connection($leave->getConnectionName())->transaction(function () use ($leave, $actor) {
             $workflow = WorkflowInstance::withoutGlobalScopes()->where('leave_request_id', $leave->id)
                 ->lockForUpdate()->firstOrFail();
-            if (in_array($workflow->status->value, ['APPROVED', 'REJECTED', 'CANCELED', 'COMPLETED'], true)) {
-                throw ValidationException::withMessages(['status' => 'ไม่สามารถยกเลิกใบลาที่สิ้นสุดแล้ว']);
+            if (in_array($workflow->status->value, ['REJECTED', 'CANCELED'], true)) {
+                throw ValidationException::withMessages(['status' => 'ไม่สามารถยกเลิกใบลาที่ถูกปฏิเสธหรือยกเลิกไปแล้ว']);
             }
-            $step = $this->currentStep($workflow);
-            $this->appendEvidence($workflow, $step, $actor, 'CANCELED');
-            $step->update(['status' => 'CANCELED', 'acted_at' => now()]);
+            $step = $workflow->current_step
+                ? WorkflowStep::withoutGlobalScopes()->where('workflow_instance_id', $workflow->id)->where('step_order', $workflow->current_step)->first()
+                : WorkflowStep::withoutGlobalScopes()->where('workflow_instance_id', $workflow->id)->orderByDesc('step_order')->first();
+            if ($step) {
+                $this->appendEvidence($workflow, $step, $actor, 'CANCELED');
+                $step->update(['status' => 'CANCELED', 'acted_at' => now()]);
+            }
             $workflow->update(['status' => 'CANCELED', 'current_step' => null, 'completed_at' => now()]);
         }, 3);
+
+        if (Schema::connection($leave->getConnectionName())->hasColumn('leave_requests', 'workflow_status')) {
+            $leave->update(['status' => 'CANCELED', 'workflow_status' => 'canceled']);
+        }
 
         return $leave->fresh(['workflow.steps']);
     }
@@ -279,9 +287,11 @@ class LeaveWorkflowService
         if ($action === 'decline' && blank($reason)) {
             throw ValidationException::withMessages(['decline_reason' => 'กรุณาระบุเหตุผลที่ไม่สามารถรับมอบงาน']);
         }
+        $isHeadOrPalad = $leave->user?->hasRole('head') || $leave->user?->hasRole('palad');
+        $nextStatus = $isHeadOrPalad ? 'pending_inspector' : 'pending_head';
         $leave->update($action === 'accept' ? [
             'delegate_status' => 'accepted', 'delegate_decline_reason' => null,
-            'delegate_responded_at' => now(), 'workflow_status' => 'pending_head',
+            'delegate_responded_at' => now(), 'workflow_status' => $nextStatus,
         ] : [
             'delegate_status' => 'declined', 'delegate_decline_reason' => $reason,
             'delegate_responded_at' => now(), 'workflow_status' => 'delegate_declined',
@@ -302,7 +312,8 @@ class LeaveWorkflowService
                 'head_comment' => $comment, 'head_at' => now(),
             ],
             'pending_inspector' => [
-                'workflow_status' => 'pending_palad', 'inspector_id' => $actor->id,
+                'workflow_status' => $leave->user?->hasRole('palad') ? 'pending_nayok' : 'pending_palad',
+                'inspector_id' => $actor->id,
                 'inspector_status' => 'approved', 'inspector_signature' => $actor->signature,
                 'inspector_comment' => $comment, 'inspector_at' => now(),
             ],

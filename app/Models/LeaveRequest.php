@@ -78,6 +78,26 @@ class LeaveRequest extends Model
         if (Schema::connection((new static)->getConnectionName())->hasColumn('leave_requests', 'deleted_at')) {
             static::addGlobalScope('not_deleted', fn (Builder $query) => $query->whereNull('leave_requests.deleted_at'));
         }
+        static::creating(function (LeaveRequest $leave) {
+            if (! Schema::connection($leave->getConnectionName())->hasColumn('leave_requests', 'workflow_status')) {
+                return;
+            }
+
+            if ($leave->is_draft) {
+                $leave->workflow_status ??= 'draft';
+
+                return;
+            }
+            if (empty($leave->workflow_status) || $leave->workflow_status === 'pending_delegate') {
+                $hasDelegate = (bool) ($leave->delegate_id || $leave->delegate_user_id);
+                if (! $hasDelegate) {
+                    $owner = $leave->user ?? User::find($leave->user_id);
+                    $isHead = $owner?->hasRole('head') ?? false;
+                    $isPalad = $owner?->hasRole('palad') ?? false;
+                    $leave->workflow_status = ($isHead || $isPalad) ? 'pending_inspector' : 'pending_head';
+                }
+            }
+        });
         static::created(function (LeaveRequest $leave) {
             if (config('edoc.v2.enabled')
                 && ! $leave->is_draft

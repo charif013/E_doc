@@ -14,16 +14,22 @@ class SidebarAuthorizationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_user_without_document_permissions_does_not_see_document_or_review_menus(): void
+    public function test_every_authenticated_user_can_access_the_outgoing_document_menu(): void
     {
         $user = $this->userWithRole('worker');
 
         $this->actingAs($user)->get(route('home'))
             ->assertOk()
-            ->assertDontSee('งานสารบรรณ (e-Saraban)')
+            ->assertSee('งานสารบรรณ (e-Saraban)')
+            ->assertSee('สร้าง/อัปโหลดหนังสือส่งออก')
             ->assertDontSee('แฟ้มพิจารณาอนุมัติ')
             ->assertDontSee('งานที่ได้รับมอบหมาย')
             ->assertDontSee('รายงานภาพรวม');
+
+        $this->actingAs($user)
+            ->get(route('documents.create_outgoing'))
+            ->assertOk()
+            ->assertSee('อัปโหลด PDF ที่จัดทำแล้ว');
     }
 
     public function test_general_officer_sees_only_the_document_creation_menu_they_can_use(): void
@@ -33,7 +39,7 @@ class SidebarAuthorizationTest extends TestCase
         $this->actingAs($user)->get(route('home'))
             ->assertOk()
             ->assertSee('สร้างบันทึกข้อความ')
-            ->assertDontSee('อัปโหลดหนังสือส่งออก')
+            ->assertSee('สร้าง/อัปโหลดหนังสือส่งออก')
             ->assertDontSee('อัปโหลดหนังสือรับเข้า')
             ->assertDontSee('สมุดคุมเลขสารบรรณ');
     }
@@ -45,7 +51,7 @@ class SidebarAuthorizationTest extends TestCase
 
         $this->actingAs($saraban)->get(route('home'))
             ->assertOk()
-            ->assertSee('อัปโหลดหนังสือส่งออก')
+            ->assertSee('สร้าง/อัปโหลดหนังสือส่งออก')
             ->assertSee('อัปโหลดหนังสือรับเข้า')
             ->assertSee('สมุดคุมเลขสารบรรณ');
 

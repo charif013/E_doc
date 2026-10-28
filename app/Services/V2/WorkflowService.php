@@ -63,7 +63,9 @@ class WorkflowService
             }
 
             $next = WorkflowStep::where('workflow_instance_id', $locked->id)
-                ->where('step_order', '>', $step->step_order)->orderBy('step_order')->first();
+                ->where('step_order', '>', $step->step_order)
+                ->where('status', 'PENDING')
+                ->orderBy('step_order')->first();
             if ($next) {
                 $locked->update(['status' => 'IN_PROGRESS', 'current_step' => $next->step_order]);
             } else {

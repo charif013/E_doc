@@ -22,9 +22,23 @@
         @csrf
         <div class="row g-4 align-items-start">
             <div class="col-xl-8">
+                <section class="booking-section card border-0 shadow-sm mb-4" id="timeSection">
+                    <div class="card-body p-4 p-lg-5">
+                        <div class="section-heading"><span class="section-number">1</span><div><h5>วันและเวลา</h5><p>เลือกช่วงเวลาที่ต้องการก่อน เพื่อวางแผนการจองห้องได้สะดวกขึ้น</p></div></div>
+                        <div class="row g-3">
+                            <div class="col-md-6"><label for="start_time" class="form-label fw-bold">เริ่มใช้งาน <span class="text-danger">*</span></label><div class="input-icon-wrap"><i class="far fa-calendar-alt"></i><input id="start_time" type="text" name="start_time" value="{{ old('start_time') }}" class="form-control form-control-lg datetime-picker @error('start_time') is-invalid @enderror" placeholder="เลือกวันและเวลาเริ่ม" required></div>@error('start_time')<div class="text-danger small mt-1">{{ $message }}</div>@enderror</div>
+                            <div class="col-md-6"><label for="end_time" class="form-label fw-bold">สิ้นสุด <span class="text-danger">*</span></label><div class="input-icon-wrap"><i class="far fa-clock"></i><input id="end_time" type="text" name="end_time" value="{{ old('end_time') }}" class="form-control form-control-lg datetime-picker @error('end_time') is-invalid @enderror" placeholder="เลือกวันและเวลาสิ้นสุด" required></div>@error('end_time')<div class="text-danger small mt-1">{{ $message }}</div>@enderror</div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-3"><span class="small text-muted me-1">กำหนดระยะเวลาเร็ว:</span>@foreach([30 => '30 นาที', 60 => '1 ชั่วโมง', 120 => '2 ชั่วโมง', 180 => '3 ชั่วโมง'] as $minutes => $label)<button type="button" class="btn btn-sm btn-light border rounded-pill quick-duration" data-minutes="{{ $minutes }}">{{ $label }}</button>@endforeach<span id="durationFeedback" class="duration-feedback ms-md-auto">ยังไม่ได้เลือกเวลา</span></div>
+                        <div id="bookingAvailabilityHint" class="booking-availability-hint mt-3"><i class="fas fa-info-circle"></i><span>เลือกห้องประชุมด้านล่างเพื่อเช็กว่าช่วงเวลานี้ว่างหรือไม่</span></div>
+                        <div class="booking-conflict-alert mt-3" data-booking-conflict-warning role="alert" aria-live="assertive" hidden><i class="fas fa-exclamation-triangle"></i><span><strong>ช่วงเวลานี้มีการจองห้องแล้ว</strong><small>แจ้งเตือนทันทีเมื่อเลือกข้อมูลครบ กรุณาเลือกวัน เวลา หรือห้องประชุมอื่น</small></span></div>
+                        <div class="holiday-help mt-3"><span class="holiday-dot"></span><span>วันที่พื้นสีส้มคือวันหยุด เลื่อนเมาส์เหนือวันที่เพื่อดูรายละเอียด</span></div>
+                    </div>
+                </section>
+
                 <section class="booking-section card border-0 shadow-sm mb-4">
                     <div class="card-body p-4 p-lg-5">
-                        <div class="section-heading"><span class="section-number">1</span><div><h5>รายละเอียดการใช้งาน</h5><p>เลือกวัตถุประสงค์ ห้อง และระบุหัวข้อให้ชัดเจน</p></div></div>
+                        <div class="section-heading"><span class="section-number">2</span><div><h5>รายละเอียดการใช้งาน</h5><p>เลือกวัตถุประสงค์ ห้อง และระบุหัวข้อให้ชัดเจน</p></div></div>
                         <div class="mb-4">
                             <label for="title" class="form-label fw-bold">หัวข้อ / วัตถุประสงค์ <span class="text-danger">*</span></label>
                             <input id="title" type="text" name="title" value="{{ old('title') }}" class="form-control form-control-lg @error('title') is-invalid @enderror" placeholder="เช่น ประชุมติดตามงานประจำเดือน" maxlength="255" required autofocus>
@@ -45,11 +59,12 @@
                                 <select id="room_id" name="room_id" class="form-select form-select-lg @error('room_id') is-invalid @enderror" required @disabled($rooms->isEmpty())>
                                     <option value="">เลือกห้องประชุม</option>
                                     @foreach($rooms as $room)
-                                        <option value="{{ $room->id }}" data-room-name="{{ $room->name }}" data-capacity="{{ $room->capacity ?: '-' }}" @selected((string) old('room_id') === (string) $room->id)>{{ $room->name }} · รองรับ {{ $room->capacity ?: 'ไม่ระบุ' }} คน</option>
+                                        <option value="{{ $room->id }}" data-room-name="{{ $room->name }}" data-capacity="{{ $room->capacity ?: '-' }}" @selected((string) old('room_id', $rooms->count() === 1 ? $rooms->first()->id : null) === (string) $room->id)>{{ $room->name }} · รองรับ {{ $room->capacity ?: 'ไม่ระบุ' }} คน</option>
                                     @endforeach
                                 </select>
                                 @error('room_id')<div class="invalid-feedback">{{ $message }}</div>@enderror
                                 @if($rooms->isEmpty())<div class="text-danger small mt-2"><i class="fas fa-info-circle me-1"></i>ยังไม่มีห้องที่เปิดใช้งาน กรุณาติดต่อผู้ดูแลระบบ</div>@endif
+                                <div class="booking-conflict-alert mt-2" data-booking-conflict-warning hidden><i class="fas fa-exclamation-triangle"></i><span><strong>ช่วงเวลานี้มีการจองห้องแล้ว</strong><small>กรุณาเลือกวัน เวลา หรือห้องประชุมอื่น</small></span></div>
                             </div>
                             <div class="col-md-6">
                                 <label for="document_id" class="form-label fw-bold">เอกสารที่เกี่ยวข้อง <span class="text-muted fw-normal">(ถ้ามี)</span></label>
@@ -63,18 +78,6 @@
                             </div>
                         </div>
                         <div class="mt-4"><label for="description" class="form-label fw-bold">รายละเอียดเพิ่มเติม</label><textarea id="description" name="description" class="form-control @error('description') is-invalid @enderror" rows="3" maxlength="5000" placeholder="วาระประชุม อุปกรณ์ที่ต้องการ หรือข้อมูลเพิ่มเติม">{{ old('description') }}</textarea>@error('description')<div class="invalid-feedback">{{ $message }}</div>@enderror</div>
-                    </div>
-                </section>
-
-                <section class="booking-section card border-0 shadow-sm mb-4" id="timeSection">
-                    <div class="card-body p-4 p-lg-5">
-                        <div class="section-heading"><span class="section-number">2</span><div><h5>วันและเวลา</h5><p>ระบบไม่อนุญาตให้จองทับช่วงเวลาที่มีผู้ใช้งานแล้ว</p></div></div>
-                        <div class="row g-3">
-                            <div class="col-md-6"><label for="start_time" class="form-label fw-bold">เริ่มใช้งาน <span class="text-danger">*</span></label><div class="input-icon-wrap"><i class="far fa-calendar-alt"></i><input id="start_time" type="text" name="start_time" value="{{ old('start_time') }}" class="form-control form-control-lg datetime-picker @error('start_time') is-invalid @enderror" placeholder="เลือกวันและเวลาเริ่ม" required></div>@error('start_time')<div class="text-danger small mt-1">{{ $message }}</div>@enderror</div>
-                            <div class="col-md-6"><label for="end_time" class="form-label fw-bold">สิ้นสุด <span class="text-danger">*</span></label><div class="input-icon-wrap"><i class="far fa-clock"></i><input id="end_time" type="text" name="end_time" value="{{ old('end_time') }}" class="form-control form-control-lg datetime-picker @error('end_time') is-invalid @enderror" placeholder="เลือกวันและเวลาสิ้นสุด" required></div>@error('end_time')<div class="text-danger small mt-1">{{ $message }}</div>@enderror</div>
-                        </div>
-                        <div class="d-flex flex-wrap align-items-center gap-2 mt-3"><span class="small text-muted me-1">กำหนดระยะเวลาเร็ว:</span>@foreach([30 => '30 นาที', 60 => '1 ชั่วโมง', 120 => '2 ชั่วโมง', 180 => '3 ชั่วโมง'] as $minutes => $label)<button type="button" class="btn btn-sm btn-light border rounded-pill quick-duration" data-minutes="{{ $minutes }}">{{ $label }}</button>@endforeach<span id="durationFeedback" class="duration-feedback ms-md-auto">ยังไม่ได้เลือกเวลา</span></div>
-                        <div class="holiday-help mt-3"><span class="holiday-dot"></span><span>วันที่พื้นสีส้มคือวันหยุด เลื่อนเมาส์เหนือวันที่เพื่อดูรายละเอียด</span></div>
                     </div>
                 </section>
 
@@ -108,9 +111,12 @@
 // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
 document.addEventListener('DOMContentLoaded', function () {
     const holidays = @json($holidays->mapWithKeys(fn ($holiday) => [$holiday->holiday_date => $holiday->name]));
+    const activeBookings = @json($activeBookings);
     const form = document.getElementById('bookingForm'), title = document.getElementById('title'), room = document.getElementById('room_id');
     const startInput = document.getElementById('start_time'), endInput = document.getElementById('end_time'), durationFeedback = document.getElementById('durationFeedback');
-    let startPicker, endPicker;
+    const availabilityHint = document.getElementById('bookingAvailabilityHint'), conflictWarnings = document.querySelectorAll('[data-booking-conflict-warning]'), submitBooking = document.getElementById('submitBooking');
+    const noRoomsAvailable = submitBooking.disabled;
+    let startPicker, endPicker, bookingConflict = false;
     // หน้าที่: ทำเครื่องหมายวันหยุดบนปฏิทินการจอง
     function holidayDay(dObj, dStr, fp, dayElem) { const key = fp.formatDate(dayElem.dateObj, 'Y-m-d'); if (holidays[key]) { dayElem.classList.add('booking-holiday'); dayElem.title = 'วันหยุด: ' + holidays[key]; } }
     // หน้าที่: คืนประเภทการจองที่ผู้ใช้เลือก
@@ -119,19 +125,30 @@ document.addEventListener('DOMContentLoaded', function () {
     function pad(value) { return String(value).padStart(2, '0'); }
     // หน้าที่: จัดรูปแบบวันเวลาเป็นรูปแบบไทยสำหรับแสดงผล
     function formatDate(date) { return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear() + 543} ${pad(date.getHours())}:${pad(date.getMinutes())}`; }
+    // หน้าที่: แจ้งเตือนทันทีเมื่อเลือกห้องและช่วงเวลาที่ทับกับรายการจองที่ยังใช้งานอยู่
+    function updateBookingAvailability() {
+        const start = startPicker?.selectedDates[0], end = endPicker?.selectedDates[0];
+        bookingConflict = Boolean(room.value && start && end && end > start && activeBookings.some(booking => Number(booking.room_id) === Number(room.value) && start < new Date(booking.end_time) && end > new Date(booking.start_time)));
+        availabilityHint.hidden = Boolean(room.value);
+        conflictWarnings.forEach(warning => warning.hidden = !bookingConflict);
+        [startInput, endInput, startPicker?.altInput, endPicker?.altInput].filter(Boolean).forEach(input => input.classList.toggle('is-invalid', bookingConflict));
+        submitBooking.disabled = noRoomsAvailable || bookingConflict;
+    }
     // หน้าที่: คำนวณและแสดงระยะเวลาการจอง
     function updateDuration() {
         const start = startPicker?.selectedDates[0], end = endPicker?.selectedDates[0];
-        if (!start || !end) { durationFeedback.textContent = 'ยังไม่ได้เลือกเวลาครบ'; durationFeedback.className = 'duration-feedback ms-md-auto'; document.getElementById('summaryDate').textContent = 'ยังไม่ได้เลือกเวลา'; return; }
+        if (!start || !end) { durationFeedback.textContent = 'ยังไม่ได้เลือกเวลาครบ'; durationFeedback.className = 'duration-feedback ms-md-auto'; document.getElementById('summaryDate').textContent = 'ยังไม่ได้เลือกเวลา'; updateBookingAvailability(); return; }
         const minutes = Math.round((end - start) / 60000);
-        if (minutes <= 0) { durationFeedback.textContent = 'เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม'; durationFeedback.className = 'duration-feedback duration-error ms-md-auto'; return; }
+        if (minutes <= 0) { durationFeedback.textContent = 'เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม'; durationFeedback.className = 'duration-feedback duration-error ms-md-auto'; updateBookingAvailability(); return; }
         const hours = Math.floor(minutes / 60), remainder = minutes % 60, duration = [hours ? `${hours} ชม.` : '', remainder ? `${remainder} นาที` : ''].filter(Boolean).join(' ');
-        durationFeedback.textContent = `ระยะเวลา ${duration}`; durationFeedback.className = 'duration-feedback duration-ok ms-md-auto'; document.getElementById('summaryDate').textContent = `${formatDate(start)} – ${pad(end.getHours())}:${pad(end.getMinutes())} น.`;
+        durationFeedback.textContent = `ระยะเวลา ${duration}`; durationFeedback.className = 'duration-feedback duration-ok ms-md-auto'; document.getElementById('summaryDate').textContent = `${formatDate(start)} – ${pad(end.getHours())}:${pad(end.getMinutes())} น.`; updateBookingAvailability();
     }
     const options = {enableTime:true,time_24hr:true,locale:'th',dateFormat:'Y-m-d H:i',altInput:true,altFormat:'d/m/Y เวลา H:i น.',minuteIncrement:15,allowInput:true,minDate:'today',onDayCreate:holidayDay};
     // หน้าที่: ซิงก์ข้อมูลเมื่อค่าของตัวเลือกวันที่เปลี่ยน
     startPicker = flatpickr(startInput, {...options, onChange:function(dates){ if(!dates.length)return; const start=dates[0]; endPicker.set('minDate',start); if(!endPicker.selectedDates[0]||endPicker.selectedDates[0]<=start)endPicker.setDate(new Date(start.getTime()+3600000),true); updateDuration(); }});
     endPicker = flatpickr(endInput, {...options, onChange:updateDuration});
+    // หน้าที่: ตรวจห้องว่างทันทีทั้งจากการเลือกในปฏิทินและการพิมพ์วันเวลาเอง
+    [startInput, endInput, startPicker.altInput, endPicker.altInput].filter(Boolean).forEach(input => input.addEventListener('change', updateBookingAvailability));
     // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.querySelectorAll('.quick-duration').forEach(button => button.addEventListener('click', function(){ const start=startPicker.selectedDates[0]; if(!start){startPicker.open();return;} endPicker.setDate(new Date(start.getTime()+Number(this.dataset.minutes)*60000),true); }));
     // หน้าที่: อัปเดตข้อมูลสรุปให้ตรงกับค่าปัจจุบันของแบบฟอร์ม
@@ -142,13 +159,13 @@ document.addEventListener('DOMContentLoaded', function () {
         const count=document.querySelectorAll('.invitee-checkbox:checked').length; document.getElementById('selectedInvitees').textContent=count; document.getElementById('summaryInvitees').textContent=count;
         const meeting=type?.value==='meeting'; document.getElementById('invitees_section').hidden=!meeting; document.getElementById('summaryInviteeRow').hidden=!meeting;
     }
-    title.addEventListener('input',updateSummary); room.addEventListener('change',updateSummary); document.querySelectorAll('input[name="booking_type"],.invitee-checkbox').forEach(input=>input.addEventListener('change',updateSummary));
+    title.addEventListener('input',updateSummary); room.addEventListener('change',function(){updateSummary();updateBookingAvailability();}); document.querySelectorAll('input[name="booking_type"],.invitee-checkbox').forEach(input=>input.addEventListener('change',updateSummary));
     // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.getElementById('clearInvitees').addEventListener('click',function(){document.querySelectorAll('.invitee-checkbox').forEach(input=>input.checked=false);updateSummary();});
     // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.getElementById('inviteeSearch').addEventListener('input',function(){const keyword=this.value.trim().toLocaleLowerCase('th');document.querySelectorAll('.invitee-item').forEach(item=>item.hidden=!item.dataset.search.includes(keyword));});
     // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
-    form.addEventListener('submit',function(event){const start=startPicker.selectedDates[0],end=endPicker.selectedDates[0];if(!start||!end||end<=start){event.preventDefault();durationFeedback.textContent='กรุณาเลือกเวลาเริ่มและสิ้นสุดให้ถูกต้อง';durationFeedback.className='duration-feedback duration-error ms-md-auto';document.getElementById('timeSection').scrollIntoView({behavior:'smooth',block:'center'});return;}const submit=document.getElementById('submitBooking');submit.disabled=true;submit.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>กำลังตรวจสอบห้องว่าง...';});
+    form.addEventListener('submit',function(event){const start=startPicker.selectedDates[0],end=endPicker.selectedDates[0];if(!start||!end||end<=start||bookingConflict){event.preventDefault();if(bookingConflict){conflictWarnings.forEach(warning => warning.hidden=false);}else{durationFeedback.textContent='กรุณาเลือกเวลาเริ่มและสิ้นสุดให้ถูกต้อง';durationFeedback.className='duration-feedback duration-error ms-md-auto';}document.getElementById('timeSection').scrollIntoView({behavior:'smooth',block:'center'});return;}const submit=document.getElementById('submitBooking');submit.disabled=true;submit.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>กำลังตรวจสอบห้องว่าง...';});
     // หน้าที่: จัดการเหตุการณ์ขององค์ประกอบในหน้านี้
     document.querySelector('.content-area')?.addEventListener('scroll',function(){startPicker.close();endPicker.close();}); updateSummary(); updateDuration();
 });
@@ -158,6 +175,8 @@ document.addEventListener('DOMContentLoaded', function () {
 .booking-create-page{max-width:1440px}.booking-auto-status{display:flex;align-items:center;gap:.75rem;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:14px;padding:.7rem 1rem}.booking-auto-status .status-dot{width:11px;height:11px;border-radius:50%;background:#10b981;box-shadow:0 0 0 5px rgba(16,185,129,.12)}.booking-auto-status div{display:flex;flex-direction:column;line-height:1.25}.booking-auto-status small{opacity:.75}.booking-section,.booking-summary{border-radius:20px}.section-heading{display:flex;align-items:flex-start;gap:1rem;margin-bottom:1.5rem}.section-heading h5{font-weight:800;margin:0 0 .25rem}.section-heading p{color:#64748b;margin:0;font-size:.9rem}.section-number{display:inline-grid;place-items:center;min-width:36px;height:36px;border-radius:11px;background:#e8f1ff;color:#0d6efd;font-weight:800}
 .booking-type-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem}.booking-type-option input{position:absolute;opacity:0;pointer-events:none}.booking-type-card{height:100%;display:flex;align-items:center;gap:.75rem;padding:1rem;border:1.5px solid #e2e8f0;border-radius:14px;cursor:pointer;transition:.18s;background:#fff}.booking-type-card>i:first-child{font-size:1.2rem;color:#64748b}.booking-type-card span{display:flex;flex-direction:column;min-width:0}.booking-type-card small{font-size:.72rem;color:#64748b;margin-top:.15rem}.selected-check{margin-left:auto;color:#0d6efd;opacity:0}.booking-type-option input:checked+.booking-type-card{border-color:#0d6efd;background:#f4f8ff;box-shadow:0 0 0 3px rgba(13,110,253,.08)}.booking-type-option input:checked+.booking-type-card .selected-check{opacity:1}.booking-type-option input:focus-visible+.booking-type-card{outline:3px solid rgba(13,110,253,.25)}
 .form-control,.form-select{border-color:#dbe3ee;border-radius:12px}.form-control-lg,.form-select-lg{font-size:1rem;min-height:50px}.input-icon-wrap{position:relative}.input-icon-wrap>i{position:absolute;left:1rem;top:50%;transform:translateY(-50%);color:#64748b;z-index:2}.input-icon-wrap .form-control{padding-left:2.7rem}.duration-feedback{font-size:.85rem;color:#64748b;font-weight:600}.duration-ok{color:#047857}.duration-error{color:#dc2626}.holiday-help{display:flex;align-items:center;gap:.5rem;color:#64748b;font-size:.8rem}.holiday-dot{width:10px;height:10px;border-radius:50%;background:#f59e0b;flex:none}.flatpickr-day.booking-holiday{background:#fef3c7!important;border-color:#f59e0b!important;color:#92400e!important;font-weight:700}.flatpickr-day.booking-holiday:hover{background:#fde68a!important}
+.booking-conflict-alert{display:flex;align-items:flex-start;gap:.75rem;padding:1rem 1.1rem;background:#fef2f2;border:1px solid #fca5a5;border-radius:14px;color:#b91c1c}.booking-conflict-alert>i{font-size:1.15rem;margin-top:.1rem}.booking-conflict-alert span{display:flex;flex-direction:column}.booking-conflict-alert small{margin-top:.15rem;color:#b91c1c}
+.booking-availability-hint{display:flex;align-items:center;gap:.55rem;color:#1d4ed8;font-size:.85rem;font-weight:600}.booking-availability-hint>i{font-size:1rem}
 .invite-search{position:relative;flex:1;max-width:360px}.invite-search i{position:absolute;left:.9rem;top:50%;transform:translateY(-50%);color:#94a3b8}.invite-search input{padding-left:2.5rem}.invitee-list{display:grid;grid-template-columns:repeat(2,1fr);gap:.65rem;max-height:330px;overflow:auto;padding:.15rem}.invitee-item{display:flex;align-items:center;gap:.7rem;border:1px solid #e2e8f0;border-radius:13px;padding:.75rem;cursor:pointer;transition:.15s}.invitee-item:hover{border-color:#93c5fd;background:#f8fbff}.invitee-item:has(input:checked){border-color:#60a5fa;background:#eff6ff}.invitee-avatar{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-weight:800}.invitee-info{display:flex;flex-direction:column;min-width:0}.invitee-info strong,.invitee-info small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.invitee-info small{color:#64748b;font-size:.75rem}
 .booking-summary{position:sticky;top:1.25rem}.summary-title{font-size:1.05rem;font-weight:800;background:#f8fafc;border-radius:13px;padding:1rem;margin-bottom:1.25rem;word-break:break-word}.summary-list{display:flex;flex-direction:column;gap:1rem}.summary-list>div{display:flex;align-items:center;gap:.8rem}.summary-list span:not(.summary-icon){display:flex;flex-direction:column;min-width:0}.summary-list small{color:#64748b}.summary-list strong{font-size:.9rem;white-space:normal}.summary-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;flex:none}.summary-confirmation{display:flex;gap:.75rem;background:#f0fdf4;color:#166534;border-radius:13px;padding:1rem;margin-top:1.5rem}.summary-confirmation>i{margin-top:.15rem}.summary-confirmation span{display:flex;flex-direction:column}.summary-confirmation small{opacity:.75;font-size:.75rem;margin-top:.15rem}
 @media(max-width:991.98px){.booking-summary{position:static}.booking-type-grid{grid-template-columns:1fr}.invitee-list{grid-template-columns:1fr}}@media(max-width:575.98px){.booking-create-page{padding-left:.75rem!important;padding-right:.75rem!important}.booking-section .card-body{padding:1.25rem!important}.booking-auto-status{width:100%}.invite-search{max-width:none;width:100%}.quick-duration{flex:1}.section-heading p{font-size:.8rem}}

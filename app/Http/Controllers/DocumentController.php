@@ -675,7 +675,7 @@ class DocumentController extends Controller
             }
             $request->validate([
                 'document_source' => 'required|in:system,upload',
-                'doc_number' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'string', 'max:255'],
+                'doc_number' => ['nullable', 'string', 'max:255'],
                 'doc_date' => 'required|date',
                 'doc_type_category' => 'required|string|max:255',
                 'title' => 'required|string|max:255',
@@ -889,10 +889,15 @@ class DocumentController extends Controller
             ? \App\Models\V2\Document::with('type')->whereHas('type', fn ($types) => $types->where('code', 'INCOMING'))->latest()->limit(20)->get()
             : Document::where('doc_type', 'incoming')->orderBy('created_at', 'desc')->limit(20)->get();
 
-        $signers = User::role(['executive', 'palad'])
+        // Query the relation directly so every authenticated user can open
+        // the form even before optional signer roles have been configured.
+        $signers = User::whereHas('roles', function ($roles) {
+            $roles->whereIn('name', ['executive', 'palad']);
+        })
             ->orWhere(function ($query) {
-                $query->role('head')
-                    ->where('department', 'LIKE', '%สำนักงานปลัด%');
+                $query->whereHas('roles', function ($roles) {
+                    $roles->where('name', 'head');
+                })->where('department', 'LIKE', '%สำนักงานปลัด%');
             })
             ->get();
 
@@ -907,13 +912,8 @@ class DocumentController extends Controller
         if (! $request->filled('document_source')) {
             $request->merge(['document_source' => $request->hasFile('file') ? 'upload' : 'system']);
         }
-        if ($request->input('document_source') === 'system') {
-            // หนังสือที่สร้างในระบบยังไม่รับเลขจนกว่าผู้ลงนามจะอนุมัติ
-            $request->merge(['doc_number' => null, 'running_number' => null]);
-        } else {
-            $this->authorizeSarabanNumbering();
-            $this->normalizeOutgoingNumberInput($request);
-        }
+        // หนังสือส่งออกทุกแบบรอให้สารบรรณลงเลข หลังผู้ลงนามอนุมัติครบแล้ว
+        $request->merge(['doc_number' => null, 'running_number' => null]);
         if ($request->input('document_source') === 'system' && ! $request->filled('sender_address')) {
             $request->merge(['sender_address' => config('edoc.organization.outgoing_address')]);
         }
@@ -923,7 +923,7 @@ class DocumentController extends Controller
         }
         $request->validate([
             'document_source' => 'required|in:system,upload',
-            'doc_number' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'string', 'max:255'],
+            'doc_number' => ['nullable', 'string', 'max:255'],
             'doc_date' => 'required|date',
             'doc_type_category' => 'required|string|max:255',
             'title' => 'required|string|max:255',
@@ -931,7 +931,7 @@ class DocumentController extends Controller
             'signer_name' => 'required|string|max:255',
             'signer_user_id' => 'required|integer|exists:users,id|not_in:'.Auth::id(),
             'content' => [Rule::requiredIf($request->input('document_source') === 'system'), 'nullable', 'string', 'max:50000'],
-            'file' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'file', 'mimes:pdf', 'max:20480'],
+            'file' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'file', 'mimes:pdf', 'max:10240'],
             'sender_address' => 'nullable|string|max:1000',
             'closing_text' => 'nullable|string|max:255',
             'contact_line' => 'nullable|string|max:500',
@@ -945,8 +945,9 @@ class DocumentController extends Controller
             'signer_name.required' => 'กรุณาเลือกผู้ลงนาม',
             'content.required' => 'กรุณาระบุเนื้อหาหนังสือ',
             'file.required' => 'กรุณาแนบไฟล์หนังสือส่งออก (PDF) เมื่อเลือกอัปโหลดไฟล์',
+            'file.uploaded' => 'อัปโหลดไฟล์ไม่สำเร็จ กรุณาตรวจสอบขนาดไฟล์และลองใหม่อีกครั้ง',
             'file.mimes' => 'รองรับเฉพาะไฟล์ PDF เท่านั้น',
-            'file.max' => 'ขนาดไฟล์ต้องไม่เกิน 20MB',
+            'file.max' => 'ขนาดไฟล์ต้องไม่เกิน 10MB',
         ]);
 
         $signerId = $this->validatedOutgoingSignerId($request);
@@ -1325,8 +1326,7 @@ class DocumentController extends Controller
                         $document->update($nextStepData);
                         $msg = 'อนุมัติสำเร็จ ระบบได้ส่งเรื่องให้ผู้พิจารณาลำดับถัดไปเรียบร้อยแล้ว';
                     } else {
-                        $waitsForNumber = $document->doc_type === 'internal'
-                            || ($document->doc_type === 'outgoing' && $document->source_type === 'system');
+                        $waitsForNumber = $document->doc_type === 'internal' || $document->doc_type === 'outgoing';
                         $finalData = ['status' => $waitsForNumber ? 'WAITING_NUMBERING' : 'APPROVED'];
                         if ($document->doc_type === 'incoming') {
                             $assignedTo = $assignmentChoice !== null
@@ -1355,7 +1355,7 @@ class DocumentController extends Controller
                     } elseif ($user->hasRole('head') && $document->status === 'WAITING_SUPERVISOR') {
                         $isFinalSigner = ($document->doc_type === 'outgoing' && ! str_contains($document->signer_name ?? '', 'ปลัด') && ! str_contains($document->signer_name ?? '', 'นายก'));
                         $nextStatus = $isFinalSigner
-                            ? ($document->source_type === 'system' ? 'WAITING_NUMBERING' : 'APPROVED')
+                            ? 'WAITING_NUMBERING'
                             : 'WAITING_PALAD';
 
                         $document->update([
@@ -1382,7 +1382,7 @@ class DocumentController extends Controller
                             : $document->assigned_to;
                         $isFinalSigner = ($document->doc_type === 'outgoing' && str_contains($document->signer_name ?? '', 'ปลัด'));
                         $nextStatus = $isFinalSigner
-                            ? ($document->source_type === 'system' ? 'WAITING_NUMBERING' : 'APPROVED')
+                            ? 'WAITING_NUMBERING'
                             : 'WAITING_NAYOK';
 
                         $paladData = [
@@ -1416,7 +1416,7 @@ class DocumentController extends Controller
                             $newStatus = 'APPROVED';
                             $successMsg = 'ลงนามสั่งการหนังสือรับเข้าเรียบร้อยแล้ว';
                         } elseif ($document->doc_type === 'outgoing') {
-                            $newStatus = $document->source_type === 'system' ? 'WAITING_NUMBERING' : 'APPROVED';
+                            $newStatus = 'WAITING_NUMBERING';
                             $successMsg = $document->source_type === 'upload'
                                 ? 'ยืนยันว่าเป็นผู้ลงนามใน PDF ที่อัปโหลดเรียบร้อยแล้ว'
                                 : 'ลงนามอนุมัติแล้ว ระบบส่งให้เจ้าหน้าที่สารบรรณลงเลขต่อไป';
@@ -2117,6 +2117,32 @@ class DocumentController extends Controller
         return view('documents.assigned_list', compact('documents', 'subordinates', 'leaveDelegations'));
     }
 
+    // หน้าที่: แสดงภาพรวมความคืบหน้างานที่ผู้บริหารหรือหัวหน้าส่วนสั่งการ
+    public function assignmentOverview(V2DocumentReadService $v2Documents)
+    {
+        abort_unless(config('edoc.v2.document_reads'), 404);
+        /** @var User $user */
+        $user = Auth::user();
+        $assignments = $v2Documents->assignmentOverview($user);
+        $progressValues = $assignments->map(function ($assignment) {
+            $status = strtoupper((string) ($assignment->status instanceof \BackedEnum ? $assignment->status->value : $assignment->status));
+            if ($status === 'COMPLETED') {
+                return 100;
+            }
+
+            return $assignment->progressUpdates->first()?->progress_percent;
+        })->filter(fn ($progress) => $progress !== null);
+        $summary = [
+            'total' => $assignments->count(),
+            'pending' => $assignments->filter(fn ($assignment) => strtoupper((string) $assignment->status->value) === 'PENDING')->count(),
+            'in_progress' => $assignments->filter(fn ($assignment) => strtoupper((string) $assignment->status->value) === 'IN_PROGRESS')->count(),
+            'completed' => $assignments->filter(fn ($assignment) => strtoupper((string) $assignment->status->value) === 'COMPLETED')->count(),
+            'average_progress' => $progressValues->isEmpty() ? null : (int) round($progressValues->avg()),
+        ];
+
+        return view('documents.assignment_overview', compact('assignments', 'summary'));
+    }
+
     // หน้าที่: ตรวจสอบและเปลี่ยนรหัสผ่านเข้าสู่ระบบ
     public function changePassword(Request $request)
     {
@@ -2294,10 +2320,78 @@ class DocumentController extends Controller
         return back()->with('success', 'ส่งต่อเรื่องให้ '.$delegate->name.' เรียบร้อยแล้ว');
     }
 
+    // หน้าที่: ให้ผู้รับงานรายนั้นบันทึกสถานะและรายละเอียดความคืบหน้า
+    public function updateAssignmentProgress(Request $request, $id, V2DocumentReadService $v2Documents, V2DocumentWriteService $v2Writes)
+    {
+        abort_unless(config('edoc.v2.document_reads'), 404);
+
+        $data = $request->validate([
+            'assignment_id' => ['required', 'integer'],
+            'status' => ['required', 'in:in_progress,completed'],
+            'progress_percent' => ['nullable', 'integer', 'min:0', 'max:100', 'required_if:status,in_progress'],
+            'progress_note' => ['nullable', 'string', 'max:2000'],
+            'progress_attachment' => ['nullable', 'file', 'mimes:pdf,doc,docx,xls,xlsx,jpg,jpeg,png', 'max:10240'],
+        ], [
+            'progress_percent.required_if' => 'กรุณาระบุเปอร์เซ็นต์ความคืบหน้า',
+            'progress_percent.min' => 'เปอร์เซ็นต์ความคืบหน้าต้องอยู่ระหว่าง 0 ถึง 100',
+            'progress_percent.max' => 'เปอร์เซ็นต์ความคืบหน้าต้องอยู่ระหว่าง 0 ถึง 100',
+        ]);
+
+        $document = $v2Documents->find($id);
+        $v2Writes->updateAssignmentProgress(
+            $document,
+            Auth::user(),
+            (int) $data['assignment_id'],
+            $data['status'],
+            isset($data['progress_percent']) ? (int) $data['progress_percent'] : null,
+            filled($data['progress_note'] ?? null) ? trim($data['progress_note']) : null,
+            $request->file('progress_attachment'),
+        );
+
+        return back()->with('success', $data['status'] === 'completed'
+            ? 'บันทึกว่างานเสร็จสิ้นแล้ว'
+            : 'อัปเดตความคืบหน้าเรียบร้อยแล้ว');
+    }
+
+    // หน้าที่: ส่งไฟล์หลักฐานที่แนบมากับการอัปเดตความคืบหน้า โดยตรวจสิทธิ์เอกสารก่อนเสมอ
+    public function assignmentProgressAttachment(string|int $id, int $progressUpdate, V2DocumentReadService $v2Documents)
+    {
+        abort_unless(config('edoc.v2.document_reads'), 404);
+        $document = $v2Documents->find($id);
+        $this->authorize('accessConfidential', $document);
+
+        $update = \App\Models\V2\DocumentAssignmentProgressUpdate::where('id', $progressUpdate)
+            ->whereHas('assignment', fn ($assignment) => $assignment->where('document_id', $document->id))
+            ->firstOrFail();
+        abort_unless($update->attachment_path, 404);
+
+        return app(DocumentFileStorage::class)->response(
+            $update->attachment_path,
+            $update->attachment_original_name ?: basename($update->attachment_path),
+            ['Content-Disposition' => 'attachment']
+        );
+    }
+
     // หน้าที่: สร้างข้อความร่างเอกสารด้วยบริการ AI
     public function generateDraft(Request $request)
     {
-        $request->validate(['topic' => 'required|string']);
+        $validated = $request->validate([
+            'topic' => 'nullable|string|max:2000',
+            'document_context' => 'nullable|array',
+            'document_context.doc_from' => 'nullable|string|max:255',
+            'document_context.doc_date' => 'nullable|string|max:100',
+            'document_context.title' => 'nullable|string|max:255',
+            'document_context.doc_to' => 'nullable|string|max:255',
+        ]);
+
+        $topic = trim($validated['topic'] ?? '');
+        $documentContext = $validated['document_context'] ?? [];
+
+        if ($topic === '' && blank($documentContext['title'] ?? null)) {
+            return response()->json(['error' => 'กรุณาระบุเรื่องหรือรายละเอียดสำหรับให้ AI ร่างข้อความ'], 422);
+        }
+
+        $shouldGenerateTitle = blank($documentContext['title'] ?? null);
 
         $apiKey = config('services.typhoon.api_key');
 
@@ -2305,7 +2399,32 @@ class DocumentController extends Controller
             return response()->json(['error' => 'ระบบติดต่อปัญญาประดิษฐ์ยังไม่พร้อมใช้งาน'], 500);
         }
 
-        $systemPrompt = "คุณคือปลัดองค์การบริหารส่วนตำบล ผู้เชี่ยวชาญระเบียบงานสารบรรณ จงร่างบันทึกข้อความจากหัวข้อที่กำหนดให้ โดยเขียนในรูปแบบเอกสารราชการ ๓ ย่อหน้า (ภาคเหตุ, ภาคความประสงค์, ภาคสรุป) ใช้ภาษาทางการ สั้น กระชับ สละสลวย **คำสั่งสำคัญ:** 1. ให้ตอบมาเฉพาะเนื้อหาล้วนๆ ห้ามมีคำว่า 'เรื่อง', 'เรียน', 'จึงเรียนมาเพื่อโปรดทราบ' หรือคำอธิบายเพิ่มเติมใดๆ 2. ให้ขึ้นต้นแต่ละย่อหน้าด้วยการย่อหน้า (ไม่ต้องพิมพ์คำว่า ภาคเหตุ/ประสงค์/สรุป นำหน้า)";
+        $systemPrompt = "คุณคือปลัดองค์การบริหารส่วนตำบล ผู้เชี่ยวชาญระเบียบงานสารบรรณ จงร่างบันทึกข้อความจากหัวข้อที่กำหนดให้ โดยเขียนในรูปแบบเอกสารราชการ ๓ ย่อหน้า (ภาคเหตุ, ภาคความประสงค์, ภาคสรุป) ใช้ภาษาทางการ สั้น กระชับ สละสลวย
+
+ก่อนร่าง ให้ยึดรายละเอียดในหัวข้อเป็นเรื่องเดียวกันตลอดทั้งฉบับ และเรียบเรียงลำดับความให้เชื่อมโยงกันอย่างมีเหตุผล: ย่อหน้าแรกอธิบายที่มา/ข้อเท็จจริงและความจำเป็น, ย่อหน้าที่สองต่อยอดจากเหตุผลข้างต้นเป็นวัตถุประสงค์หรือข้อพิจารณา, ย่อหน้าที่สามสรุปข้อเสนอหรือการดำเนินการที่สอดคล้องกับสองย่อหน้าแรก ใช้คำเชื่อมที่เหมาะสม เช่น “ดังนั้น”, “เพื่อให้”, “ในการนี้” เมื่อช่วยให้ข้อความลื่นไหล ห้ามเปลี่ยนประเด็น ขัดแย้ง หรือเติมรายละเอียดสำคัญที่ไม่มีในหัวข้อ
+
+คำสั่งสำคัญ: 1. ให้ตอบมาเฉพาะเนื้อหาล้วนๆ ห้ามมีคำว่า 'เรื่อง', 'เรียน', 'จึงเรียนมาเพื่อโปรดทราบ' หรือคำอธิบายเพิ่มเติมใดๆ 2. ให้ขึ้นต้นแต่ละย่อหน้าด้วยการย่อหน้า (ไม่ต้องพิมพ์คำว่า ภาคเหตุ/ประสงค์/สรุป นำหน้า)";
+
+        if ($shouldGenerateTitle) {
+            $systemPrompt .= "\n\nเนื่องจากผู้ใช้ยังไม่ได้ระบุ ‘เรื่อง’ ให้คิดชื่อเรื่องราชการที่สั้น ชัดเจน และตรงกับรายละเอียด แล้วตอบเป็น JSON ที่ถูกต้องเพียงอย่างเดียวในรูปแบบ {\"title\":\"ชื่อเรื่องที่เสนอ\",\"content\":\"เนื้อหาบันทึก ๓ ย่อหน้า\"} ห้ามใช้ Markdown หรือข้อความอื่นนอก JSON โดยค่า content ต้องปฏิบัติตามคำสั่งสำคัญข้างต้นทั้งหมด";
+        }
+
+        $headerFields = [
+            'ส่วนราชการ' => $documentContext['doc_from'] ?? null,
+            'วันที่' => $documentContext['doc_date'] ?? null,
+            'เรื่อง' => $documentContext['title'] ?? null,
+            'เรียน' => $documentContext['doc_to'] ?? null,
+        ];
+        $headerContext = collect($headerFields)
+            ->filter(fn ($value) => filled($value))
+            ->map(fn ($value, $label) => $label.': '.$value)
+            ->implode("\n");
+
+        $userPrompt = "รายละเอียดเพิ่มเติมที่ผู้ใช้ระบุ:\n".($topic !== '' ? $topic : '- ไม่มี -');
+        if ($headerContext !== '') {
+            $userPrompt .= "\n\nข้อมูลหัวบันทึกข้อความ (ใช้วิเคราะห์บริบท ผู้ส่ง ผู้รับ และประเด็นของเรื่อง):\n".$headerContext;
+            $userPrompt .= "\n\nให้นำข้อมูลหัวบันทึกมาวิเคราะห์ร่วมกับรายละเอียดเพิ่มเติม เพื่อร่างเนื้อหาที่สอดคล้องกับเรื่องและผู้รับ โดยไม่ต้องพิมพ์หัวข้อส่วนราชการ วันที่ เรื่อง หรือเรียนซ้ำในเนื้อหา";
+        }
 
         try {
             $typhoon = app(TyphoonClient::class);
@@ -2314,7 +2433,7 @@ class DocumentController extends Controller
                     'model' => config('services.typhoon.model'),
                     'messages' => [
                         ['role' => 'system', 'content' => $systemPrompt],
-                        ['role' => 'user', 'content' => 'หัวข้อที่ต้องการให้ร่าง: '.$request->topic],
+                        ['role' => 'user', 'content' => $userPrompt],
                     ],
                     'temperature' => 0.4,
                     'max_tokens' => 1500,
@@ -2326,9 +2445,33 @@ class DocumentController extends Controller
 
             if ($response->successful()) {
                 $content = $response->json('choices.0.message.content');
+                $suggestedTitle = null;
+
+                if ($shouldGenerateTitle && is_string($content)) {
+                    // รองรับกรณีที่ผู้ให้บริการห่อ JSON ไว้ใน code fence แม้จะสั่งไม่ให้ทำ
+                    $jsonContent = preg_replace('/^```(?:json)?\s*|\s*```$/u', '', trim($content));
+                    $generated = json_decode($jsonContent, true);
+
+                    if (is_array($generated) && is_string($generated['title'] ?? null) && is_string($generated['content'] ?? null)) {
+                        $suggestedTitle = trim($generated['title']);
+                        $content = $generated['content'];
+                    }
+                }
+
+                if ($shouldGenerateTitle && blank($suggestedTitle)) {
+                    return response()->json(['error' => 'AI ส่งชื่อเรื่องไม่สมบูรณ์ กรุณาลองร่างใหม่อีกครั้ง'], 500);
+                }
+
+                if (! is_string($content) || trim($content) === '') {
+                    return response()->json(['error' => 'AI ส่งข้อความร่างไม่สมบูรณ์ กรุณาลองใหม่อีกครั้ง'], 500);
+                }
+
                 $formattedContent = "\t\t".str_replace("\n", "\n\t\t", trim($content));
 
-                return response()->json(['draft' => $formattedContent]);
+                return response()->json([
+                    'draft' => $formattedContent,
+                    'title' => $suggestedTitle,
+                ]);
             }
 
             return response()->json(['error' => 'ระบบ AI ขัดข้องชั่วคราว'], 500);
@@ -2381,8 +2524,7 @@ class DocumentController extends Controller
     private function notifySarabanForV2Numbering(\App\Models\V2\Document $document): void
     {
         $document->loadMissing('type');
-        $waitsForNumber = $document->doc_type === 'internal'
-            || ($document->doc_type === 'outgoing' && $document->source_type === 'system');
+        $waitsForNumber = $document->doc_type === 'internal' || $document->doc_type === 'outgoing';
         if (! $waitsForNumber || $document->status !== 'APPROVED') {
             return;
         }
@@ -2762,21 +2904,26 @@ class DocumentController extends Controller
             ],
             'outgoing' => $common + [
                 'document_source' => 'required|in:system,upload',
-                'doc_number' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'string', 'max:255'], 'doc_type_category' => 'required|string|max:255',
+                'doc_number' => ['nullable', 'string', 'max:255'], 'doc_type_category' => 'required|string|max:255',
                 'doc_to' => 'required|string|max:255', 'signer_name' => 'required|string|max:255',
                 'signer_user_id' => 'required|integer|exists:users,id|not_in:'.Auth::id(),
                 'content' => [Rule::requiredIf($request->input('document_source') === 'system'), 'nullable', 'string', 'max:50000'],
-                'file' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'file', 'mimes:pdf', 'max:20480'],
+                'file' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'file', 'mimes:pdf', 'max:10240'],
                 'sender_address' => 'nullable|string|max:1000', 'closing_text' => 'nullable|string|max:255',
                 'contact_line' => 'nullable|string|max:500', 'attachment' => 'nullable|string|max:1000',
-                'running_number' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'integer', 'min:1'],
+                'running_number' => ['nullable', 'integer', 'min:1'],
             ],
             default => $common + ($uploadOnly ? [
                 'doc_from' => 'required|string|max:255', 'doc_to' => 'required|string|max:255',
                 'file' => 'required|file|mimes:pdf|max:5120',
             ] : ['content' => 'required|string']),
         };
-        $data = $request->validate($rules);
+        $data = $request->validate($rules, $type === 'outgoing' ? [
+            'file.required' => 'กรุณาแนบไฟล์หนังสือส่งออก (PDF) เมื่อเลือกอัปโหลดไฟล์',
+            'file.uploaded' => 'อัปโหลดไฟล์ไม่สำเร็จ กรุณาตรวจสอบขนาดไฟล์และลองใหม่อีกครั้ง',
+            'file.mimes' => 'รองรับเฉพาะไฟล์ PDF เท่านั้น',
+            'file.max' => 'ขนาดไฟล์ต้องไม่เกิน 10MB',
+        ] : []);
         if ($type === 'incoming' && ! $request->hasFile('file') && ! $request->filled('external_url')) {
             throw ValidationException::withMessages(['file' => 'กรุณาแนบไฟล์หรือระบุลิงก์เอกสาร']);
         }
@@ -2931,13 +3078,13 @@ class DocumentController extends Controller
         } elseif ($type === 'outgoing') {
             $rules += [
                 'document_source' => 'required|in:system,upload',
-                'doc_number' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'string', 'max:255'], 'doc_type_category' => 'required|string|max:255',
+                'doc_number' => ['nullable', 'string', 'max:255'], 'doc_type_category' => 'required|string|max:255',
                 'doc_to' => 'required|string|max:255', 'signer_name' => 'required|string|max:255',
                 'signer_user_id' => 'required|integer|exists:users,id|not_in:'.Auth::id(),
                 'content' => [Rule::requiredIf($request->input('document_source') === 'system'), 'nullable', 'string', 'max:50000'],
                 'sender_address' => 'nullable|string|max:1000', 'closing_text' => 'nullable|string|max:255',
                 'contact_line' => 'nullable|string|max:500', 'attachment' => 'nullable|string|max:1000',
-                'running_number' => [Rule::requiredIf($request->input('document_source') === 'upload'), 'nullable', 'integer', 'min:1'],
+                'running_number' => ['nullable', 'integer', 'min:1'],
             ];
         } else {
             $rules += ['doc_from' => 'required|string|max:255', 'doc_to' => 'required|string|max:255', 'content' => 'nullable|string'];

@@ -87,7 +87,7 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/{id}/draft/submit', [LeaveRequestController::class, 'submitDraft'])->whereNumber('id')->name('draft.submit');
         Route::get('/{id}/attachments/{attachment}', [LeaveRequestController::class, 'downloadAttachment'])
             ->whereNumber(['id', 'attachment'])->name('attachments.download');
-        Route::put('/{id}/cancel', [LeaveRequestController::class, 'cancel'])->name('cancel');
+        Route::match(['put', 'post'], '/{id}/cancel', [LeaveRequestController::class, 'cancel'])->name('cancel');
         Route::post('/{id}/delegate-action', [LeaveRequestController::class, 'delegateAction'])->name('delegateAction');
         Route::post('/{id}/reassign-delegate', [LeaveRequestController::class, 'reassignDelegate'])->name('reassign_delegate');
     });
@@ -121,6 +121,9 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/reserve-number-slot', [DocumentNumberingController::class, 'reserveSlot'])
             ->middleware(['role:saraban', 'edoc.legacy-document-write'])
             ->name('reserve_number_slot');
+        Route::post('/cancel-number-slot', [DocumentNumberingController::class, 'cancelSlot'])
+            ->middleware(['role:saraban'])
+            ->name('cancel_number_slot');
 
         Route::post('/auto-extract', [DocumentController::class, 'autoExtract'])->name('auto_extract');
         Route::get('/auto-extract/{taskId}', [DocumentController::class, 'autoExtractStatus'])
@@ -128,7 +131,13 @@ Route::middleware(['auth'])->group(function () {
 
         // ผู้ใช้ทุกบทบาทอาจได้รับมอบหมายให้ปฏิบัติงานแทนระหว่างการลา
         Route::get('/assigned', [DocumentController::class, 'assignedList'])->name('assigned');
-
+        Route::get('/assignment-overview', [DocumentController::class, 'assignmentOverview'])
+            ->middleware('role:executive|palad|head')
+            ->name('assignment_overview');
+        Route::get('/create-outgoing', [DocumentController::class, 'createOutgoing'])
+            ->middleware('edoc.legacy-document-write')->name('create_outgoing');
+        Route::post('/outgoing', [DocumentController::class, 'storeOutgoing'])
+            ->middleware('edoc.legacy-document-write')->name('store_outgoing');
         // -------------------------------------------------------------------------
         // โซนสร้าง / แก้ไข / อัปโหลดเอกสาร
         // -------------------------------------------------------------------------
@@ -140,10 +149,8 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/create', [DocumentController::class, 'create'])->middleware('edoc.legacy-document-write')->name('create');
             Route::get('/create-incoming', [DocumentController::class, 'createIncoming'])->middleware('edoc.legacy-document-write')->name('create_incoming');
             Route::get('/create-upload', [DocumentController::class, 'createUpload'])->middleware('edoc.legacy-document-write')->name('create_upload');
-            Route::get('/create-outgoing', [DocumentController::class, 'createOutgoing'])->middleware('edoc.legacy-document-write')->name('create_outgoing');
             Route::post('/', [DocumentController::class, 'store'])->middleware('edoc.legacy-document-write')->name('store');
             Route::post('/incoming', [DocumentController::class, 'storeIncoming'])->middleware('edoc.legacy-document-write')->name('store_incoming');
-            Route::post('/outgoing', [DocumentController::class, 'storeOutgoing'])->middleware('edoc.legacy-document-write')->name('store_outgoing');
             Route::post('/store-upload', [DocumentController::class, 'storeUpload'])->middleware('edoc.legacy-document-write')->name('store_upload');
 
             // --- Dynamic {id} routes ---
@@ -177,6 +184,8 @@ Route::middleware(['auth'])->group(function () {
         // 🌟 ระบบรับทราบคำสั่ง (สำหรับ ผอ.กอง)
         Route::post('/{id}/acknowledge', [DocumentController::class, 'acknowledge'])->middleware('edoc.legacy-document-write')->name('acknowledge');
         Route::post('/{id}/assignment-action', [DocumentController::class, 'assignmentAction'])->middleware('edoc.legacy-document-write')->name('assignment_action');
+        Route::post('/{id}/assignment-progress', [DocumentController::class, 'updateAssignmentProgress'])->middleware('edoc.legacy-document-write')->name('assignment_progress');
+        Route::get('/{id}/assignment-progress/{progressUpdate}/attachment', [DocumentController::class, 'assignmentProgressAttachment'])->name('assignment_progress_attachment');
 
         // -------------------------------------------------------------------------
         // สมุดทะเบียนเลข (ธุรการ)

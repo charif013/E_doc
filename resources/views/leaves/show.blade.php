@@ -71,7 +71,18 @@
                         <p class="signature-space">(ลงชื่อ)........................................................</p><p>({{ $leave->user->name ?? '................................' }})</p>
                     @endif
                 </div>
-                @foreach([['ความเห็นหัวหน้าส่วนราชการ', $leave->head_signature, $leave->head_comment, $leave->head, $leave->head_at, 'หัวหน้าส่วนราชการ'], ['ความเห็นผู้บังคับบัญชา (ปลัด อบต.)', $leave->palad_signature, $leave->palad_comment, $leave->palad, $leave->palad_at, 'ปลัดองค์การบริหารส่วนตำบลพร่อน']] as [$title, $signature, $comment, $actor, $actedAt, $defaultPosition])
+                @php
+                    $isApplicantHead = $leave->user?->hasRole('head');
+                    $isApplicantPalad = $leave->user?->hasRole('palad');
+                    $approvalBlocks = [];
+                    if (! $isApplicantHead && ! $isApplicantPalad) {
+                        $approvalBlocks[] = ['ความเห็นหัวหน้าส่วนราชการ', $leave->head_signature, $leave->head_comment, $leave->head, $leave->head_at, 'หัวหน้าส่วนราชการ'];
+                    }
+                    if (! $isApplicantPalad) {
+                        $approvalBlocks[] = ['ความเห็นผู้บังคับบัญชา (ปลัด อบต.)', $leave->palad_signature, $leave->palad_comment, $leave->palad, $leave->palad_at, 'ปลัดองค์การบริหารส่วนตำบลพร่อน'];
+                    }
+                @endphp
+                @foreach($approvalBlocks as [$title, $signature, $comment, $actor, $actedAt, $defaultPosition])
                     <div class="approval-block"><h2>{{ $title }}</h2>
                         @if($signature)@if($comment)<p class="approval-comment">“{{ $comment }}”</p>@endif<img src="{{ $signature }}" alt="ลายเซ็น {{ $title }}"><p>({{ $actor?->name ?? '-' }})</p><p>ตำแหน่ง {{ $actor?->position ?: $defaultPosition }}</p><p>วันที่ {{ $thaiDate($actedAt) }}</p>
                         @else<p class="dotted"></p><p>(ลงชื่อ)........................................................</p><p>ตำแหน่ง {{ $defaultPosition }}</p><p>วันที่........../................../..........</p>@endif
@@ -106,6 +117,26 @@
     @elseif($canApprove)
         <section class="review-action-panel"><h5><i class="fas fa-pen-nib me-2"></i>{{ $actionTitle }}</h5><form action="{{ route('leaves.reviewAction', $leave->id) }}" method="POST">@csrf<div class="row g-3"><div class="col-md-8"><label class="form-label">ความเห็น / เหตุผลกรณีไม่อนุญาต</label><textarea name="reject_reason" id="reject_reason" class="form-control" rows="3"></textarea></div><div class="col-md-4"><label class="form-label">รหัส PIN ลายเซ็น</label><input type="password" name="pin" class="form-control text-center" maxlength="6" required autocomplete="off"></div></div><div class="d-flex justify-content-end gap-2 mt-3"><button type="submit" name="is_approved" value="0" class="btn btn-outline-danger" onclick="return requireReason()">{{ $rejectText }}</button><button type="submit" name="is_approved" value="1" class="btn btn-teal fw-bold">{{ $approveText }}</button></div></form></section>
     @endif
+
+    @if($isOwner && $user->can('cancel', $leave))
+        <section class="review-action-panel mt-3" style="border-left: 4px solid #dc3545;">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="text-danger mb-1"><i class="fas fa-times-circle me-2"></i>ยกเลิกใบลา</h5>
+                    <p class="mb-0 text-muted" style="font-size: 0.95rem;">
+                        {{ $leave->status === 'APPROVED' ? 'ใบลาฉบับนี้ได้รับอนุมัติแล้ว หากคุณต้องการยกเลิก สามารถกดยกเลิกการลาเพื่อคืนสิทธิ์วันลาได้' : 'คุณสามารถยกเลิกคำขอลาฉบับนี้ได้ในระหว่างรอการพิจารณา' }}
+                    </p>
+                </div>
+                <form id="owner-cancel-form" action="{{ route('leaves.cancel', $leave->id) }}" method="POST">
+                    @csrf
+                    @method('PUT')
+                    <button type="button" class="btn btn-outline-danger fw-bold rounded-pill px-4" onclick="confirmCancelLeave()">
+                        <i class="fas fa-times-circle me-1"></i>ยกเลิกใบลาของฉัน
+                    </button>
+                </form>
+            </div>
+        </section>
+    @endif
 </div>
 
 <style>
@@ -117,5 +148,30 @@
 </style>
 <script>
 // หน้าที่: บังคับให้ระบุเหตุผลเมื่อไม่อนุญาตคำขอลา
-function requireReason(){const input=document.getElementById('reject_reason');if(!input||input.value.trim())return true;if(window.Swal){Swal.fire({icon:'warning',title:'กรุณาระบุเหตุผล',text:'ต้องระบุเหตุผลเมื่อเลือกไม่อนุญาต',confirmButtonColor:'#164f51'});}else{alert('กรุณาระบุเหตุผล');}input.focus();return false;}</script>
+function requireReason(){const input=document.getElementById('reject_reason');if(!input||input.value.trim())return true;if(window.Swal){Swal.fire({icon:'warning',title:'กรุณาระบุเหตุผล',text:'ต้องระบุเหตุผลเมื่อเลือกไม่อนุญาต',confirmButtonColor:'#164f51'});}else{alert('กรุณาระบุเหตุผล');}input.focus();return false;}
+function confirmCancelLeave(){
+    const isApproved = {{ $leave->status === 'APPROVED' ? 'true' : 'false' }};
+    const message = isApproved
+        ? 'ใบลาฉบับนี้ได้รับการอนุมัติแล้ว คุณต้องการยกเลิกการลาเพื่อคืนสิทธิ์วันลาใช่หรือไม่?'
+        : 'คุณต้องการยกเลิกคำขอลาฉบับนี้ใช่หรือไม่?';
+    if(window.Swal){
+        Swal.fire({
+            title: 'ยืนยันการยกเลิกใบลา?',
+            text: message,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'ยืนยันยกเลิกใบลา',
+            cancelButtonText: 'ปิด'
+        }).then((result) => {
+            if(result.isConfirmed){
+                document.getElementById('owner-cancel-form').submit();
+            }
+        });
+    } else if(confirm(message)){
+        document.getElementById('owner-cancel-form').submit();
+    }
+}
+</script>
 @endsection

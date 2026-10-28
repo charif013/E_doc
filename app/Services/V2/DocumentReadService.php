@@ -4,6 +4,7 @@ namespace App\Services\V2;
 
 use App\Models\User as LegacyUser;
 use App\Models\V2\Document;
+use App\Models\V2\DocumentAssignment;
 use App\Models\V2\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -16,7 +17,7 @@ class DocumentReadService
             'creator.organizationUnit.parent',
             'creator.positionRecord',
             'type', 'category', 'priority', 'confidentiality',
-            'files', 'assignments.assignee', 'assignments.unit',
+            'files', 'assignments.assignee', 'assignments.unit', 'assignments.progressUpdates.updater',
             'numberAllocation', 'workflow',
             'routes.user.organizationUnit.parent',
             'routes.user.positionRecord',
@@ -75,14 +76,37 @@ class DocumentReadService
         return Document::whereHas('assignments', function (Builder $assignments) use ($user, $names) {
             $assignments->whereIn('status', ['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS', 'COMPLETED'])
                 ->where(function (Builder $visibleAssignments) use ($user, $names) {
-                    $visibleAssignments->where('assigned_user_id', $user->id);
+                    $visibleAssignments->where('assigned_user_id', $user->id)
+                        // ผู้ที่สั่งการ (นายก/ปลัด/หัวหน้าส่วน) ติดตามงานที่ตนมอบหมายได้
+                        ->orWhere('assigned_by', $user->id)
+                        ->orWhere('delegated_by', $user->id);
                     if ($user->hasRole('head')) {
-                        $visibleAssignments->orWhere('assigned_by', $user->id)
-                            ->orWhere('delegated_by', $user->id)
-                            ->orWhereHas('unit', fn (Builder $units) => $units->whereIn('name', $names));
+                        $visibleAssignments->orWhereHas('unit', fn (Builder $units) => $units->whereIn('name', $names));
                     }
                 });
-        })->with(['assignments.assignee', 'assignments.unit', 'type', 'numberAllocation'])->latest()->get();
+        })->with(['assignments.assignee', 'assignments.unit', 'assignments.progressUpdates.updater', 'type', 'numberAllocation'])->latest()->get();
+    }
+
+    /** งานที่ผู้บริหาร/หัวหน้าส่วนมีสิทธิ์ติดตาม เพื่อนำไปแสดงภาพรวมความคืบหน้า */
+    public function assignmentOverview(LegacyUser $user): Collection
+    {
+        $unitNames = array_values(array_filter([$user->department, $user->division, $user->work_unit]));
+
+        return DocumentAssignment::query()
+            ->whereIn('status', ['PENDING', 'ACKNOWLEDGED', 'IN_PROGRESS', 'COMPLETED'])
+            ->where(function (Builder $assignments) use ($user, $unitNames) {
+                $assignments->where('assigned_by', $user->id)
+                    ->orWhere('delegated_by', $user->id);
+                if ($user->hasRole('head')) {
+                    $assignments->orWhereHas('unit', fn (Builder $units) => $units->whereIn('name', $unitNames));
+                }
+            })
+            ->with([
+                'document.type', 'document.numberAllocation',
+                'assignee', 'unit', 'assigner', 'delegator', 'progressUpdates.updater',
+            ])
+            ->latest('updated_at')
+            ->get();
     }
 
     public function subordinates(LegacyUser $user): Collection

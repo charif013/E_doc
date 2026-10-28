@@ -108,9 +108,20 @@
                     <div class="review-queue-item__state">
                         <span class="review-queue-status review-queue-status--{{ $leaveStatus[0] }}">{{ $leaveStatus[1] }}</span>
                     </div>
-                    <a href="{{ route('leaves.show', $leave->id) }}" class="review-queue-item__action {{ !$leaveCanAct ? 'review-queue-item__action--secondary' : '' }}">
-                        <i class="fas {{ $leaveCanAct ? 'fa-pen-nib' : ($leaveIsDraft ? 'fa-file-lines' : 'fa-chart-line') }} me-1" aria-hidden="true"></i>{{ $leaveCanAct ? ($currentUser->hasRole('hr') ? 'ตรวจสอบสิทธิ์' : 'พิจารณา') : ($leaveIsDraft ? 'ตรวจฉบับร่าง' : (($isOverview || $leaveIsOwned) ? 'ดูความคืบหน้า' : 'ดูรายละเอียด')) }}
-                    </a>
+                    <div class="d-flex align-items-center gap-2">
+                        <a href="{{ route('leaves.show', $leave->id) }}" class="review-queue-item__action {{ !$leaveCanAct ? 'review-queue-item__action--secondary' : '' }}">
+                            <i class="fas {{ $leaveCanAct ? 'fa-pen-nib' : ($leaveIsDraft ? 'fa-file-lines' : 'fa-chart-line') }} me-1" aria-hidden="true"></i>{{ $leaveCanAct ? ($currentUser->hasRole('hr') ? 'ตรวจสอบสิทธิ์' : 'พิจารณา') : ($leaveIsDraft ? 'ตรวจฉบับร่าง' : (($isOverview || $leaveIsOwned) ? 'ดูความคืบหน้า' : 'ดูรายละเอียด')) }}
+                        </a>
+                        @if($leaveIsOwned && $currentUser->can('cancel', $leave))
+                            <form id="cancel-form-{{ $leave->id }}" action="{{ route('leaves.cancel', $leave->id) }}" method="POST" class="d-inline">
+                                @csrf
+                                @method('PUT')
+                                <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3 fw-bold" onclick="confirmCancelQueue({{ $leave->id }})" title="ยกเลิกใบลา">
+                                    <i class="fas fa-times me-1"></i>ยกเลิก
+                                </button>
+                            </form>
+                        @endif
+                    </div>
                 </article>
             @empty
                 <div class="review-queue-empty" role="status">
@@ -122,6 +133,30 @@
         </div>
     </div>
 </div>
+
+<script>
+function confirmCancelQueue(id) {
+    const text = 'คุณต้องการยกเลิกคำขอลาฉบับนี้ใช่หรือไม่?';
+    if (window.Swal) {
+        Swal.fire({
+            title: 'ยืนยันการยกเลิกใบลา?',
+            text: text,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'ยืนยันยกเลิกใบลา',
+            cancelButtonText: 'ปิด'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                document.getElementById('cancel-form-' + id).submit();
+            }
+        });
+    } else if (confirm(text)) {
+        document.getElementById('cancel-form-' + id).submit();
+    }
+}
+</script>
 
 @include('partials.review_queue_styles')
 @endsection

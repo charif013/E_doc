@@ -8,6 +8,8 @@ use App\Models\V2\DocumentAccessRequest;
 use App\Models\V2\DocumentCategory;
 use App\Models\V2\DocumentConfidentiality;
 use App\Models\V2\DocumentFile;
+use App\Models\V2\DocumentAssignment;
+use App\Models\V2\DocumentAssignmentProgressUpdate;
 use App\Models\V2\DocumentPriority;
 use App\Models\V2\DocumentType;
 use App\Models\V2\OrganizationUnit;
@@ -140,14 +142,6 @@ class DocumentWriteService
     public function review(Document $document, User $actor, bool $approved, ?string $comment, ?string $assignmentChoice, ?string $evidenceAction = null): Document
     {
         $this->guard->ensureEnabled();
-        if ($approved && $document->doc_type === 'outgoing' && $document->source_type === 'upload') {
-            $allocation = $document->numberAllocation()->first();
-            if (! $allocation || trim((string) $allocation->formatted_number) !== trim((string) $document->document_number)) {
-                throw ValidationException::withMessages([
-                    'document_number' => 'ไม่สามารถอนุมัติได้ เนื่องจากเลขหนังสือไม่ตรงกับสมุดคุมเลข',
-                ]);
-            }
-        }
         $noAssignment = $assignmentChoice === '__NO_ASSIGNMENT__';
         $unit = null;
         if ($document->doc_type === 'incoming' && $assignmentChoice !== null && ! $noAssignment) {
@@ -170,8 +164,8 @@ class DocumentWriteService
                 // หนังสือที่จัดทำในระบบต้องรอสารบรรณลงเลขหลังผู้ลงนามอนุมัติแล้ว
                 $document->update(['number_status' => 'UNASSIGNED', 'finalized_at' => null]);
             } else {
-                // PDF ที่จัดทำแล้วมีเลขอยู่ในต้นฉบับ จบงานได้หลังผู้ลงนามยืนยันตัวตน
-                $document->update(['status' => 'COMPLETED', 'number_status' => 'CONFIRMED', 'finalized_at' => now()]);
+                // หนังสือที่อัปโหลดก็รอสารบรรณลงเลขหลังผู้ลงนามดำเนินการครบเช่นกัน
+                $document->update(['number_status' => 'UNASSIGNED', 'finalized_at' => null]);
             }
         } elseif ($reviewed->doc_type === 'incoming' && $assignmentChoice !== null) {
             $proposal = $document->assignments()->where('status', 'PROPOSED')->latest('id')->first();
@@ -348,6 +342,7 @@ class DocumentWriteService
                 abort(403, 'เอกสารยังไม่ผ่านการอนุมัติขั้นสุดท้าย');
             }
             if ($action === 'accept') {
+                abort_unless($assignmentStatus === 'PENDING', 403, 'งานนี้ถูกรับดำเนินการแล้ว');
                 $assignment->update([
                     'assigned_user_id' => $actor->id, 'status' => 'ACKNOWLEDGED',
                     'acknowledged_at' => now(),
@@ -388,6 +383,63 @@ class DocumentWriteService
 
             return $document->fresh();
         }, 3);
+    }
+
+    /** บันทึกความคืบหน้าของงานโดยผู้รับมอบหมายของรายการนั้นเท่านั้น */
+    public function updateAssignmentProgress(
+        Document $document,
+        LegacyUser $actor,
+        int $assignmentId,
+        string $status,
+        ?int $progressPercent,
+        ?string $note,
+        ?UploadedFile $attachment = null,
+    ): DocumentAssignment {
+        $this->guard->ensureEnabled();
+
+        $storedAttachmentPath = null;
+        try {
+            return DB::connection('mysql_v2')->transaction(function () use ($document, $actor, $assignmentId, $status, $progressPercent, $note, $attachment, &$storedAttachmentPath) {
+            $assignment = $document->assignments()
+                ->whereKey($assignmentId)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $currentStatus = $assignment->status instanceof \BackedEnum ? $assignment->status->value : (string) $assignment->status;
+
+            abort_unless((int) $assignment->assigned_user_id === (int) $actor->id, 403, 'เฉพาะผู้รับมอบหมายเท่านั้นที่อัปเดตความคืบหน้าได้');
+            abort_unless(in_array((string) $document->status, ['APPROVED', 'COMPLETED', 'ARCHIVED'], true)
+                && in_array($currentStatus, ['ACKNOWLEDGED', 'IN_PROGRESS'], true), 403, 'กรุณารับดำเนินการก่อนอัปเดตความคืบหน้า');
+
+            $status = strtoupper($status);
+            $progressPercent = $status === 'COMPLETED' ? 100 : $progressPercent;
+            $assignment->update([
+                'status' => $status,
+                'completed_at' => $status === 'COMPLETED' ? now() : null,
+            ]);
+            if ($attachment) {
+                $storedAttachmentPath = $this->files->store($attachment, 'assignment_progress');
+            }
+            DocumentAssignmentProgressUpdate::create([
+                'document_assignment_id' => $assignment->id,
+                'updated_by' => $actor->id,
+                'status' => $status,
+                'progress_percent' => $progressPercent,
+                'note' => $note,
+                'attachment_path' => $storedAttachmentPath,
+                'attachment_original_name' => $attachment?->getClientOriginalName(),
+                'attachment_mime_type' => $attachment?->getMimeType(),
+                'attachment_size' => $attachment?->getSize(),
+                'attachment_sha256' => $attachment ? hash_file('sha256', $attachment->getRealPath()) : null,
+            ]);
+
+            return $assignment->fresh(['assignee', 'unit', 'progressUpdates.updater']);
+            }, 3);
+        } catch (\Throwable $error) {
+            if ($storedAttachmentPath) {
+                $this->files->delete($storedAttachmentPath);
+            }
+            throw $error;
+        }
     }
 
     public function requestAccess(Document $document, int $actorId, ?string $reason = null): DocumentAccessRequest

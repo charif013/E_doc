@@ -138,6 +138,28 @@
                                             <i class="fas fa-lock"></i> จองเลขนี้
                                         </button>
                                     </form>
+                                @elseif(in_array($status, ['จองเลขมือ', 'จองรออนุมัติ']) && auth()->user()->hasRole('saraban'))
+                                    <div class="d-flex gap-1 justify-content-center">
+                                        @if($doc)
+                                            <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}"
+                                               class="btn btn-outline-secondary btn-sm rounded-pill fw-bold shadow-sm"
+                                               title="ดูเอกสาร">
+                                                <i class="fas fa-eye"></i>
+                                            </a>
+                                        @endif
+                                        <form action="{{ route('documents.cancel_number_slot') }}" method="POST"
+                                              id="cancel-slot-form-{{ $num }}" class="m-0">
+                                            @csrf
+                                            <input type="hidden" name="type" value="{{ $type }}">
+                                            <input type="hidden" name="running_number" value="{{ $num }}">
+                                            <button type="button"
+                                                    class="btn btn-outline-danger btn-sm fw-bold rounded-pill shadow-sm"
+                                                    onclick="confirmCancelSlot({{ $num }}, '{{ $displayReserveNum }}')"
+                                                    title="ยกเลิกการจองเลขนี้">
+                                                <i class="fas fa-times"></i> ยกเลิกจอง
+                                            </button>
+                                        </form>
+                                    </div>
                                 @else
                                     <button class="btn btn-light btn-sm text-muted rounded-pill shadow-none" disabled>ถูกใช้งานแล้ว</button>
                                 @endif
@@ -151,3 +173,23 @@
     </div>
 </div>
 @endsection
+
+<script>
+function confirmCancelSlot(num, displayNum) {
+    const doCancel = () => document.getElementById('cancel-slot-form-' + num).submit();
+    if (window.Swal) {
+        Swal.fire({
+            title: 'ยืนยันยกเลิกการจองเลข?',
+            html: `ต้องการยกเลิกการจองเลขที่ <strong>${displayNum}</strong> ใช่หรือไม่?<br><small class="text-muted">เลขนี้จะกลับมาเป็น "ว่าง" ทันที</small>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="fas fa-times me-1"></i>ยืนยันยกเลิก',
+            cancelButtonText: 'ปิด',
+        }).then(result => { if (result.isConfirmed) doCancel(); });
+    } else if (confirm(`ยืนยันยกเลิกการจองเลขที่ ${displayNum} ?`)) {
+        doCancel();
+    }
+}
+</script>

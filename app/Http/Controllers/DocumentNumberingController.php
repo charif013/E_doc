@@ -85,6 +85,8 @@ class DocumentNumberingController extends Controller
     {
         $type = $request->input('type', 'outgoing');
         abort_unless(in_array($type, ['incoming', 'outgoing', 'internal'], true), 422);
+        // ผู้ใช้ทั่วไปดูและจองได้เฉพาะเลขหนังสือส่งออกจากหน้าสร้างเอกสาร
+        abort_unless($type === 'outgoing' || $request->user()->hasRole('saraban'), 403);
 
         if (config('edoc.v2.document_reads')) {
             $documentId = trim((string) $request->input('document'));
@@ -137,9 +139,19 @@ class DocumentNumberingController extends Controller
             'running_number' => ['required', 'integer', 'min:1'],
             'doc_number' => ['required', 'string', 'max:255'],
         ]);
+        // การจองจากหน้าสร้างเปิดเฉพาะหนังสือส่งออก ส่วนเลขประเภทอื่นยังเป็นงานสารบรรณ
+        abort_unless($data['type'] === 'outgoing' || $request->user()->hasRole('saraban'), 403);
 
         if (config('edoc.v2.document_reads')) {
             $this->v2Writes->reserveSlot($data['type'], $request->user()->id, (int) $data['running_number'], $data['doc_number']);
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'จองเลขเอกสารเรียบร้อยแล้ว รอผู้ลงนามและธุรการยืนยันเลขอีกครั้ง',
+                    'next_number' => (int) $data['running_number'],
+                    'formatted' => $data['doc_number'],
+                ], 201);
+            }
 
             return back()->with('success', 'จองเลขเอกสารใน V2 เรียบร้อยแล้ว');
         }
@@ -163,7 +175,98 @@ class DocumentNumberingController extends Controller
             );
         }, 3);
 
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'จองเลขเอกสารเรียบร้อยแล้ว รอผู้ลงนามและธุรการยืนยันเลขอีกครั้ง',
+                'next_number' => (int) $data['running_number'],
+                'formatted' => $data['doc_number'],
+            ], 201);
+        }
+
         return back()->with('success', 'จองเลขเอกสารล่วงหน้าเรียบร้อยแล้ว');
+    }
+
+    /**
+     * ยกเลิกเลขที่จองไว้มือ (สารบรรณเท่านั้น)
+     * รองรับทั้ง Legacy Documents และ V2 number_allocations
+     */
+    public function cancelSlot(Request $request)
+    {
+        abort_unless($request->user()->hasRole('saraban'), 403);
+
+        $data = $request->validate([
+            'type'           => ['required', 'in:incoming,outgoing,internal'],
+            'running_number' => ['required', 'integer', 'min:1'],
+        ]);
+
+        if (config('edoc.v2.document_reads')) {
+            // V2: ใช้ connection ของ V2 ระบบ (mysql_v2)
+            $v2Connection = 'mysql_v2';
+            $actor = V2User::findOrFail($request->user()->id);
+            $year  = $this->v2Numbering->fiscalYear(now());
+            $scope = $data['type'] === 'internal' ? ($actor->department ?: 'organization') : 'organization';
+
+            $allocation = DB::connection($v2Connection)
+                ->table('number_allocations')
+                ->join('number_sequences', 'number_sequences.id', '=', 'number_allocations.sequence_id')
+                ->where('number_sequences.number_type', $data['type'])
+                ->where('number_sequences.scope', $scope)
+                ->where('number_sequences.fiscal_year', $year)
+                ->where('number_allocations.running_number', $data['running_number'])
+                ->select('number_allocations.*')
+                ->first();
+
+            if (! $allocation) {
+                return back()->with('error', 'ไม่พบเลขที่จองนี้ในสมุดเลข');
+            }
+
+            // ตรวจว่าต้องเป็น placeholder เท่านั้น (ชื่อ [จองเลขเอกสารล่วงหน้า] + ยังไม่มีเอกสารจริงผูกอยู่)
+            $isPlaceholder = false;
+            if ($allocation->document_id) {
+                $isPlaceholder = DB::connection($v2Connection)
+                    ->table('documents')
+                    ->where('id', $allocation->document_id)
+                    ->where('title', '[จองเลขเอกสารล่วงหน้า]')
+                    ->whereIn('status', ['REGISTERED', 'RESERVED'])
+                    ->exists();
+            }
+
+            if (! $isPlaceholder) {
+                return back()->with('error', 'ไม่สามารถยกเลิกได้ เลขนี้ถูกออกให้เอกสารจริงแล้ว หรือไม่ใช่เลขที่จองล่วงหน้า');
+            }
+
+            DB::connection($v2Connection)->transaction(function () use ($v2Connection, $allocation) {
+                DB::connection($v2Connection)
+                    ->table('number_allocations')
+                    ->where('id', $allocation->id)
+                    ->delete();
+
+                DB::connection($v2Connection)
+                    ->table('documents')
+                    ->where('id', $allocation->document_id)
+                    ->where('title', '[จองเลขเอกสารล่วงหน้า]')
+                    ->delete();
+            }, 3);
+
+            return back()->with('success', "ยกเลิกการจองเลขที่ {$data['running_number']} เรียบร้อยแล้ว เลขนี้กลับมาว่างแล้ว");
+        }
+
+        // Legacy path
+        $document = Document::where('doc_type', $data['type'])
+            ->where('running_number', $data['running_number'])
+            ->whereIn('status', ['RESERVED'])
+            ->first();
+
+        if (! $document) {
+            return back()->with('error', 'ไม่พบเลขที่จองนี้ หรือเลขดังกล่าวถูกออกไปแล้ว');
+        }
+
+        DB::transaction(function () use ($document) {
+            \App\Models\DocumentNumberAllocation::where('document_id', $document->id)->delete();
+            $document->delete();
+        }, 3);
+
+        return back()->with('success', "ยกเลิกการจองเลขที่ {$data['running_number']} เรียบร้อยแล้ว");
     }
 
     public function registry(Request $request)
@@ -361,7 +464,17 @@ class DocumentNumberingController extends Controller
         $ledger = [];
         for ($number = 1; $number <= max(50, $maxNumber + 20); $number++) {
             $document = $usedNumbers->get($number);
-            $ledger[$number] = ['status' => $document ? ($document->status === 'CANCELED' ? 'ยกเลิก' : 'ออกเลขแล้ว') : 'ว่าง', 'doc' => $document];
+            if (! $document) {
+                $status = 'ว่าง';
+            } elseif ($document->status === 'CANCELED') {
+                $status = 'ยกเลิก';
+            } elseif ($document->title === '[จองเลขเอกสารล่วงหน้า]' && in_array($document->status, ['REGISTERED', 'RESERVED'], true)) {
+                // เอกสาร placeholder ที่จองเลขล่วงหน้าแต่ยังไม่ผูกกับเอกสารจริง
+                $status = 'จองเลขมือ';
+            } else {
+                $status = 'ออกเลขแล้ว';
+            }
+            $ledger[$number] = ['status' => $status, 'doc' => $document];
         }
         $departments = V2User::with('organizationUnit.parent')->get()->pluck('department')->filter()->unique()->values();
         $dept = $department;

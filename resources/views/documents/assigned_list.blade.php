@@ -109,8 +109,20 @@
                         $v2UnitAssignment = $v2ActiveAssignments->first(fn ($assignment) => !$assignment->assigned_user_id
                             && $assignment->unit
                             && $assignment->unit->name === $currentUser->department);
+                        $isAssignmentIssuer = $isV2Assignment && $v2ActiveAssignments->contains(fn ($assignment) =>
+                            (int) $assignment->assigned_by === (int) $currentUser->id
+                            || (int) $assignment->delegated_by === (int) $currentUser->id
+                        );
+                        $trackedAssignments = $isV2Assignment
+                            ? ($isAssignmentIssuer
+                                ? $v2ActiveAssignments->filter(fn ($assignment) => (int) $assignment->assigned_by === (int) $currentUser->id || (int) $assignment->delegated_by === (int) $currentUser->id)
+                                : $v2ActiveAssignments->where('assigned_user_id', $currentUser->id))
+                            : collect();
+                        $displayAssignment = $v2UserAssignment ?: ($isAssignmentIssuer
+                            ? $trackedAssignments->sortByDesc('id')->first()
+                            : $v2UnitAssignment);
                         $assignmentStatus = $isV2Assignment
-                            ? strtolower((string) ($v2UserAssignment?->status->value ?? $v2UnitAssignment?->status->value ?? 'pending'))
+                            ? strtolower((string) ($displayAssignment?->status->value ?? 'pending'))
                             : strtolower((string) $doc->assignment_status);
                         $canAct = (!config('edoc.v2.document_reads') || config('edoc.v2.write_enabled'))
                             && ($isV2Assignment
@@ -145,11 +157,46 @@
                                 <span><i class="fas fa-user"></i><span><small>ผู้รับปัจจุบัน</small>{{ $recipientNames->isNotEmpty() ? $recipientNames->join(', ') : 'หัวหน้าส่วนราชการ' }}</span></span>
                                 @if($doc->delegator)<span><i class="fas fa-share"></i><span><small>ผู้ส่งต่อ</small>{{ $doc->delegator->name }}</span></span>@endif
                             </div>
+                            @if($trackedAssignments->isNotEmpty())
+                                <div class="assignment-progress-list mt-3">
+                                    <small class="assignment-progress-list__label"><i class="fas fa-chart-line"></i>{{ $isAssignmentIssuer ? 'ความคืบหน้างานที่มอบหมาย' : 'ความคืบหน้าของงานของคุณ' }}</small>
+                                    @foreach($trackedAssignments as $trackedAssignment)
+                                        @php
+                                            $trackedStatus = strtolower((string) $trackedAssignment->status->value);
+                                            $latestProgress = $trackedAssignment->progressUpdates->first();
+                                            $progressValue = $latestProgress?->progress_percent;
+                                            $progressLabel = match ($trackedStatus) {
+                                                'completed' => 'เสร็จสิ้น',
+                                                'in_progress' => 'กำลังดำเนินการ',
+                                                'acknowledged' => 'รับงานแล้ว',
+                                                default => 'รอรับงาน',
+                                            };
+                                        @endphp
+                                        <div class="assignment-progress-item">
+                                            <div class="assignment-progress-item__head">
+                                                <strong>{{ $trackedAssignment->assignee?->name ?? $trackedAssignment->unit?->name ?? 'รอระบุผู้รับ' }}</strong>
+                                                <span class="soft-badge soft-badge--{{ $trackedStatus === 'completed' ? 'success' : ($trackedStatus === 'in_progress' ? 'blue' : 'warning') }}">{{ $progressLabel }}{{ $progressValue !== null ? ' · '.$progressValue.'%' : '' }}</span>
+                                            </div>
+                                            @if($latestProgress)
+                                                <div class="assignment-progress-item__note">
+                                                    {{ $latestProgress->note ?: 'ไม่มีรายละเอียดเพิ่มเติม' }}
+                                                    @if($latestProgress->attachment_path)
+                                                        <a href="{{ route('documents.assignment_progress_attachment', [$doc->uuid ?? $doc->id, $latestProgress->id]) }}" class="assignment-progress-item__file"><i class="fas fa-paperclip"></i>{{ $latestProgress->attachment_original_name ?: 'ดาวน์โหลดไฟล์แนบ' }}</a>
+                                                    @endif
+                                                    <small>อัปเดตโดย {{ $latestProgress->updater?->name ?? '-' }} · {{ $latestProgress->created_at?->format('d/m/Y H:i') }}</small>
+                                                </div>
+                                            @elseif($trackedAssignment->acknowledged_at)
+                                                <div class="assignment-progress-item__note">รับงานเมื่อ {{ $trackedAssignment->acknowledged_at->format('d/m/Y H:i') }}</div>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
                         </div>
                         <div class="document-card__actions">
                             <a href="{{ route('documents.show', $doc->uuid ?? $doc->id) }}" class="task-btn task-btn--neutral"><i class="fas fa-eye"></i>ดูเอกสาร</a>
-                            @if($canAct && !in_array($assignmentStatus, ['accepted', 'acknowledged', 'completed'], true))
-                                <form action="{{ route('documents.assignment_action', $doc->uuid ?? $doc->id) }}" method="POST">@csrf<input type="hidden" name="action" value="accept"><button class="task-btn task-btn--success"><i class="fas fa-check"></i>รับดำเนินการเอง</button></form>
+                            @if($canAct && $assignmentStatus === 'pending')
+                                <form action="{{ route('documents.assignment_action', $doc->uuid ?? $doc->id) }}" method="POST">@csrf<input type="hidden" name="action" value="accept"><button class="task-btn task-btn--success"><i class="fas fa-check"></i>รับงาน</button></form>
                                 @if($currentUser->hasRole('head') && $subordinates->isNotEmpty())
                                     <details class="action-menu action-menu--blue">
                                         <summary><i class="fas fa-share-nodes"></i>ส่งต่อบุคลากร</summary>
@@ -174,8 +221,32 @@
                                 @endif
                             @elseif(in_array($assignmentStatus, ['accepted', 'acknowledged'], true))
                                 <div class="action-finished"><i class="fas fa-check-double"></i>{{ $doc->assignee?->name ?? 'คุณ' }} รับเรื่องแล้ว</div>
+                            @elseif($assignmentStatus === 'in_progress')
+                                <div class="action-finished action-finished--blue"><i class="fas fa-spinner"></i>กำลังดำเนินการ</div>
                             @elseif($doc->assignee)
                                 <div class="action-finished action-finished--blue"><i class="fas fa-share"></i>ส่งต่อให้ {{ $doc->assignee->name }}</div>
+                            @endif
+                            @if($isV2Assignment && config('edoc.v2.write_enabled') && $v2UserAssignment && in_array(strtolower((string) $v2UserAssignment->status->value), ['acknowledged', 'in_progress'], true))
+                                <details class="action-menu action-menu--blue">
+                                    <summary><i class="fas fa-chart-line"></i>อัปเดตความคืบหน้า</summary>
+                                    <form action="{{ route('documents.assignment_progress', $doc->uuid ?? $doc->id) }}" method="POST" enctype="multipart/form-data" class="action-menu__panel">
+                                        @csrf
+                                        <input type="hidden" name="assignment_id" value="{{ $v2UserAssignment->id }}">
+                                        <label for="progress_status_{{ $doc->id }}">สถานะ</label>
+                                        <select id="progress_status_{{ $doc->id }}" name="status" class="form-select form-select-sm" required>
+                                            <option value="in_progress">กำลังดำเนินการ</option>
+                                            <option value="completed">ดำเนินการเสร็จสิ้น</option>
+                                        </select>
+                                        <label for="progress_percent_{{ $doc->id }}">ความคืบหน้า (0–100%)</label>
+                                        <input id="progress_percent_{{ $doc->id }}" name="progress_percent" type="number" class="form-control form-control-sm" min="0" max="100" value="{{ $v2UserAssignment->progressUpdates->first()?->progress_percent ?? 0 }}" required>
+                                        <label for="progress_note_{{ $doc->id }}">รายละเอียด</label>
+                                        <textarea id="progress_note_{{ $doc->id }}" name="progress_note" class="form-control form-control-sm" rows="3" maxlength="2000" placeholder="ระบุงานที่ดำเนินการ อุปสรรค หรือผลลัพธ์"></textarea>
+                                        <label for="progress_attachment_{{ $doc->id }}">ไฟล์แนบ (ถ้ามี)</label>
+                                        <input id="progress_attachment_{{ $doc->id }}" name="progress_attachment" type="file" class="form-control form-control-sm" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png">
+                                        <small class="text-muted">PDF, Word, Excel หรือรูปภาพ ไม่เกิน 10 MB</small>
+                                        <button class="task-btn task-btn--primary w-100"><i class="fas fa-floppy-disk"></i>บันทึกความคืบหน้า</button>
+                                    </form>
+                                </details>
                             @endif
                         </div>
                     </article>
@@ -202,6 +273,7 @@
     .task-btn,.action-menu summary{min-height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 13px;border:1px solid transparent;border-radius:10px;font-size:.79rem;font-weight:800;text-decoration:none;cursor:pointer}.task-btn--neutral{color:#334155;background:#fff;border-color:#cbd5e1}.task-btn--success{color:#fff;background:#059669}.task-btn--primary{color:#fff;background:#0284c7}.task-btn--danger{color:#fff;background:#dc2626}.task-btn:hover{filter:brightness(.95);color:inherit}.task-btn--success:hover,.task-btn--primary:hover,.task-btn--danger:hover{color:#fff}
     .action-menu{position:relative}.action-menu summary{list-style:none}.action-menu summary::-webkit-details-marker{display:none}.action-menu--danger summary{color:#b91c1c;background:#fff;border-color:#fecaca}.action-menu--blue summary{color:#0369a1;background:#f0f9ff;border-color:#bae6fd}.action-menu__panel{position:absolute;z-index:20;right:0;top:calc(100% + 7px);width:min(340px,86vw);display:grid;gap:9px;padding:14px;color:#334155;background:#fff;border:1px solid var(--ap-border);border-radius:13px;box-shadow:0 14px 35px rgba(15,23,42,.16)}.action-menu__panel label{font-size:.78rem;font-weight:800}
     .document-card{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(190px,auto);align-items:center;gap:15px;padding:17px;background:#fff;border:1px solid #e3ebef;border-left:4px solid #f59e0b;border-radius:15px;transition:.18s}.document-card:hover,.leave-card:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(15,23,42,.07)}.document-card--success{border-left-color:#10b981}.document-card--blue{border-left-color:#0ea5e9}.document-card__icon{width:46px;height:46px;display:grid;place-items:center;color:#087fba;background:#e8f7fc;border-radius:13px;font-size:18px}.document-card__body{min-width:0}.document-card__topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:7px}.document-card__topline time{color:#94a3b8;font-size:.71rem;white-space:nowrap}.document-card__topline time i{margin-right:5px}.soft-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:.69rem;font-weight:800}.soft-badge--warning{color:#a16207;background:#fef3c7}.soft-badge--success{color:#047857;background:#d1fae5}.soft-badge--blue{color:#0369a1;background:#e0f2fe}.soft-badge--slate{color:#475569;background:#f1f5f9}.document-number{color:#64748b;font-size:.73rem;font-weight:700}.document-title{display:block;margin-bottom:10px;color:var(--ap-text);font-size:1rem;font-weight:800;line-height:1.45;text-decoration:none;overflow-wrap:anywhere}.document-title:hover{color:var(--ap-blue)}.document-meta{display:flex;flex-wrap:wrap;gap:9px 20px}.document-meta>span{display:flex;align-items:center;gap:8px;color:#334155;font-size:.78rem}.document-meta>span>i{color:#94a3b8}.document-meta small{display:block;color:#94a3b8;font-size:.65rem}.document-card__actions{position:relative;display:flex;align-items:stretch;justify-content:flex-end;flex-direction:column;gap:7px;min-width:190px}.document-card__actions form,.document-card__actions button,.document-card__actions>a,.document-card__actions summary{width:100%}.action-finished{display:flex;align-items:center;justify-content:center;gap:7px;padding:9px;color:#047857;background:#ecfdf5;border-radius:10px;font-size:.76rem;font-weight:800}.action-finished--blue{color:#0369a1;background:#f0f9ff}
+    .assignment-progress-list{display:grid;gap:7px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px}.assignment-progress-list__label{color:#475569;font-size:.7rem;font-weight:800}.assignment-progress-list__label i{margin-right:5px;color:#0284c7}.assignment-progress-item{padding-top:7px;border-top:1px solid #e2e8f0}.assignment-progress-item:first-of-type{padding-top:0;border-top:0}.assignment-progress-item__head{display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:.75rem}.assignment-progress-item__note{margin-top:3px;color:#64748b;font-size:.72rem;line-height:1.45}.assignment-progress-item__note small{display:block;margin-top:2px;color:#94a3b8}.assignment-progress-item__file{display:block;width:max-content;max-width:100%;margin-top:5px;color:#0369a1;font-weight:700;overflow:hidden;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}.assignment-progress-item__file:hover{text-decoration:underline}
     .assignment-empty{display:flex;align-items:center;flex-direction:column;padding:52px 20px;text-align:center}.assignment-empty>span{width:70px;height:70px;display:grid;place-items:center;margin-bottom:14px;color:#94a3b8;background:#f1f5f9;border-radius:22px;font-size:28px}.assignment-empty h4{margin:0 0 5px;color:#334155;font-size:1rem;font-weight:800}.assignment-empty p{margin:0 0 18px;color:#94a3b8;font-size:.81rem}
     @media(max-width:991.98px){.assignment-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.leave-card,.document-card{grid-template-columns:1fr}.document-card__icon{display:none}.task-actions{justify-content:flex-start}.document-card__actions{min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.action-finished{grid-column:1/-1}.action-menu__panel{right:auto;left:0}}
     @media(max-width:575.98px){.assignment-hero{align-items:flex-start;flex-direction:column;padding:19px}.assignment-hero__icon{width:48px;height:48px;flex-basis:48px}.assignment-back{width:100%;justify-content:center}.assignment-summary{gap:9px}.summary-card{align-items:flex-start;flex-direction:column;padding:13px}.summary-card>span{width:36px;height:36px;flex-basis:36px}.work-panel__header{align-items:flex-start;flex-direction:column;padding:16px}.panel-count{align-self:flex-start}.panel-heading__icon{display:none}.task-list{padding:9px}.leave-card,.document-card{padding:14px}.task-actions,.document-card__actions{display:flex;align-items:stretch;flex-direction:column;width:100%}.task-actions>*,.task-actions form,.task-actions button,.task-actions a,.task-actions summary{width:100%}.document-card__topline{align-items:flex-start;flex-direction:column}.document-meta{flex-direction:column;gap:8px}.action-menu__panel{position:fixed;left:12px;right:12px;top:auto;bottom:12px;width:auto}}

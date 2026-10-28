@@ -4,6 +4,7 @@ namespace App\Models\V2;
 
 use App\Enums\AssignmentStatus;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Builder;
 
 class DocumentAssignment extends V2Model
@@ -18,6 +19,9 @@ class DocumentAssignment extends V2Model
     public function document(): BelongsTo { return $this->belongsTo(Document::class); }
     public function assignee(): BelongsTo { return $this->belongsTo(User::class, 'assigned_user_id'); }
     public function unit(): BelongsTo { return $this->belongsTo(OrganizationUnit::class, 'assigned_unit_id'); }
+    public function assigner(): BelongsTo { return $this->belongsTo(User::class, 'assigned_by'); }
+    public function delegator(): BelongsTo { return $this->belongsTo(User::class, 'delegated_by'); }
+    public function progressUpdates(): HasMany { return $this->hasMany(DocumentAssignmentProgressUpdate::class)->latest('id'); }
 
     protected static function booted(): void
     {

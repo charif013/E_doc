@@ -122,6 +122,7 @@
                     <p>({{ $leave->user->name ?? '................................' }})</p>
                 </div>
 
+                @unless($leave->user?->hasRole('palad'))
                 <div class="approval-block">
                     <h2>ความเห็นผู้บังคับบัญชา (ปลัด อบต.)</h2>
                     <p class="dotted"></p>
@@ -129,6 +130,7 @@
                     <p>ตำแหน่ง ปลัดองค์การบริหารส่วนตำบลพร่อน</p>
                     <p>วันที่........../................../..........</p>
                 </div>
+                @endunless
 
                 <div class="approval-block">
                     <h2>คำสั่ง</h2>

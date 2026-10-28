@@ -147,46 +147,151 @@
                     : ($document->assigned_user_id === $user->id
                         || ($user->hasRole('head') && !$document->assigned_user_id && $document->assigned_to === $user->department)));
             $assignmentAccepted = $isV2Assignment
-                ? (strtoupper((string) ($v2UserAssignment?->status->value ?? '')) === 'ACKNOWLEDGED')
+                ? in_array(strtoupper((string) ($v2UserAssignment?->status->value ?? '')), ['ACKNOWLEDGED', 'IN_PROGRESS', 'COMPLETED'], true)
                 : $document->assignment_status === 'accepted';
             $canDelegateAssignment = $canHandleAssignment && $user->hasRole('head');
             $departmentUsers = $canDelegateAssignment
                 ? \App\Models\User::where('department', $user->department)->where('id', '!=', $user->id)->orderBy('name')->get()
                 : collect();
+            $deptUsersJson = $departmentUsers->map(function($u) {
+                return [
+                    'id' => (string) $u->id,
+                    'n' => (string) $u->name,
+                    'r' => (string) ($u->position ?? ''),
+                ];
+            })->values();
+            $isAssignmentIssuer = $isV2Assignment && $v2ActiveAssignments->contains(fn ($assignment) =>
+                (int) $assignment->assigned_by === (int) $user->id
+                || (int) $assignment->delegated_by === (int) $user->id
+            );
+            $trackableAssignments = $isV2Assignment
+                ? ($isAssignmentIssuer
+                    ? $v2ActiveAssignments->filter(fn ($assignment) => (int) $assignment->assigned_by === (int) $user->id || (int) $assignment->delegated_by === (int) $user->id)
+                    : $v2ActiveAssignments->where('assigned_user_id', $user->id))
+                : collect();
         @endphp
         @if($document->status === 'APPROVED' && $canHandleAssignment && !$assignmentAccepted)
-            <div class="card border-0 shadow-sm mb-4 no-print" style="border-radius:12px;border-left:5px solid #0284c7 !important">
-                <div class="card-body p-4">
-                    <h5 class="fw-bold"><i class="fas fa-tasks text-primary me-2"></i>งานที่นายกมอบหมายให้ {{ $document->assigned_to }}</h5>
-                    <p class="text-muted small">เลือกรับดำเนินการด้วยตนเอง หรือเลือกส่งต่อให้บุคลากรในฝ่ายเดียวกันได้หลายคน</p>
-                    <div class="d-flex flex-wrap gap-2">
-                        <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST">
-                            @csrf
-                            <input type="hidden" name="action" value="accept">
-                            <button type="submit" class="btn btn-success rounded-pill px-4 fw-bold"><i class="fas fa-check me-1"></i>รับดำเนินการเอง</button>
-                        </form>
-                        @if($departmentUsers->isNotEmpty())
-                        <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST" class="d-flex flex-column gap-2 flex-grow-1">
-                            @csrf
-                            <input type="hidden" name="action" value="delegate">
-                            <div class="border rounded p-2 bg-light" data-delegate-list style="max-height:220px;overflow-y:auto">
-                                <label class="form-check fw-semibold border-bottom pb-2 mb-2 d-block">
-                                    <input class="form-check-input" type="checkbox" data-delegate-select-all>
-                                    <span class="form-check-label">เลือกทั้งหมด</span>
-                                </label>
-                                @foreach($departmentUsers as $departmentUser)
-                                    <label class="form-check mb-2 d-block" for="delegate_{{ $document->id }}_{{ $departmentUser->id }}">
-                                        <input id="delegate_{{ $document->id }}_{{ $departmentUser->id }}" class="form-check-input" type="checkbox" name="delegate_user_ids[]" value="{{ $departmentUser->id }}" data-delegate-recipient>
-                                        <span class="form-check-label">{{ $departmentUser->name }}{{ $departmentUser->position ? ' — '.$departmentUser->position : '' }}</span>
-                                    </label>
-                                @endforeach
+            <section class="delegate-assignment-card no-print mb-4">
+                <h2>
+                    <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+                        <path fill-rule="evenodd" d="M2 2.5a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5V3a.5.5 0 0 0-.5-.5H2Zm4.5.25a.75.75 0 0 0 0 1.5h8a.75.75 0 0 0 0-1.5h-8Zm0 4.5a.75.75 0 0 0 0 1.5h8a.75.75 0 0 0 0-1.5h-8Zm0 4.5a.75.75 0 0 0 0 1.5h8a.75.75 0 0 0 0-1.5h-8ZM1.5 7.5A.5.5 0 0 1 2 7h1a.5.5 0 0 1 .5.5v1A.5.5 0 0 1 3 9H2a.5.5 0 0 1-.5-.5v-1Zm.5 4a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5H2Z"/>
+                    </svg>
+                    งานที่นายกมอบหมายให้ {{ $document->assigned_to }}
+                </h2>
+                <p class="sub">เลือกรับดำเนินการด้วยตนเอง หรือเลือกส่งต่อให้บุคลากรในฝ่ายเดียวกันได้หลายคน</p>
+
+                <div class="row">
+                    <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST" class="d-inline-flex m-0">
+                        @csrf
+                        <input type="hidden" name="action" value="accept">
+                        <button type="submit" class="btn g" id="take">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.485 3.929a1 1 0 0 1 0 1.414l-6.01 6.01a1 1 0 0 1-1.414 0L2.515 7.808a1 1 0 1 1 1.414-1.414l2.84 2.84 5.303-5.304a1 1 0 0 1 1.414 0Z"/></svg>
+                            รับงาน
+                        </button>
+                    </form>
+
+                    @if($departmentUsers->isNotEmpty())
+                    <form action="{{ route('documents.assignment_action', $document->uuid ?? $document->id) }}" method="POST" class="delegate-form-row m-0" id="delegateForm">
+                        @csrf
+                        <input type="hidden" name="action" value="delegate">
+                        <div id="delegateHiddenInputs"></div>
+
+                        <div class="dd" id="dd">
+                            <button type="button" class="trigger" id="tg" aria-haspopup="listbox" aria-expanded="false"></button>
+                            <div class="panel" role="listbox" aria-multiselectable="true">
+                                <div class="search"><input id="q" type="search" placeholder="ค้นหาชื่อหรือตำแหน่ง" autocomplete="off"></div>
+                                <label class="opt all"><input type="checkbox" id="all">เลือกทั้งหมด</label>
+                                <div class="list" id="ls"></div>
+                                <div class="empty" id="em">ไม่พบบุคลากรที่ค้นหา</div>
                             </div>
-                            <div><button type="submit" class="btn btn-primary text-nowrap"><i class="fas fa-share me-1"></i>ส่งต่อให้ผู้ที่เลือก</button></div>
-                        </form>
-                        @endif
-                    </div>
+                        </div>
+
+                        <button type="submit" class="btn b" id="fw" disabled>
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M9.5 2.5a.5.5 0 0 1 .82-.38l5 4.25a.5.5 0 0 1 0 .76l-5 4.25a.5.5 0 0 1-.82-.38V8.5C5.6 8.4 3.3 9.6 2 12.5c0-4 1.8-7.4 7.5-7.9V2.5Z"/></svg>
+                            <span id="fl">ส่งต่อให้ผู้ที่เลือก</span>
+                        </button>
+                    </form>
+                    @endif
                 </div>
-            </div>
+            </section>
+        @endif
+
+        @if($isV2Assignment && $trackableAssignments->isNotEmpty())
+            <section class="assignment-progress-ui no-print mb-4">
+                <div class="assignment-progress-ui__heading">
+                    <h5><i class="fas fa-chart-line"></i>{{ $isAssignmentIssuer ? 'ติดตามความคืบหน้างานที่มอบหมาย' : 'ความคืบหน้างานที่ได้รับมอบหมาย' }}</h5>
+                    <p>ผู้รับงานบันทึกสถานะและรายละเอียดล่าสุดไว้ที่นี่</p>
+                </div>
+                <div class="assignment-progress-ui__recipients">
+                        @foreach($trackableAssignments as $trackedAssignment)
+                            @php
+                                $trackedStatus = strtolower((string) $trackedAssignment->status->value);
+                                $latestProgress = $trackedAssignment->progressUpdates->first();
+                                $progressPercent = $latestProgress?->progress_percent;
+                                $receivedAt = $trackedAssignment->acknowledged_at ?: $trackedAssignment->assigned_at;
+                                $statusLabel = match ($trackedStatus) {
+                                    'completed' => 'ดำเนินการเสร็จสิ้น',
+                                    'in_progress' => 'กำลังดำเนินการ',
+                                    'acknowledged' => 'รับดำเนินการแล้ว',
+                                    default => 'รอรับดำเนินการ',
+                                };
+                            @endphp
+                            <article class="assignment-progress-ui__who">
+                                <div>
+                                    <strong>{{ $trackedAssignment->assignee?->name ?? $trackedAssignment->unit?->name ?? 'รอระบุผู้รับ' }}</strong>
+                                    <small>{{ $receivedAt ? 'รับงานเมื่อ '.$receivedAt->format('d/m/Y H:i') : 'ผู้รับงานยังไม่ได้รับงาน' }}</small>
+                                    @if($latestProgress)
+                                        <span class="assignment-progress-ui__latest">{{ $latestProgress->note ?: 'ไม่มีรายละเอียดเพิ่มเติม' }}</span>
+                                        @if($latestProgress->attachment_path)
+                                            <a href="{{ route('documents.assignment_progress_attachment', [$document->uuid ?? $document->id, $latestProgress->id]) }}"><i class="fas fa-paperclip"></i>{{ $latestProgress->attachment_original_name ?: 'ดาวน์โหลดไฟล์แนบ' }}</a>
+                                        @endif
+                                    @endif
+                                </div>
+                                <span class="assignment-progress-ui__badge assignment-progress-ui__badge--{{ $trackedStatus }}">{{ $statusLabel }}{{ $progressPercent !== null ? ' · '.$progressPercent.'%' : '' }}</span>
+                            </article>
+                        @endforeach
+                </div>
+
+                    @if(config('edoc.v2.write_enabled') && $v2UserAssignment && in_array(strtolower((string) $v2UserAssignment->status->value), ['acknowledged', 'in_progress'], true))
+                        @php
+                            $currentProgress = $v2UserAssignment->progressUpdates->first()?->progress_percent ?? 0;
+                            $currentStatus = strtolower((string) $v2UserAssignment->status->value);
+                        @endphp
+                        <form action="{{ route('documents.assignment_progress', $document->uuid ?? $document->id) }}" method="POST" enctype="multipart/form-data" class="assignment-progress-ui__form" data-assignment-progress-form>
+                            @csrf
+                            <input type="hidden" name="assignment_id" value="{{ $v2UserAssignment->id }}">
+                            <div class="assignment-progress-ui__fields">
+                                <div>
+                                    <label for="assignment_progress_status">สถานะ</label>
+                                    <select id="assignment_progress_status" name="status" class="assignment-progress-ui__control" data-progress-status required>
+                                        <option value="in_progress" {{ $currentStatus === 'in_progress' ? 'selected' : '' }}>กำลังดำเนินการ</option>
+                                        <option value="completed">ดำเนินการเสร็จสิ้น</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="assignment_progress_percent">ความคืบหน้า (%)</label>
+                                    <div class="assignment-progress-ui__percent"><input id="assignment_progress_percent" name="progress_percent" type="number" class="assignment-progress-ui__control" min="0" max="100" value="{{ $currentProgress }}" required data-progress-number><em>%</em></div>
+                                    <input type="range" min="0" max="100" step="5" value="{{ $currentProgress }}" aria-label="ความคืบหน้า" data-progress-range>
+                                </div>
+                                <div>
+                                    <label for="assignment_progress_note">รายละเอียด</label>
+                                    <input id="assignment_progress_note" name="progress_note" type="text" class="assignment-progress-ui__control" maxlength="2000" placeholder="ระบุงานที่ดำเนินการ อุปสรรค หรือผลลัพธ์">
+                                </div>
+                            </div>
+                            <div class="assignment-progress-ui__upload-row">
+                                <div>
+                                    <label>ไฟล์แนบ (ถ้ามี)</label>
+                                    <label class="assignment-progress-ui__file" for="assignment_progress_attachment">
+                                        <input id="assignment_progress_attachment" name="progress_attachment" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" data-progress-file>
+                                        <span>เลือกไฟล์</span><i><b data-progress-file-name>ยังไม่ได้เลือกไฟล์</b><button type="button" aria-label="ลบไฟล์" data-progress-file-clear>&times;</button></i>
+                                    </label>
+                                    <small>PDF, Word, Excel หรือรูปภาพ ไม่เกิน 10 MB</small>
+                                </div>
+                                <button class="assignment-progress-ui__save" type="submit"><i class="fas fa-floppy-disk"></i>บันทึก</button>
+                            </div>
+                        </form>
+                    @endif
+            </section>
         @endif
 
         {{-- 🌟 Main Card (ข้อมูลเอกสาร) --}}
@@ -411,7 +516,11 @@
                 </div>
                 @endif
 
-                @include('documents.partials.dynamic_route_track')
+                {{-- เมื่อมอบหมายงานและอนุมัติครบแล้ว ให้ผู้รับงานเห็นเฉพาะใบเกษียน
+                     ไม่แสดงเส้นทางนำส่ง/พิจารณาภายในอีกต่อไป --}}
+                @if(! $assignmentIsFinalized)
+                    @include('documents.partials.dynamic_route_track')
+                @endif
                 </div>
 
                 @if($isReviewer)
@@ -687,6 +796,45 @@
         border: 0;
         border-radius: 7px;
     }
+    .delegate-assignment-card{--dac-card:#fff;--dac-ink:#212529;--dac-mute:#6c757d;--dac-line:#dee2e6;--dac-soft:#f8f9fa;--dac-blue:#0d6efd;--dac-edge:#0d9bf0;--dac-green:#198754;background:var(--dac-card);border-radius:12px;border-left:4px solid var(--dac-edge) !important;box-shadow:0 2px 12px rgba(20,40,80,.08);padding:24px 28px}
+    .delegate-assignment-card h2{margin:0;font-size:1.35rem;font-weight:700;display:flex;align-items:center;gap:8px;color:var(--dac-ink)}
+    .delegate-assignment-card h2 svg{color:var(--dac-blue)}
+    .delegate-assignment-card .sub{margin:2px 0 18px;color:var(--dac-mute);font-size:.95rem}
+    .delegate-assignment-card .row{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin:0}
+    .delegate-assignment-card .delegate-form-row{display:flex;gap:12px;align-items:flex-start;flex:1 1 360px;flex-wrap:wrap}
+    .delegate-assignment-card .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 24px;border:0;border-radius:6px;color:#fff;font:inherit;font-weight:600;cursor:pointer;line-height:normal;text-decoration:none}
+    .delegate-assignment-card .btn:focus-visible{outline:0;box-shadow:0 0 0 .22rem rgba(13,110,253,.35)}
+    .delegate-assignment-card .btn.g{background:var(--dac-green);border-radius:99px;padding:0 28px}
+    .delegate-assignment-card .btn.g:hover{background:#157347;color:#fff}
+    .delegate-assignment-card .btn.b{background:var(--dac-blue);white-space:nowrap}
+    .delegate-assignment-card .btn.b:hover{background:#0b5ed7;color:#fff}
+    .delegate-assignment-card .btn:disabled{opacity:.5;cursor:not-allowed;background:var(--dac-blue)}
+    .delegate-assignment-card .dd{position:relative;flex:1;min-width:260px}
+    .delegate-assignment-card .trigger{width:100%;min-height:44px;display:flex;align-items:center;gap:8px;border:1px solid var(--dac-line);border-radius:6px;background:#fff;padding:5px 40px 5px 12px;font:inherit;text-align:left;cursor:pointer;position:relative;flex-wrap:wrap}
+    .delegate-assignment-card .trigger:focus-visible,.delegate-assignment-card .dd.open .trigger{outline:0;border-color:#86b7fe;box-shadow:0 0 0 .22rem rgba(13,110,253,.2)}
+    .delegate-assignment-card .trigger .ph{color:#8a949e;font-size:.95rem}
+    .delegate-assignment-card .trigger:after{content:"";position:absolute;right:14px;top:50%;width:8px;height:8px;border:solid #343a40;border-width:0 2px 2px 0;transform:translateY(-70%) rotate(45deg);transition:transform .15s;pointer-events:none}
+    .delegate-assignment-card .dd.open .trigger:after{transform:translateY(-20%) rotate(225deg)}
+    .delegate-assignment-card .chip{display:inline-flex;align-items:center;gap:6px;background:#e7f1ff;color:#0a58ca;border-radius:99px;padding:3px 6px 3px 12px;font-size:.88rem;font-weight:500}
+    .delegate-assignment-card .chip b{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:.7rem;font-weight:400;cursor:pointer;user-select:none}
+    .delegate-assignment-card .chip b:hover{background:#cfe2ff}
+    .delegate-assignment-card .panel{display:none;position:absolute;z-index:1050;left:0;right:0;top:calc(100% + 6px);background:#fff;border:1px solid var(--dac-line);border-radius:8px;box-shadow:0 8px 24px rgba(20,40,80,.14);overflow:hidden}
+    .delegate-assignment-card .dd.open .panel{display:block}
+    .delegate-assignment-card .search{padding:10px;border-bottom:1px solid var(--dac-line)}
+    .delegate-assignment-card .search input{width:100%;height:38px;border:1px solid var(--dac-line);border-radius:6px;padding:0 12px;font:inherit;font-size:.95rem}
+    .delegate-assignment-card .search input:focus{outline:0;border-color:#86b7fe;box-shadow:0 0 0 .2rem rgba(13,110,253,.2)}
+    .delegate-assignment-card .opt{display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;font-size:.98rem;margin-bottom:0;user-select:none}
+    .delegate-assignment-card .opt:hover{background:var(--dac-soft)}
+    .delegate-assignment-card .opt input{width:18px;height:18px;accent-color:var(--dac-blue);margin:0;cursor:pointer}
+    .delegate-assignment-card .opt small{color:var(--dac-mute)}
+    .delegate-assignment-card .all{font-weight:700;border-bottom:1px solid var(--dac-line)}
+    .delegate-assignment-card .list{max-height:220px;overflow:auto}
+    .delegate-assignment-card .empty{padding:14px;color:var(--dac-mute);text-align:center;display:none}
+    @media (max-width: 600px){.delegate-assignment-card{padding:18px}.delegate-assignment-card .row{flex-direction:column}.delegate-assignment-card .row>form,.delegate-assignment-card .row>form .btn,.delegate-assignment-card .delegate-form-row,.delegate-assignment-card .delegate-form-row .btn,.delegate-assignment-card .dd{width:100%;min-width:100%}}
+    .assignment-progress-ui{--apu-blue:#0d6efd;--apu-edge:#0d9bf0;--apu-ink:#212529;--apu-muted:#6c757d;--apu-line:#dee2e6;--apu-soft:#f8f9fa;padding:24px 28px;background:#fff;border-left:4px solid var(--apu-edge);border-radius:12px;box-shadow:0 2px 12px rgba(20,40,80,.08)}
+    .assignment-progress-ui__heading h5{display:flex;align-items:center;gap:8px;margin:0;color:var(--apu-ink);font-size:1.35rem;font-weight:700}.assignment-progress-ui__heading h5 i{color:var(--apu-edge)}.assignment-progress-ui__heading p{margin:2px 0 16px;color:var(--apu-muted);font-size:.92rem}.assignment-progress-ui__recipients{display:grid;gap:10px}.assignment-progress-ui__who{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 18px;background:var(--apu-soft);border:1px solid var(--apu-line);border-radius:8px}.assignment-progress-ui__who strong,.assignment-progress-ui__who small,.assignment-progress-ui__who a,.assignment-progress-ui__latest{display:block}.assignment-progress-ui__who strong{margin-bottom:4px;color:var(--apu-ink);font-size:1.05rem}.assignment-progress-ui__who small{color:var(--apu-muted);font-size:.88rem}.assignment-progress-ui__latest{margin-top:8px;color:#475569;font-size:.88rem}.assignment-progress-ui__who a{max-width:430px;margin-top:6px;color:#0b5ed7;font-size:.85rem;font-weight:700;overflow:hidden;text-decoration:none;text-overflow:ellipsis;white-space:nowrap}.assignment-progress-ui__who a i{margin-right:5px}.assignment-progress-ui__badge{flex:0 0 auto;padding:4px 10px;color:#212529;background:#ffc107;border-radius:6px;font-size:.78rem;font-weight:600}.assignment-progress-ui__badge--in_progress{color:#fff;background:#0d6efd}.assignment-progress-ui__badge--completed{color:#fff;background:#198754}.assignment-progress-ui__badge--acknowledged{color:#055160;background:#cff4fc}.assignment-progress-ui__form{margin-top:20px;padding-top:20px;border-top:1px solid var(--apu-line)}.assignment-progress-ui__fields{display:grid;grid-template-columns:230px 190px minmax(0,1fr);gap:18px;margin-bottom:18px}.assignment-progress-ui label{display:block;margin-bottom:8px;color:var(--apu-ink);font-weight:600}.assignment-progress-ui__control{width:100%;height:42px;padding:0 12px;color:var(--apu-ink);background:#fff;border:1px solid var(--apu-line);border-radius:6px;font:inherit;font-size:1rem}.assignment-progress-ui__control:focus{outline:0;border-color:#86b7fe;box-shadow:0 0 0 .22rem rgba(13,110,253,.2)}.assignment-progress-ui select.assignment-progress-ui__control{appearance:auto}.assignment-progress-ui__percent{position:relative}.assignment-progress-ui__percent .assignment-progress-ui__control{padding-right:34px}.assignment-progress-ui__percent em{position:absolute;top:10px;right:12px;color:var(--apu-muted);font-style:normal}.assignment-progress-ui input[type=range]{width:100%;height:6px;margin:12px 0 0;appearance:none;outline:0;border-radius:99px;background:linear-gradient(to right,var(--apu-blue) var(--progress-value,0%),var(--apu-line) var(--progress-value,0%))}.assignment-progress-ui input[type=range]::-webkit-slider-thumb{width:18px;height:18px;appearance:none;cursor:pointer;background:var(--apu-blue);border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 1px var(--apu-blue)}.assignment-progress-ui input[type=range]::-moz-range-thumb{width:12px;height:12px;cursor:pointer;background:var(--apu-blue);border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 1px var(--apu-blue)}.assignment-progress-ui__upload-row{display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap}.assignment-progress-ui__upload-row>div{flex:1 1 340px;min-width:min(340px,100%)}.assignment-progress-ui__file{display:flex !important;width:340px;max-width:100%;height:42px;margin:0 !important;overflow:hidden;cursor:pointer;background:#fff;border:1px solid var(--apu-line);border-radius:6px}.assignment-progress-ui__file input{display:none}.assignment-progress-ui__file>span{display:flex;align-items:center;padding:0 14px;background:var(--apu-soft);border-right:1px solid var(--apu-line)}.assignment-progress-ui__file i{display:flex;align-items:center;justify-content:space-between;flex:1;min-width:0;padding:0 12px;font-style:normal;color:var(--apu-ink)}.assignment-progress-ui__file b{overflow:hidden;font-weight:400;text-overflow:ellipsis;white-space:nowrap}.assignment-progress-ui__file button{display:none;padding:0;color:var(--apu-muted);background:none;border:0;font-size:1rem;cursor:pointer}.assignment-progress-ui__upload-row small{display:block;margin-top:8px;color:var(--apu-muted);font-size:.85rem}.assignment-progress-ui__save{display:inline-flex;align-items:center;gap:8px;height:42px;margin-top:33px;margin-left:auto;padding:0 26px;color:#fff;background:var(--apu-blue);border:0;border-radius:6px;font:inherit;font-weight:600;cursor:pointer}.assignment-progress-ui__save:hover{background:#0b5ed7}.assignment-progress-ui__save:focus-visible{outline:0;box-shadow:0 0 0 .22rem rgba(13,110,253,.35)}
+    @media (max-width: 820px){.assignment-progress-ui__fields{grid-template-columns:1fr 1fr}.assignment-progress-ui__fields>div:last-child{grid-column:1/-1}}
+    @media (max-width: 520px){.assignment-progress-ui{padding:18px}.assignment-progress-ui__fields{grid-template-columns:1fr}.assignment-progress-ui__fields>div:last-child{grid-column:auto}.assignment-progress-ui__who{padding:13px}.assignment-progress-ui__who a{max-width:240px}.assignment-progress-ui__upload-row>div,.assignment-progress-ui__file{width:100%;min-width:0}.assignment-progress-ui__save{width:100%;justify-content:center;margin-top:0;margin-left:0}}
     @media (max-width: 767.98px) {
         .incoming-page-heading {
             align-items: flex-start !important;
@@ -783,17 +931,152 @@
 
     // หน้าที่: เริ่มตั้งค่าหน้าและผูกเหตุการณ์เมื่อ DOM พร้อมใช้งาน
     document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('[data-delegate-select-all]').forEach(function(selectAll) {
-            const list = selectAll.closest('[data-delegate-list]');
-            const recipients = Array.from(list.querySelectorAll('[data-delegate-recipient]'));
-            selectAll.addEventListener('change', function() {
-                recipients.forEach(function(recipient) { recipient.checked = selectAll.checked; });
-            });
-            recipients.forEach(function(recipient) {
-                recipient.addEventListener('change', function() {
-                    selectAll.checked = recipients.length > 0 && recipients.every(function(item) { return item.checked; });
+        const delegateDd = document.getElementById('dd');
+        if (delegateDd) {
+            const P = @json($deptUsersJson ?? []);
+            const S = {};
+            const tg = document.getElementById('tg');
+            const ls = document.getElementById('ls');
+            const q = document.getElementById('q');
+            const all = document.getElementById('all');
+            const fw = document.getElementById('fw');
+            const fl = document.getElementById('fl');
+            const em = document.getElementById('em');
+            const hiddenInputs = document.getElementById('delegateHiddenInputs');
+
+            function escapeHtml(str) {
+                const div = document.createElement('div');
+                div.textContent = str || '';
+                return div.innerHTML;
+            }
+
+            function sel() {
+                return P.filter(function(p) { return S[p.id]; });
+            }
+
+            function renderList() {
+                const k = q.value.trim().toLowerCase();
+                let n = 0;
+                ls.innerHTML = '';
+                P.forEach(function(p) {
+                    if (k && (p.n + ' ' + p.r).toLowerCase().indexOf(k) < 0) return;
+                    n++;
+                    const l = document.createElement('label');
+                    l.className = 'opt';
+                    l.innerHTML = '<input type="checkbox"' + (S[p.id] ? ' checked' : '') + '><span>' + escapeHtml(p.n) + (p.r ? ' <small>— ' + escapeHtml(p.r) + '</small>' : '') + '</span>';
+                    l.querySelector('input').addEventListener('change', function(e) {
+                        S[p.id] = e.target.checked;
+                        sync();
+                    });
+                    ls.appendChild(l);
                 });
+                em.style.display = n ? 'none' : 'block';
+            }
+
+            function sync() {
+                const s = sel();
+                if (s.length > 0) {
+                    tg.innerHTML = s.map(function(p) {
+                        return '<span class="chip">' + escapeHtml(p.n) + '<b data-id="' + p.id + '" title="เอาออก">✕</b></span>';
+                    }).join('');
+                } else {
+                    tg.innerHTML = '<span class="ph">เลือกบุคลากรที่จะส่งต่อ</span>';
+                }
+
+                all.checked = P.length > 0 && s.length === P.length;
+                all.indeterminate = s.length > 0 && s.length < P.length;
+
+                fw.disabled = s.length === 0;
+                fl.textContent = 'ส่งต่อให้ผู้ที่เลือก' + (s.length ? ' (' + s.length + ')' : '');
+
+                if (hiddenInputs) {
+                    hiddenInputs.innerHTML = s.map(function(p) {
+                        return '<input type="hidden" name="delegate_user_ids[]" value="' + escapeHtml(p.id) + '">';
+                    }).join('');
+                }
+
+                renderList();
+            }
+
+            function open_(o) {
+                delegateDd.classList.toggle('open', o);
+                tg.setAttribute('aria-expanded', o ? 'true' : 'false');
+                if (o) {
+                    q.focus();
+                }
+            }
+
+            tg.addEventListener('click', function(e) {
+                const removeBtn = e.target.closest('[data-id]');
+                if (removeBtn) {
+                    e.stopPropagation();
+                    const uid = removeBtn.getAttribute('data-id');
+                    S[uid] = false;
+                    sync();
+                    return;
+                }
+                open_(!delegateDd.classList.contains('open'));
             });
+
+            all.addEventListener('change', function() {
+                P.forEach(function(p) {
+                    S[p.id] = all.checked;
+                });
+                sync();
+            });
+
+            q.addEventListener('input', renderList);
+
+            document.addEventListener('click', function(e) {
+                if (!delegateDd.contains(e.target)) {
+                    open_(false);
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    open_(false);
+                    tg.focus();
+                }
+            });
+
+            sync();
+        }
+        document.querySelectorAll('[data-assignment-progress-form]').forEach(function(form) {
+            const status = form.querySelector('[data-progress-status]');
+            const number = form.querySelector('[data-progress-number]');
+            const range = form.querySelector('[data-progress-range]');
+            const file = form.querySelector('[data-progress-file]');
+            const fileName = form.querySelector('[data-progress-file-name]');
+            const clearFile = form.querySelector('[data-progress-file-clear]');
+            const syncProgress = function(value, updateStatus) {
+                const progress = Math.max(0, Math.min(100, Number(value) || 0));
+                number.value = progress;
+                range.value = progress;
+                range.style.setProperty('--progress-value', progress + '%');
+                if (updateStatus) status.value = progress === 100 ? 'completed' : 'in_progress';
+            };
+            ['input', 'change'].forEach(function(eventName) {
+                number.addEventListener(eventName, function() { syncProgress(number.value, true); });
+                range.addEventListener(eventName, function() { syncProgress(range.value, true); });
+            });
+            status.addEventListener('change', function() {
+                if (status.value === 'completed') syncProgress(100, false);
+            });
+            file.addEventListener('change', function() {
+                const selectedFile = file.files[0];
+                fileName.textContent = selectedFile ? selectedFile.name : 'ยังไม่ได้เลือกไฟล์';
+                clearFile.style.display = selectedFile ? 'block' : 'none';
+            });
+            clearFile.addEventListener('click', function(event) {
+                event.preventDefault();
+                file.value = '';
+                file.dispatchEvent(new Event('change'));
+            });
+            form.addEventListener('submit', function() {
+                syncProgress(status.value === 'completed' ? 100 : number.value, true);
+            });
+            syncProgress(number.value, false);
         });
         @if(session('error_signature'))
             Swal.fire({ icon: 'warning', title: 'ยังไม่พร้อมใช้งาน', text: '{{ session("error_signature") }}', confirmButtonText: 'ไปหน้าตั้งค่าโปรไฟล์', confirmButtonColor: '#0284c7' }).then((result) => { if (result.isConfirmed) window.location.href = "{{ route('profile.index') }}"; });

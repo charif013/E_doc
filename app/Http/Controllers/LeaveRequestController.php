@@ -30,6 +30,8 @@ class LeaveRequestController extends Controller
     // ==========================================
     public function create()
     {
+        $this->authorize('create', LeaveRequest::class);
+
         /** @var User $user */
         $user = Auth::user();
         $fiscalYear = $this->fiscalYears->year(now());
@@ -72,9 +74,9 @@ class LeaveRequestController extends Controller
         $this->authorize('cancel', $leave);
         $wasDraft = $leave->is_draft;
 
-        // 2. ป้องกันไม่ให้ยกเลิกใบลาที่พิจารณาจบไปแล้ว
-        if (in_array($leave->status, ['APPROVED', 'REJECTED', 'CANCELED'])) {
-            return back()->with('error', 'ไม่สามารถยกเลิกใบลาที่ถูกพิจารณาไปแล้ว หรือถูกยกเลิกไปแล้วได้');
+        // ป้องกันไม่ให้ยกเลิกใบลาที่ถูกปฏิเสธ หรือถูกยกเลิกไปแล้ว
+        if (in_array(strtoupper((string) $leave->status), ['REJECTED', 'CANCELED'])) {
+            return back()->with('error', 'ไม่สามารถยกเลิกใบลาที่ถูกปฏิเสธ หรือถูกยกเลิกไปแล้วได้');
         }
 
         $canceledLeave = app(LeaveWorkflowService::class)->cancel($leave, Auth::user());
@@ -117,6 +119,8 @@ class LeaveRequestController extends Controller
     // ==========================================
     public function store(Request $request)
     {
+        $this->authorize('create', LeaveRequest::class);
+
         /** @var User $user */
         $user = $request->user();
         $limits = $this->leaveLimitsFor($user);
@@ -132,6 +136,16 @@ class LeaveRequestController extends Controller
             'attachments' => ['nullable', 'array', 'max:5'],
             'attachments.*' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
         ]);
+
+        // ลาป่วย: ห้ามระบุวันสิ้นสุดเกินกว่า "วันพรุ่งนี้"
+        if ($request->leave_type === 'ลาป่วย') {
+            $tomorrow = Carbon::tomorrow()->toDateString();
+            if (Carbon::parse($request->end_date)->gt(Carbon::tomorrow())) {
+                throw ValidationException::withMessages([
+                    'end_date' => 'ลาป่วยสามารถระบุได้ถึงวันพรุ่งนี้ (' . $tomorrow . ') เท่านั้น ไม่สามารถลาล่วงหน้าได้',
+                ]);
+            }
+        }
 
         $limit = $limits[$request->leave_type];
         if ($limit !== null) {
@@ -224,6 +238,9 @@ class LeaveRequestController extends Controller
             abort_unless($leave->user_id === Auth::id(), 403);
             abort_unless($leave->is_draft, 409, 'ฉบับร่างนี้ถูกส่งแล้ว');
 
+            $isHeadOrPalad = $submitter->hasAnyRole(['head', 'palad']);
+            $defaultFirstStage = $isHeadOrPalad ? 'pending_inspector' : 'pending_head';
+
             $attributes = [
                 'is_draft' => false,
                 'applicant_signature' => $submitter->signature,
@@ -231,7 +248,7 @@ class LeaveRequestController extends Controller
             ];
             if (Schema::connection($leave->getConnectionName())->hasColumn('leave_requests', 'workflow_status')) {
                 $attributes['status'] = 'PENDING';
-                $attributes['workflow_status'] = $leave->delegate_id ? 'pending_delegate' : 'pending_head';
+                $attributes['workflow_status'] = $leave->delegate_id ? 'pending_delegate' : $defaultFirstStage;
             }
             $leave->forceFill($attributes)->save();
 
